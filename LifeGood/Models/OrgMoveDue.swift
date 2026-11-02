@@ -261,6 +261,8 @@ extension OrgMovePlan {
         if m.kind == OrgMoveKind.plant.rawValue { return "\(d) 起換到 \(m.to.plant ?? "")" }
         // [v25.593 轉組織 v2]「11/1 起調出到品保課」「11/1 起調出我的管轄」「11/1 起離職」「11/1 起退休」。要退回這一件：刪這一行
         if let h = leavingPendingHead(m, world: world) { return h }
+        // [v4 裁定] 暫時離開「11/2 起借調」（原本落到「11/2 交接（部門照舊）」：提示列、取消時記的那一句）。要退回這一件：刪這一行
+        if m.isTemp { return "\(d) 起\(m.tempKindValue.label)" }
         if m.keepDept == true || m.to.deptId == m.from.deptId { return "\(d) 交接（部門照舊）" }
         let dept = sideText(OrgMoveSide(deptId: m.to.deptId, deptLabel: m.to.deptLabel), world: world)
         return "\(d) 起調\(dept)"
@@ -347,7 +349,8 @@ extension OrgMovePlan {
                 warning = b.text
                 actions = blockActions(b.kind)
             } else {
-                warning = "部門、廠區還沒改"
+                // [v4 裁定] 暫時離開部門不改：notAppliedText。要退回這一件：改回 "部門、廠區還沒改"
+                warning = notAppliedText(m)
                 actions = [.applyNow]
             }
         } else if m.isPlanned {
@@ -519,7 +522,8 @@ extension OrgMovePlan {
         // [v25.593 轉組織 v2] 調出、離職、退休：「✓ 已收進「已轉出」」。要退回這一件：改回只有後面那一行
         let head = m.isLeaving ? "✓ 已收進「已轉出」"
             : (m.timingValue == .together ? "✓ 交接、部門都做好了" : "✓ 已換好")
-        let detail = applied ? "\(head)・交接完成日 \(by)" : "部門、廠區還沒改"
+        // [v4 裁定] 還沒套用的那一句照 notAppliedText（暫時離開部門不改）。要退回這一件：改回 "部門、廠區還沒改"
+        let detail = applied ? "\(head)・交接完成日 \(by)" : notAppliedText(m)
         let offer = applied && m.retitleBirthday == true && birthdayOffer(m, world: world)
         return OrgMoveDueResult(moveId: m.id, personId: m.personId, applied: applied, title: title, detail: detail,
                                 blockKind: nil, birthdayOffer: offer, reminderCount: applied ? reminderCount : 0)
@@ -562,12 +566,18 @@ extension OrgMovePlan {
                 return OrgMoveDueRow(moveId: m.id, personId: m.personId, title: title, detail: b.text, blocked: true,
                                      actions: blockActions(b.kind))
             }
-            return OrgMoveDueRow(moveId: m.id, personId: m.personId, title: title, detail: "部門、廠區還沒改",
+            // [v4 裁定] notAppliedText（暫時離開部門不改）。要退回這一件：改回 detail: "部門、廠區還沒改"
+            return OrgMoveDueRow(moveId: m.id, personId: m.personId, title: title, detail: notAppliedText(m),
                                  blocked: false, actions: [.applyNow])
         }
     }
 
     // MARK: 改、取消（生效前）
+
+    /// [v4 裁定] 到了生效日、還沒套用的那一句（提示列 warning、「今天生效」那一列）：暫時離開的部門、廠區、職稱本來就不改
+    static func notAppliedText(_ m: OrgMove) -> String {
+        m.isTemp ? "還沒套用（部門、廠區、職稱都照舊）" : "部門、廠區還沒改"
+    }
 
     /// 〔取消這張單〕可以按嗎（部門還沒改的）
     static func canCancel(_ m: OrgMove) -> Bool {
@@ -576,7 +586,9 @@ extension OrgMovePlan {
 
     /// 〔取消這張單〕的確認框
     static func cancelAsk(_ m: OrgMove, map: OrgMoveHolderMap, now: Date) -> OrgMoveCancelAsk {
-        let title = "取消 \(shortDay(m.effectiveKey)) 的轉組織？"
+        // [v4 裁定] 暫時離開「取消 11/2 的借調？」。要退回這一件：改回只有 "取消 … 的轉組織？"
+        let title = m.isTemp ? "取消 \(shortDay(m.effectiveKey)) 的\(m.tempKindValue.label)？"
+            : "取消 \(shortDay(m.effectiveKey)) 的轉組織？"
         if m.isPlanned {
             return OrgMoveCancelAsk(title: title, message: "這張單什麼都還沒動，取消了就不見了。",
                                     confirmLabel: "取消這張單", takeBackLabel: nil, keepLabel: nil)

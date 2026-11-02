@@ -762,6 +762,8 @@ struct DepartmentDetailView: View {
     @State private var orgMoveWizard: OrgMoveWizardRequest?
     @State private var orgMoveSheet: OrgMoveSheetRequest?
     @State private var showOrgMovePremium = false
+    /// [v25.597 轉組織 v4] 人員長按〔設成我的部屬…〕開的新增部屬表單
+    @State private var orgIntake: OrgMoveIntakeRequest?
     @State private var addingPerson = false
     @State private var viewingPersonId: UUID?
     @State private var showEditDept = false
@@ -861,7 +863,7 @@ struct DepartmentDetailView: View {
             }
         }
         // [v25.592 轉組織 v1b] 精靈、交接單兩個 .sheet(item:)＋付費說明（包成一個 modifier）。要退回這一件：刪這一行
-        .orgMoveEntrySheets(wizard: $orgMoveWizard, sheet: $orgMoveSheet, premium: $showOrgMovePremium)
+        .orgMoveEntrySheets(wizard: $orgMoveWizard, sheet: $orgMoveSheet, premium: $showOrgMovePremium, intake: $orgIntake)
     }
 
     // MARK: [v25.592 轉組織 v1b] 人員長按〔轉組織…〕、名字後小字、最下面「異動」（judge §4.1、§4.8）
@@ -880,6 +882,17 @@ struct DepartmentDetailView: View {
     private func openOrgMove(_ subordinateId: UUID) {
         guard subscription.isPremium else { showOrgMovePremium = true; return }
         orgMoveWizard = OrgMoveWizardRequest(personId: subordinateId)
+    }
+
+    /// [v25.597 轉組織 v4] 長按〔設成我的部屬…〕的那位（沒連到部屬、或連到的已經不在＝這位的 id；其餘 nil）。
+    /// 要退回這一件：刪這兩支、orgIntake，peopleSection 的 orgMovePersonMenu 拿掉 claimPersonId／onClaim，body 的 intake:
+    private func claimablePersonId(_ p: OrgPerson) -> UUID? {
+        OrgMoveIntakeRequest.canClaim(p, subordinates: lifeStore.subordinates) ? p.id : nil
+    }
+
+    private func openIntake(_ orgPersonId: UUID) {
+        guard subscription.isPremium else { showOrgMovePremium = true; return }
+        orgIntake = OrgMoveIntakeRequest(orgPersonId: orgPersonId)
     }
 
     /// 名字後面小字「11/1 調設備課」（只換廠區「11/1 換到 P2」；部門照舊的交接沒有字）
@@ -1611,7 +1624,9 @@ struct DepartmentDetailView: View {
                     }
                     .buttonStyle(.plain)
                     // [v25.592 轉組織 v1b] 連到部屬的那位長按〔轉組織…〕（要退回這一件：刪這一行）
-                    .orgMovePersonMenu(subordinateId: liveSubordinateId(person), onOrgMove: openOrgMove)
+                    // [v25.597 轉組織 v4] 沒連到部屬的那位改〔設成我的部屬…〕
+                    .orgMovePersonMenu(subordinateId: liveSubordinateId(person), onOrgMove: openOrgMove,
+                                       claimPersonId: claimablePersonId(person), onClaim: openIntake)
                     .opacity(peopleAppeared ? 1 : 0)
                     .offset(y: peopleAppeared ? 0 : 12)
                     .animation(.spring(response: 0.42, dampingFraction: 0.78).delay(0.05 + Double(idx) * 0.06), value: peopleAppeared)
@@ -1777,9 +1792,13 @@ private struct DeptOrgMoveSection: View {
 }
 
 /// 連到部屬的人員那一列長按〔轉組織…〕（沒連到、部屬已經不在＝不掛 contextMenu）
+/// [v25.597 轉組織 v4] 沒連到部屬（或連到的部屬已經不在）的那位改掛〔設成我的部屬…〕（claimPersonId 有值才掛；judge §3.7）。
+/// 要退回這一件：刪 claimPersonId、onClaim 兩格與 else if 那一段
 private struct OrgMovePersonMenu: ViewModifier {
     let subordinateId: UUID?
     let onOrgMove: (UUID) -> Void
+    var claimPersonId: UUID? = nil
+    var onClaim: (UUID) -> Void = { _ in }
 
     @ViewBuilder
     func body(content: Content) -> some View {
@@ -1789,9 +1808,29 @@ private struct OrgMovePersonMenu: ViewModifier {
                     Label("轉組織…", systemImage: "arrow.left.arrow.right.circle.fill")
                 }
             }
+        } else if let pid = claimPersonId {
+            content.contextMenu {
+                Button { onClaim(pid) } label: {
+                    Label("設成我的部屬…", systemImage: "person.badge.plus")
+                }
+            }
         } else {
             content
         }
+    }
+}
+
+/// [v25.597 轉組織 v4] 組織頁人員〔設成我的部屬…〕打開的新增部屬表單（`.sheet(item:)` 用；brief §6）。
+/// 表單＝`AddSubordinateView(editing: nil, claimOrgPersonId:)`：名字等先填好，存檔＝`addSubordinateClaiming`（連到這一位，組織圖不多一個人）
+struct OrgMoveIntakeRequest: Identifiable, Equatable {
+    let orgPersonId: UUID
+    var id: UUID { orgPersonId }
+
+    /// 給不給〔設成我的部屬…〕：沒連到部屬、或連到的部屬已經不在名單裡（同 `LifeStore.addSubordinateClaiming` 的條件；已離職的也給）。
+    /// 連到的部屬還在（含已轉出）＝不給（在職的照舊〔轉組織…〕；已轉出的到卡片〔回到我的部屬〕）
+    static func canClaim(_ p: OrgPerson, subordinates: [Subordinate]) -> Bool {
+        guard let sid = p.linkedSubordinateId else { return true }
+        return !subordinates.contains(where: { $0.id == sid })
     }
 }
 
@@ -1800,6 +1839,8 @@ private struct OrgMoveEntrySheets: ViewModifier {
     @Binding var wizard: OrgMoveWizardRequest?
     @Binding var sheet: OrgMoveSheetRequest?
     @Binding var premium: Bool
+    /// [v25.597 轉組織 v4] 〔設成我的部屬…〕的新增部屬表單（要退回這一件：刪這一格與下面那個 .sheet）
+    @Binding var intake: OrgMoveIntakeRequest?
 
     func body(content: Content) -> some View {
         content
@@ -1811,20 +1852,30 @@ private struct OrgMoveEntrySheets: ViewModifier {
                 OrgMoveSheetView(moveId: r.moveId)
                     .appStores()
             }
+            .sheet(item: $intake) { r in
+                AddSubordinateView(editing: nil, claimOrgPersonId: r.orgPersonId)
+                    .appStores()
+            }
             .premiumLockAlert(isPresented: $premium)
     }
 }
 
 extension View {
     /// [v25.592 轉組織 v1b] 見 OrgMovePersonMenu
-    fileprivate func orgMovePersonMenu(subordinateId: UUID?, onOrgMove: @escaping (UUID) -> Void) -> some View {
-        modifier(OrgMovePersonMenu(subordinateId: subordinateId, onOrgMove: onOrgMove))
+    /// [v25.597 轉組織 v4] 多 claimPersonId／onClaim（〔設成我的部屬…〕；不帶＝照舊）
+    fileprivate func orgMovePersonMenu(subordinateId: UUID?, onOrgMove: @escaping (UUID) -> Void,
+                                       claimPersonId: UUID? = nil,
+                                       onClaim: @escaping (UUID) -> Void = { _ in }) -> some View {
+        modifier(OrgMovePersonMenu(subordinateId: subordinateId, onOrgMove: onOrgMove,
+                                   claimPersonId: claimPersonId, onClaim: onClaim))
     }
 
     /// [v25.592 轉組織 v1b] 見 OrgMoveEntrySheets
+    /// [v25.597 轉組織 v4] 多 intake（〔設成我的部屬…〕的表單；不帶＝不會打開）
     fileprivate func orgMoveEntrySheets(wizard: Binding<OrgMoveWizardRequest?>, sheet: Binding<OrgMoveSheetRequest?>,
-                                        premium: Binding<Bool>) -> some View {
-        modifier(OrgMoveEntrySheets(wizard: wizard, sheet: sheet, premium: premium))
+                                        premium: Binding<Bool>,
+                                        intake: Binding<OrgMoveIntakeRequest?> = .constant(nil)) -> some View {
+        modifier(OrgMoveEntrySheets(wizard: wizard, sheet: sheet, premium: premium, intake: intake))
     }
 }
 
@@ -2610,6 +2661,8 @@ struct OrgPersonDetailView: View {
     /// [v25.592 轉組織 v1b] 編輯頁按了〔用轉組織〕：先記著，編輯頁關掉（onDismiss）才開精靈（兩張 sheet 不疊）
     @State private var pendingOrgMove: OrgMoveWizardRequest?
     @State private var showOrgMovePremium = false
+    /// [v25.597 轉組織 v4] 右上〔設成我的部屬〕開的新增部屬表單
+    @State private var orgIntake: OrgMoveIntakeRequest?
     @State private var showDeleteConfirm = false
     @State private var showBirthdayReminder = false
     /// [v25.323] 新增簡易作品／報告項目
@@ -2687,6 +2740,8 @@ struct OrgPersonDetailView: View {
                     HStack(spacing: 16) {
                         // [v25.592 轉組織 v1b] 連到部屬的那位多〔轉組織〕（要退回這一件：刪這一行）
                         orgMoveToolbarButton
+                        // [v25.597 轉組織 v4] 沒連到部屬的那位多〔設成我的部屬〕（要退回這一件：刪這一行）
+                        orgIntakeToolbarButton
                         Button { showEdit = true } label: { Text("編輯").foregroundStyle(.green) }
                         Button { showDeleteConfirm = true } label: { Text("刪除").foregroundStyle(.red) }
                     }
@@ -2736,7 +2791,7 @@ struct OrgPersonDetailView: View {
             }
         }
         // [v25.592 轉組織 v1b] 精靈 sheet＋付費說明（掛在 NavigationStack 外面：裡面已經有刪除的 alert）。要退回這一件：刪這一行
-        .orgMoveEntrySheets(wizard: $orgMoveWizard, sheet: .constant(nil), premium: $showOrgMovePremium)
+        .orgMoveEntrySheets(wizard: $orgMoveWizard, sheet: .constant(nil), premium: $showOrgMovePremium, intake: $orgIntake)
     }
 
     // MARK: [v25.592 轉組織 v1b] 〔轉組織〕（judge §4.1：連到部屬的才有；要訂閱）
@@ -2760,6 +2815,27 @@ struct OrgPersonDetailView: View {
     private func openOrgMove(_ subordinateId: UUID) {
         guard subscription.isPremium else { showOrgMovePremium = true; return }
         orgMoveWizard = OrgMoveWizardRequest(personId: subordinateId)
+    }
+
+    // MARK: [v25.597 轉組織 v4] 〔設成我的部屬〕（judge §3.7；同部門頁長按的條件；要訂閱）
+    // 要退回這一件：刪這一區、toolbar 的 orgIntakeToolbarButton、body 外面 .orgMoveEntrySheets 的 intake:、orgIntake。
+
+    /// 這位還在組織裡、沒連到部屬（或連到的已經不在）才給
+    private var canClaimAsSubordinate: Bool {
+        guard let p = lifeStore.orgPeople.first(where: { $0.id == personId }) else { return false }
+        return OrgMoveIntakeRequest.canClaim(p, subordinates: lifeStore.subordinates)
+    }
+
+    @ViewBuilder
+    private var orgIntakeToolbarButton: some View {
+        if canClaimAsSubordinate {
+            Button { openIntake() } label: { Text("設成我的部屬").foregroundStyle(.indigo) }
+        }
+    }
+
+    private func openIntake() {
+        guard subscription.isPremium else { showOrgMovePremium = true; return }
+        orgIntake = OrgMoveIntakeRequest(orgPersonId: personId)
     }
 
     /// 編輯頁〔用轉組織〕：沒訂閱＝nil（編輯頁只問〔只改部門〕〔取消〕）

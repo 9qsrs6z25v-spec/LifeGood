@@ -101,6 +101,8 @@ struct SubordinateView: View {
     @State private var orgMoveWizard: OrgMoveWizardRequest?
     /// [v25.593 轉組織 v2] 名單最下面「已轉出（N）」展開了沒（預設收起；judge §4.8）。要退回這一件：刪這一行與 archivedSection
     @State private var archivedOpen = false
+    /// [v25.597 轉組織 v4]「暫時離開（N）」那一區展開了沒（預設展開；judge §7 v4）。要退回這一件：刪這一行與 awaySection 那幾支
+    @State private var awayOpen = true
     /// [v25.593 轉組織 v2] 往左滑〔刪除〕在職的人先問三選一「王小明是轉走了嗎？」（judge §3.6、③-C2）：問的是哪一位。
     /// 跟 pendingDelete 分開（兩個框不能掛同一個 state）。要退回這一件：刪這一行、滑出按鈕改回 pendingDelete = s、body 的第二個 .alert
     @State private var deleteChoiceFor: Subordinate?
@@ -146,7 +148,9 @@ struct SubordinateView: View {
     private var sortedSubordinates: [Subordinate] {
         // [v25.593 轉組織 v2] 名單上面只列在職的；已轉出的收在最下面「已轉出（N）」（archivedSection）。
         // 要退回這一件：改回 lifeStore.subordinates
-        let list = lifeStore.activeSubordinates
+        // [v25.597 轉組織 v4] 今天暫時離開中的（借調、支援、留停）也不列在上面，收在「暫時離開（N）」那一區（awaySection）。
+        // activeSubordinates 不變（挑人、互評、小工具照舊算在職）。要退回這一件：改回 `let list = lifeStore.activeSubordinates`
+        let list = activeNotAway
         if sortOption == .manual { return list }
         // 預先建立 id→index 對照，避免 sort closure 內部重複呼叫 firstIndex 造成 O(n² log n)
         let indexMap: [UUID: Int] = sortOption == .dateAdded
@@ -180,6 +184,14 @@ struct SubordinateView: View {
             return sortAscending ? result : !result
         }
         return sorted
+    }
+
+    /// [v25.597 轉組織 v4] 在職、今天沒有暫時離開的（名單上面那幾組、手動排序只排這些）。沒有暫時離開的單就不濾
+    private var activeNotAway: [Subordinate] {
+        let all = lifeStore.activeSubordinates
+        guard !OrgMoveIndex.away.isEmpty else { return all }
+        let todayKey = OrgMovePlan.dayKey(Date())
+        return all.filter { OrgMoveIndex.awayNow($0.id, todayKey: todayKey) == nil }
     }
 
     /// 部門標籤（代號 + 名稱）
@@ -235,6 +247,8 @@ struct SubordinateView: View {
         let rows = displayRows(filtered)
         // [v25.593 轉組織 v2] 最下面「已轉出（N）」那幾列（交接單算的；新的在前；不套部門篩選）。一次算好給 archivedSection
         let archived = archivedListRows()
+        // [v25.597 轉組織 v4]「暫時離開（N）」那幾列（套部門篩選；照回來那天排）。一次算好給 awaySection 與空狀態
+        let away = awayListRows()
         // 部門篩選列（有定義部門才顯示）
         if !lifeStore.departments.isEmpty {
             Section {
@@ -261,11 +275,14 @@ struct SubordinateView: View {
         }
 
         if filtered.isEmpty {
-            Section {
-                filteredEmptyState
-                    .listRowInsets(EdgeInsets())
-                    .listRowBackground(Color.clear)
-                    .listRowSeparator(.hidden)
+            // [v25.597 轉組織 v4] 這個部門的人都暫時離開中：不顯示「尚無部屬」（下面那一區有人）。要退回這一件：拿掉 if away.isEmpty
+            if away.isEmpty {
+                Section {
+                    filteredEmptyState
+                        .listRowInsets(EdgeInsets())
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                }
             }
         } else {
             ForEach(Array(rows.enumerated()), id: \.element.id) { idx, row in
@@ -299,6 +316,9 @@ struct SubordinateView: View {
                 lifeStore.moveActiveSubordinates(visibleIds: filtered.map(\.id), fromOffsets: from, toOffset: to)
             }
         }
+
+        // [v25.597 轉組織 v4]「暫時離開（N）」在「已轉出」上面（預設展開；沒有就不出現）。要退回這一件：刪這一行與 away 那一行
+        awaySection(away)
 
         // [v25.593 轉組織 v2] 名單最下面「已轉出（N）」（收起來；沒有就不出現）。要退回這一件：刪這一行與 archived 那一行
         archivedSection(archived)
@@ -594,6 +614,91 @@ struct SubordinateView: View {
         guard subscription.isPremium else { showPremiumAlert = true; return }
         guard let s = lifeStore.subordinates.first(where: { $0.id == id }) else { return }
         pendingDelete = s
+    }
+
+    // MARK: - [v25.597 轉組織 v4] 名單「暫時離開（N）」那一區（judge §7 v4；字在 OrgMovePlan.awayRows／awaySectionTitle）
+    // 今天暫時離開中的在職部屬（借調、支援、留停）：名字＋右邊灰字「借調中・到 1/29」；點了開卡片；長按、往左滑同在職那列
+    //（還是在職的部屬：〔轉組織…〕〔編輯〕、刪除先問三選一）。套部門篩選；不給拖曳（手動排序只排上面那幾組）。
+    // 回來那天起用算的自動回到上面（OrgMoveIndex.awayNow）。只在 App 內名單；小工具、通知、手錶一個字都沒有。
+    // （要退回這一件：刪 awayOpen、這六支、subordinateSections 裡 away 那三處、activeNotAway、檔尾兩個 SubAwayList… struct。）
+
+    /// 「暫時離開」那幾列（套部門篩選）。沒有任何暫時離開的單就不建 OrgMoveWorld
+    private func awayListRows() -> [OrgMoveAwayRow] {
+        guard !OrgMoveIndex.away.isEmpty else { return [] }
+        let rows = OrgMovePlan.awayRows(world: OrgMoveWorld(store: lifeStore), todayKey: OrgMovePlan.dayKey(Date()))
+        let ids = selectedDeptIds
+        guard !ids.isEmpty, !rows.isEmpty else { return rows }
+        var deptOf: [UUID: UUID] = [:]
+        for s in lifeStore.subordinates {
+            if let d = s.departmentId { deptOf[s.id] = d }
+        }
+        return rows.filter { r in
+            guard let d = deptOf[r.personId] else { return false }
+            return ids.contains(d)
+        }
+    }
+
+    @ViewBuilder
+    private func awaySection(_ rows: [OrgMoveAwayRow]) -> some View {
+        if !rows.isEmpty {
+            Section {
+                awayHeader(count: rows.count)
+                if awayOpen {
+                    ForEach(rows) { r in
+                        awayRow(r)
+                    }
+                }
+            }
+        }
+    }
+
+    /// 標題列「暫時離開（1）▾」：整列點了收起／展開（用點擊手勢：手動排序時 List 在編輯模式，Button 點不到）
+    private func awayHeader(count: Int) -> some View {
+        SubAwayListHeader(title: OrgMovePlan.awaySectionTitle(count), open: awayOpen)
+            .contentShape(Rectangle())
+            .onTapGesture { toggleAway() }
+    }
+
+    /// 一列：點了開卡片；長按〔轉組織…〕〔編輯〕、往左滑〔刪除〕（先問三選一）同在職那列
+    private func awayRow(_ r: OrgMoveAwayRow) -> some View {
+        SubAwayListRow(row: r)
+            .contentShape(Rectangle())
+            .onTapGesture { openAway(r.personId) }
+            .contextMenu { awayMenu(r.personId) }
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                Button {
+                    deleteAway(r.personId)
+                } label: {
+                    Label("刪除", systemImage: "trash")
+                }
+                .tint(.red)
+            }
+    }
+
+    @ViewBuilder
+    private func awayMenu(_ id: UUID) -> some View {
+        if let s = lifeStore.subordinates.first(where: { $0.id == id }) {
+            personMenu(s)
+        }
+    }
+
+    private func toggleAway() {
+        withAnimation(.easeInOut(duration: 0.2)) {
+            awayOpen.toggle()
+        }
+    }
+
+    /// 打開卡片（看卡片不用訂閱，同在職那列）
+    private func openAway(_ id: UUID) {
+        guard let s = lifeStore.subordinates.first(where: { $0.id == id }) else { return }
+        viewingItem = s
+    }
+
+    /// 往左滑〔刪除〕：同在職那列（要訂閱；先問三選一「是轉走了嗎？」）
+    private func deleteAway(_ id: UUID) {
+        guard subscription.isPremium else { showPremiumAlert = true; return }
+        guard let s = lifeStore.subordinates.first(where: { $0.id == id }) else { return }
+        deleteChoiceFor = s
     }
 
     // MARK: - [v25.592 轉組織 v1b] 名單長按：〔轉組織…〕〔編輯〕（judge §4.1、§4.8）
@@ -1193,6 +1298,63 @@ private struct SubArchivedListRow: View {
     }
 }
 
+// MARK: - [v25.597 轉組織 v4] 名單「暫時離開（N）」的標題列與一列（judge §7 v4；字在 OrgMovePlan.awayRows／awaySectionTitle 組好）
+// 只在 App 內名單；小工具、通知、手錶一個字都沒有。要退回這一件：刪這兩個 struct 與 SubordinateView 的 awaySection 那幾支
+
+/// 「暫時離開（1）▾」：青色側條、粗體字、右邊箭頭（展開轉成朝下）
+private struct SubAwayListHeader: View {
+    let title: String
+    let open: Bool
+
+    private var hint: String { open ? "收起暫時離開的部屬" : "展開暫時離開的部屬" }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Capsule()
+                .fill(Color.teal.opacity(0.75))
+                .frame(width: 4, height: 16)
+            Text(title)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(Color.primary)
+                .lineLimit(1)
+            Spacer(minLength: 6)
+            Image(systemName: "chevron.right")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(Color.secondary)
+                .rotationEffect(.degrees(open ? 90 : 0))
+        }
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityHint(Text(hint))
+    }
+}
+
+/// 一列：「林志豪」＋右邊灰字「借調中・到 1/29」＋箭頭（點了開卡片）
+private struct SubAwayListRow: View {
+    let row: OrgMoveAwayRow
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(row.name)
+                .font(.subheadline.weight(.medium))
+                .foregroundStyle(Color.primary)
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            Text(row.text)
+                .font(.caption)
+                .foregroundStyle(Color.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Image(systemName: "chevron.right")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(Color(.tertiaryLabel))
+        }
+        .padding(.vertical, 4)
+        .accessibilityElement(children: .combine)
+    }
+}
+
 // MARK: - 新增/編輯部屬
 
 // [2026-07 v4] Section header：對齊 OrganizationView.orgPersonEditorSectionHeader／
@@ -1233,6 +1395,13 @@ struct AddSubordinateView: View {
     @State private var hasPlantArea = false
     @State private var plantArea = ""
     @State private var isSaving = false
+    /// [v25.597 轉組織 v4] 新增時公司組織裡有同名的人：問「是同一位嗎？」（nil＝沒有在問；judge §3.7）。
+    /// 要退回這一件：刪這一格、claimFilled、showAlreadyMine、save() 裡 claimOrgPersonId／intakeCandidates 那兩段、body 的兩個 .alert、檔尾 SubIntakeAsk 那一段
+    @State private var intakeAsk: SubIntakeAsk?
+    /// [v25.597 轉組織 v4] 組織頁〔設成我的部屬〕打開的：名字、生日、職等只填一次（onAppear 再跑不蓋掉你改的）
+    @State private var claimFilled = false
+    /// [v25.597 轉組織 v4]〔設成我的部屬〕存檔時那一位已經連到名單裡的部屬（另一台先設了）：「這位已經是你的部屬了」
+    @State private var showAlreadyMine = false
     /// [v25.587 轉組織 v0a⑥] 打開那一刻表單上的值（loadEditing 填好時記下）；存檔時跟它比，只寫真的改過的欄位
     @State private var opened: FormValues?
 
@@ -1295,7 +1464,7 @@ struct AddSubordinateView: View {
                     subordinateEditorSectionHeader("備註", icon: "text.bubble.fill", color: .secondary)
                 }
             }
-            .navigationTitle(editing != nil ? "編輯部屬" : "新增部屬")
+            .navigationTitle(navTitle)
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
@@ -1306,16 +1475,98 @@ struct AddSubordinateView: View {
                         if isSaving {
                             ProgressView().scaleEffect(0.7).tint(.green)
                         }
-                        Button(editing != nil ? "儲存" : "新增") { save() }
+                        Button(saveLabel) { save() }
                             .bold().foregroundStyle(.green)
                             .disabled(!canSave || isSaving)
                     }
                 }
             }
-            .onAppear { loadEditing() }
+            .onAppear {
+                loadEditing()
+                loadClaim()
+            }
+            // [v25.597 轉組織 v4] 新增時公司裡有同名的人先問（一位：〔是，從品保課轉進來〕〔不是，另一位〕；兩位以上：每位一顆〔是品保課那位〕＋〔都不是，另一位〕）
+            .alert(intakeAskTitle, isPresented: intakeAskShown, presenting: intakeAsk) { a in
+                ForEach(a.candidates) { c in
+                    Button(a.yesLabel(c)) { claimIntake(a.item, orgPersonId: c.orgPersonId) }
+                }
+                Button(a.noLabel) { addNotClaiming(a) }
+                Button("取消", role: .cancel) { intakeAsk = nil }
+            } message: { a in
+                Text(a.message)
+            }
+        }
+        // [v25.597 轉組織 v4]〔設成我的部屬〕那一位已經連到名單裡的部屬（跟上面那一框分開兩層掛）
+        .alert("這位已經是你的部屬了", isPresented: $showAlreadyMine) {
+            Button("好") { dismiss() }
+        } message: {
+            Text("組織頁的這一位已經連到部屬名單裡的人（或已經不在組織頁），沒有再加一筆。")
         }
         // [v25.592 轉組織 v1b] 編輯頁開著時告訴 OrgMoveDueCenter（開著就不自動改部門，關了再看；brief §1-4 ③）。要退回這一件：刪這一行
         .orgMoveEditorPresence()
+    }
+
+    /// [v25.597 轉組織 v4] 標題：組織頁〔設成我的部屬〕打開的＝「設成我的部屬」
+    private var navTitle: String {
+        if editing != nil { return "編輯部屬" }
+        return claimOrgPersonId != nil ? "設成我的部屬" : "新增部屬"
+    }
+
+    private var saveLabel: String {
+        editing != nil ? "儲存" : "新增"
+    }
+
+    private var intakeAskShown: Binding<Bool> {
+        Binding(get: { intakeAsk != nil }, set: { if !$0 { intakeAsk = nil } })
+    }
+
+    private var intakeAskTitle: String {
+        intakeAsk?.title ?? ""
+    }
+
+    /// [v25.597 轉組織 v4]〔是，從品保課轉進來〕：連到既有那一位（照片、關係、作品、名片都在；組織圖只有一個）。寫完才關表單。
+    /// 問的期間那一位已經被連到名單裡的人（另一台）＝什麼都不加，0.35 秒後跳「這位已經是你的部屬了」（框收完才疊第二個框）
+    private func claimIntake(_ item: Subordinate, orgPersonId: UUID) {
+        intakeAsk = nil
+        if lifeStore.addSubordinateClaiming(item, orgPersonId: orgPersonId) != nil {
+            dismiss()
+            return
+        }
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            showAlreadyMine = true
+        }
+    }
+
+    /// [v25.597 轉組織 v4]〔不是，另一位〕／〔都不是，另一位〕：照舊新增，那幾位同名的不認領（另建一筆組織人員、名片）
+    private func addNotClaiming(_ a: SubIntakeAsk) {
+        intakeAsk = nil
+        lifeStore.add(a.item, notClaiming: Set(a.candidates.map(\.orgPersonId)))
+        dismiss()
+    }
+
+    /// [v25.597 轉組織 v4] 組織頁〔設成我的部屬〕打開的：先填組織人員的名字、生日（有就填）、職等（還在職等清單裡才填）；
+    /// 部門不預選（你帶的部門自己選）。只填一次
+    /// [v4 裁定] 同名的裡面有一位在你選的部門、而且還沒連到任何部屬（add 會直接認領那一位，同 v25.394）
+    private func sameDeptClaim(_ cands: [OrgMoveIntakeCandidate], deptId: UUID?) -> Bool {
+        guard let deptId else { return false }
+        let ids: Set<UUID> = Set(cands.filter { $0.deptId == deptId }.map(\.orgPersonId))
+        guard !ids.isEmpty else { return false }
+        return lifeStore.orgPeople.contains { p in ids.contains(p.id) && p.linkedSubordinateId == nil }
+    }
+
+    private func loadClaim() {
+        guard editing == nil, !claimFilled, let cid = claimOrgPersonId else { return }
+        claimFilled = true
+        guard let p = lifeStore.orgPeople.first(where: { $0.id == cid }) else { return }
+        name = p.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let b = p.birthday {
+            hasBirthday = true
+            birthday = b
+        }
+        if let g = p.gradeTitleId, lifeStore.gradeTitles.contains(where: { $0.id == g }) {
+            selectedGradeTitleId = g
+        }
     }
 
     @ViewBuilder
@@ -1437,6 +1688,27 @@ struct AddSubordinateView: View {
             // 生日提醒事件對應也要帶回，否則存個檔就會重複建立提醒
             birthdayEventId: editing?.birthdayEventId
         )
+        // [v25.597 轉組織 v4] 組織頁〔設成我的部屬〕打開的：直接連到那一位（不再問）；那一位已經是名單裡的人＝跳「這位已經是你的部屬了」。
+        // 要退回這一件：刪這個 if
+        if let cid = claimOrgPersonId {
+            if lifeStore.addSubordinateClaiming(item, orgPersonId: cid) != nil {
+                dismiss()
+            } else {
+                isSaving = false
+                showAlreadyMine = true
+            }
+            return
+        }
+        // [v25.597 轉組織 v4] 公司組織裡有同名的人（全公司，不限部門；已經是你部屬的不算）：先問，按下去才寫（claimIntake／addNotClaiming）。
+        // 要退回這一件：刪這三行
+        let cands = OrgMovePlan.intakeCandidates(name: item.name, world: OrgMoveWorld(store: lifeStore))
+        // [v4 裁定] 你選的部門裡就有同名、還沒連結的那一位＝v25.394 起的直接認領（syncOrgPersonFor）照舊：不問、不記「轉進來」的單
+        //（人沒有換部門；不然先建組織圖再加部屬的人，每一位都會被問、都多一張「從設備課轉進來」）。要退回這一件：拿掉 `&& !sameDeptClaim(…)`、刪 sameDeptClaim
+        if !cands.isEmpty && !sameDeptClaim(cands, deptId: item.departmentId) {
+            isSaving = false
+            intakeAsk = SubIntakeAsk(item: item, candidates: cands)
+            return
+        }
         if editing != nil { lifeStore.update(item) } else { lifeStore.add(item) }
         dismiss()
     }
@@ -1513,6 +1785,38 @@ struct AddSubordinateView: View {
         hasPlantArea = values.hasPlantArea
         plantArea = values.plantArea
         opened = values
+    }
+}
+
+// MARK: - [v25.597 轉組織 v4] 新增部屬時問「是同一位嗎？」（judge §3.7；字在 OrgMovePlan.intakeAsk／intakePickLabel）
+
+/// 問的那一框要的東西：表單組好的那一筆部屬、同名的那幾位組織人員。一位＝intakeAsk 的字；兩位以上＝每位一顆〔是品保課那位〕
+private struct SubIntakeAsk: Identifiable {
+    let id = UUID()
+    let item: Subordinate
+    let candidates: [OrgMoveIntakeCandidate]
+
+    private var single: OrgMoveIntakeCandidate? { candidates.count == 1 ? candidates.first : nil }
+
+    /// 「公司裡已經有 張家瑋（品保課・工程師）」；兩位以上「公司裡已經有 2 位 張家瑋」
+    var title: String {
+        if let c = single { return OrgMovePlan.intakeAsk(c).title }
+        let n = item.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return "公司裡已經有 \(candidates.count) 位 \(n)"
+    }
+
+    var message: String {
+        if let c = single { return OrgMovePlan.intakeAsk(c).message }
+        let n = item.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        return "是其中一位嗎？選〔是〕會連到原本那一筆：照片、關係、作品、名片都留著，組織圖不會多一個\(n)。"
+    }
+
+    func yesLabel(_ c: OrgMoveIntakeCandidate) -> String {
+        single != nil ? OrgMovePlan.intakeAsk(c).yes : OrgMovePlan.intakePickLabel(c)
+    }
+
+    var noLabel: String {
+        single.map { OrgMovePlan.intakeAsk($0).no } ?? "都不是，另一位"
     }
 }
 

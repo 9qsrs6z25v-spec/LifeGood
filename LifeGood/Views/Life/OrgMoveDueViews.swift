@@ -24,6 +24,15 @@ import SwiftUI
 // [v25.593 轉組織 v2] 調出、離職、退休（orgmove/build/v2/brief.md §4-6）：「今天生效」那張的字（dueTitle、「✓ 已收進「已轉出」」）主控接好了；
 // 這裡只改〔現在套用〕〔只做交接〕確認框的字（applyAsk／applyWhat／skipAsk：「現在套用 11/1 的調出？」「…收進部屬名單最下面「已轉出」」）。
 // 換單位、只換廠區的字一個都沒變。
+//
+// [v25.597 轉組織 v4] 暫時離開（orgmove/build/v4/brief.md G2-1、G2-4、G2-5）
+// • 「今天生效」：dueTitle 主控已經是「林志豪 借調（到 1/29）」；OrgMoveDue.swift 的 detail 是換單位那套字
+//  （「部門、廠區還沒改」「✓ 已換好」「✓ 交接、部門都做好了」），暫時離開部門根本不改：這裡照 OrgMoveTempDueText 換字
+//  （卡片 detailText、「今天生效」那張 detailText、〔現在套用〕確認框 applyAsk）。換單位、調出、離職的字一個都沒變。
+// • 部屬總覽「回來了」卡（OrgMoveReturnCard）：OrgMovePlan.returnAsks 每張一列〔還給林志豪〕（確認框、下一個 runloop）〔留給代理人〕（直接寫）；
+//   都不用訂閱（同〔拿回來〕）。沒有就整張不出現、不佔位。
+// • 交接單頁〔改回來那天〕（OrgMoveReturnKeySheet；要訂閱：按〔改好了〕時擋，同〔改生效日〕）：先關頁、下一個 runloop 才 setOrgMoveReturnKey。
+// 要退回這一件：刪掉標 [v25.597 轉組織 v4] 的型別與三處 detailText／tempWhat。
 
 /// 提示列、「今天生效」卡上按了哪一顆（呼叫端設這個；modifier 負責訂閱、確認框、寫 store、跳「今天生效」）
 struct OrgMoveHintActionRequest: Identifiable, Equatable {
@@ -195,7 +204,8 @@ struct OrgMoveHintActionsModifier: ViewModifier {
         let head = OrgMovePlan.dueTitle(m, world: world)
         // 〔11/1 一起做〕排好的：交接也是這時候做
         let lead = m.isPlanned ? "交接單上的事現在交出去；" : ""
-        let what = lead + Self.applyWhat(m, world: world)
+        // [v25.597 轉組織 v4] 暫時離開部門不改：換成 OrgMoveTempDueText.applyWhat。要退回這一件：改回 `lead + Self.applyWhat(m, world: world)`
+        let what = m.isTemp ? OrgMoveTempDueText.applyWhat(m) : lead + Self.applyWhat(m, world: world)
         return OMDueAsk(moveId: m.id, title: "現在套用 \(OrgMovePlan.shortDay(m.effectiveKey)) 的\(OrgMovePlan.historyWord(m))？",
                         message: head + "：" + what, first: "現在套用", firstOp: .applyNow, firstDestructive: false,
                         cancelLabel: "取消")
@@ -384,7 +394,7 @@ struct OrgMoveDueSheet: View {
             Text(r.title)
                 .font(.headline)
                 .fixedSize(horizontal: false, vertical: true)
-            Text(r.detail)
+            Text(detailText(r))
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(r.applied ? Color.green : Color.orange)
                 .fixedSize(horizontal: false, vertical: true)
@@ -407,6 +417,12 @@ struct OrgMoveDueSheet: View {
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
+    }
+
+    /// [v25.597 轉組織 v4] 暫時離開改好了：「✓ 借調開始了・1/29 回來（部門、廠區、職稱都照舊）」（不是「✓ 已換好」）
+    private func detailText(_ r: OrgMoveDueResult) -> String {
+        guard r.applied, let m = lifeStore.orgMoves.move(r.moveId), m.isTemp else { return r.detail }
+        return OrgMoveTempDueText.applied(m)
     }
 
     private func lateText(_ r: OrgMoveDueResult) -> String? {
@@ -585,13 +601,19 @@ struct OrgMoveDueCard: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.primary)
                 .fixedSize(horizontal: false, vertical: true)
-            Text(r.detail)
+            Text(detailText(r))
                 .font(.caption)
                 .foregroundStyle(r.blocked ? Color.orange : Color.secondary)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
+    }
+
+    /// [v25.597 轉組織 v4] 暫時離開那一列不寫「部門、廠區還沒改」（部門本來就不改）
+    private func detailText(_ r: OrgMoveDueRow) -> String {
+        guard !r.blocked, let m = lifeStore.orgMoves.move(r.moveId), m.isTemp else { return r.detail }
+        return OrgMoveTempDueText.pending
     }
 
     /// 〔現在套用〕／卡住的〔只做交接〕〔選部門〕〔取消這張單〕（走 .orgMoveHintActions）
@@ -841,5 +863,325 @@ struct OrgMoveDeptPickSheet: View {
             done(r)
         }
         dismiss()
+    }
+}
+
+// MARK: - [v25.597 轉組織 v4] 暫時離開：「今天生效」的字、回來了、改回來那天
+
+/// 暫時離開那張在「今天生效」卡、「今天生效」那張、〔現在套用〕確認框的字（部門、廠區、職稱都不改；換單位那套字不能用）
+enum OrgMoveTempDueText {
+    /// 「今天生效」卡那一列的灰字（到了、還沒套用）
+    static let pending = "還沒套用（部門、廠區、職稱都照舊）"
+
+    /// 「✓ 借調開始了・1/29 回來（部門、廠區、職稱都照舊）」
+    static func applied(_ m: OrgMove) -> String {
+        let back = m.returnKey.map { "・\(OrgMovePlan.shortDay($0)) 回來" } ?? ""
+        return "✓ \(m.tempKindValue.label)開始了\(back)（部門、廠區、職稱都照舊）"
+    }
+
+    /// 〔現在套用 11/2 的借調？〕下面那一句（冒號後面）：排好的「代理的事現在交給代理人、暫停的場次現在取消；…」；
+    /// 交出去了的（代理的事已經交了）只寫「部門、廠區、職稱都照舊（1/29 回來）。」
+    static func applyWhat(_ m: OrgMove) -> String {
+        let back = m.returnKey.map { "（\(OrgMovePlan.shortDay($0)) 回來）" } ?? ""
+        let keep = "部門、廠區、職稱都照舊\(back)。"
+        return m.isPlanned ? "代理的事現在交給代理人、暫停的場次現在取消；" + keep : keep
+    }
+}
+
+/// 回來那天〔還給林志豪〕的確認框（交接單頁、部屬總覽「回來了」卡共用）：「把代理的 2 件還給林志豪？」「做完的不動。」
+enum OrgMoveReturnConfirm {
+    static func title(_ a: OrgMoveReturnAsk) -> String {
+        "把代理的 \(a.count) 件\(a.backLabel)？"
+    }
+
+    static let message = "還在代理人身上、還沒做完的才搬回來；做完的不動。"
+}
+
+/// 部屬總覽「回來了」卡（暫時離開回來那天以後、代理的還沒還也還沒留的；judge §7 v4「回來那天問」）。
+/// 每一張一列：「林志豪 1/29 回來了」（點了開那張交接單）＋「代理的 2 件還沒做完：…」＋〔還給林志豪〕〔留給代理人〕。
+/// 都不用訂閱（同〔拿回來〕）；〔還給…〕先問、確認框按下去下一個 runloop 才 returnOrgMoveTemp；〔留給代理人〕直接記（什麼都不搬）。
+/// 沒有就整張不出現、不佔位。字只在 App 內頁
+struct OrgMoveReturnCard: View {
+    /// 點標題：打開那一張交接單（moveId）
+    let onOpenMove: (UUID) -> Void
+
+    @EnvironmentObject var lifeStore: LifeStore
+    @State private var ask: OrgMoveReturnAsk?
+    /// 確認框收起那一瞬間 ask 已清成 nil：標題留最後一次的字
+    @State private var askTitleKeep = ""
+
+    init(onOpenMove: @escaping (UUID) -> Void) {
+        self.onOpenMove = onOpenMove
+    }
+
+    var body: some View {
+        content(currentRows())
+    }
+
+    /// 沒有到了回來那天、還沒按還／留的暫時離開就不建 OrgMoveWorld（部屬總覽每次重畫都會叫到）
+    private func currentRows() -> [OrgMoveReturnAsk] {
+        let book = lifeStore.orgMoves
+        let today = OrgMovePlan.dayKey(Date())
+        let ok = Set(book.live.filter { Self.mayAsk($0, todayKey: today) }.map(\.id))
+        guard !ok.isEmpty else { return [] }
+        // [審查] returnAsks 沒擋〔取消這張單〕的（交出去之後又取消、留給接手的人）：只留粗篩過的那幾張（交接單頁 tempParts 同樣擋）
+        return OrgMovePlan.returnAsks(book: book, world: OrgMoveWorld(store: lifeStore), todayKey: today)
+            .filter { ok.contains($0.moveId) }
+    }
+
+    /// 粗篩（returnAsks 再擋取消了的；套用過、沒復原、還沒按還／留、到了回來那天）
+    private static func mayAsk(_ m: OrgMove, todayKey: String) -> Bool {
+        guard m.isTemp, m.wasApplied, !m.isUndone, !m.isCancelled, m.returnedAt == nil,
+              let r = m.returnKey else { return false }
+        return r <= todayKey
+    }
+
+    private var askShown: Binding<Bool> {
+        Binding(get: { ask != nil }, set: { if !$0 { ask = nil } })
+    }
+
+    private var askTitle: String {
+        ask.map { OrgMoveReturnConfirm.title($0) } ?? askTitleKeep
+    }
+
+    @ViewBuilder
+    private func content(_ rows: [OrgMoveReturnAsk]) -> some View {
+        if rows.isEmpty {
+            EmptyView()
+        } else {
+            card(rows)
+                .alert(askTitle, isPresented: askShown, presenting: ask) { a in
+                    askButtons(a)
+                } message: { _ in
+                    Text(OrgMoveReturnConfirm.message)
+                }
+        }
+    }
+
+    private func card(_ rows: [OrgMoveReturnAsk]) -> some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            ForEach(rows) { r in
+                Divider()
+                    .padding(.leading, 14)
+                rowView(r)
+            }
+        }
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 16))
+        .overlay(
+            RoundedRectangle(cornerRadius: 16)
+                .stroke(Color(.separator).opacity(0.12), lineWidth: 0.75)
+        )
+        .shadow(color: Color.blue.opacity(0.12), radius: 10, x: 0, y: 4)
+        .shadow(color: Color.black.opacity(0.05), radius: 3, x: 0, y: 1)
+    }
+
+    private var header: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "arrow.uturn.backward.circle.fill")
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(Color.blue)
+                .frame(width: 28, height: 28)
+                .background(Color.blue.opacity(0.14), in: Circle())
+            Text("回來了")
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(.primary)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+    }
+
+    private func rowView(_ r: OrgMoveReturnAsk) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button { onOpenMove(r.moveId) } label: {
+                rowText(r)
+            }
+            .buttonStyle(.plain)
+            actionRow(r)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    private func rowText(_ r: OrgMoveReturnAsk) -> some View {
+        VStack(alignment: .leading, spacing: 3) {
+            Text(r.title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+                .fixedSize(horizontal: false, vertical: true)
+            Text(r.message)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .contentShape(Rectangle())
+    }
+
+    private func actionRow(_ r: OrgMoveReturnAsk) -> some View {
+        HStack(spacing: 8) {
+            Button(r.backLabel) { askBack(r) }
+                .font(.caption.weight(.semibold))
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .tint(.blue)
+            Button(r.keepLabel) { keep(r) }
+                .font(.caption.weight(.semibold))
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+        }
+    }
+
+    @ViewBuilder
+    private func askButtons(_ a: OrgMoveReturnAsk) -> some View {
+        Button(a.backLabel) { giveBack(a) }
+        Button("取消", role: .cancel) {}
+    }
+
+    private func askBack(_ r: OrgMoveReturnAsk) {
+        askTitleKeep = OrgMoveReturnConfirm.title(r)
+        ask = r
+    }
+
+    /// 確認框按下去：下一個 runloop 才寫
+    private func giveBack(_ a: OrgMoveReturnAsk) {
+        let id = a.moveId
+        let store = lifeStore
+        DispatchQueue.main.async { _ = store.returnOrgMoveTemp(id, giveBack: true) }
+    }
+
+    /// 〔留給代理人〕：什麼都不搬、只記下來（按過就不再問）
+    private func keep(_ r: OrgMoveReturnAsk) {
+        _ = lifeStore.returnOrgMoveTemp(r.moveId, giveBack: false)
+    }
+}
+
+/// 交接單頁〔改回來那天〕（暫時離開、還沒按還／留的；要訂閱：按〔改好了〕時擋，同〔改生效日〕）。
+/// 回來那天要比生效日晚（DatePicker 從生效日＋1 天起）；按〔改好了〕先關頁、下一個 runloop 才 setOrgMoveReturnKey
+///（暫停的會議照新的日子重排；已經清掉的班、代理的事不動：brief §8-3）
+struct OrgMoveReturnKeySheet: View {
+    let moveId: UUID
+
+    @EnvironmentObject var lifeStore: LifeStore
+    @EnvironmentObject var subscription: SubscriptionManager
+    @Environment(\.dismiss) private var dismiss
+    @State private var date = Date()
+    @State private var loaded = false
+    @State private var saving = false
+    @State private var showPremiumAlert = false
+
+    init(moveId: UUID) {
+        self.moveId = moveId
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                dateSection
+                noteSection
+            }
+            .navigationTitle("改回來那天")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar { toolbarItems }
+            .onAppear { load() }
+            .premiumLockAlert(isPresented: $showPremiumAlert)
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var toolbarItems: some ToolbarContent {
+        ToolbarItem(placement: .cancellationAction) {
+            Button("取消") { dismiss() }
+        }
+        ToolbarItem(placement: .confirmationAction) {
+            Button("改好了") { save() }
+                .disabled(!canSave)
+        }
+    }
+
+    private var dateSection: some View {
+        Section {
+            DatePicker("回來那天", selection: $date, in: minDate..., displayedComponents: .date)
+        } footer: {
+            Text(currentText)
+        }
+    }
+
+    private var noteSection: some View {
+        Section {
+            Text(noteText)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    // MARK: 資料
+
+    private var move: OrgMove? {
+        guard let m = lifeStore.orgMoves.move(moveId), m.isTemp, !m.isUndone, !m.isCancelled,
+              m.deletedAt == nil, m.returnedAt == nil else { return nil }
+        return m
+    }
+
+    /// 生效日＋1 天（回來那天＝回來上班的第一天，要比生效日晚）
+    private var minDate: Date {
+        guard let m = move, let d = OrgMovePlan.date(fromKey: OrgMovePlan.addDays(m.effectiveKey, 1)) else {
+            return Date.distantPast
+        }
+        return d
+    }
+
+    private var newKey: String {
+        OrgMovePlan.dayKey(date)
+    }
+
+    /// 「原本 1/29（五）回來（11/2（一）起）」
+    private var currentText: String {
+        guard let m = move else { return "" }
+        let ret = OrgMovePlan.dayText(m.returnKey)
+        return "原本 \(ret) 回來（\(OrgMovePlan.dayText(m.effectiveKey)) 起）；回來上班的第一天，這天以前都算暫時離開"
+    }
+
+    private var noteText: String {
+        guard let m = move else { return "這張單已經回來、取消或復原了，不能改回來那天。" }
+        if newKey == m.returnKey { return "跟原本一樣。" }
+        let d = OrgMovePlan.shortDay(newKey)
+        let person = m.personName.isEmpty ? "這位同仁" : m.personName
+        var t = "暫停的會議照新的日子重排（\(d) 起照常）；已經清掉的班、代理的事不動。"
+        if newKey <= OrgMovePlan.dayKey(Date()) {
+            t += "選了今天或以前：\(person)現在起就不算暫時離開了，代理的事會問要還給\(person)還是留給代理人。"
+        }
+        return t
+    }
+
+    private var canSave: Bool {
+        guard let m = move, !saving else { return false }
+        return newKey > m.effectiveKey && newKey != m.returnKey
+    }
+
+    private func load() {
+        guard !loaded else { return }
+        loaded = true
+        if let m = move, let d = OrgMovePlan.date(fromKey: m.returnKey) {
+            date = d
+        }
+    }
+
+    /// 〔改好了〕（要訂閱）：先關頁、下一個 runloop 才寫
+    private func save() {
+        guard subscription.isPremium else {
+            showPremiumAlert = true
+            return
+        }
+        guard canSave else { return }
+        saving = true
+        let key = newKey
+        let id = moveId
+        let store = lifeStore
+        dismiss()
+        DispatchQueue.main.async { store.setOrgMoveReturnKey(id, returnKey: key) }
     }
 }

@@ -3154,8 +3154,9 @@ class LifeStore: ObservableObject {
     /// 一次存檔。回傳搬回來的件數（留給代理人＝0）
     @discardableResult
     func returnOrgMoveTemp(_ moveId: UUID, giveBack: Bool, now: Date = Date()) -> Int {
+        // [v4 驗證] 生效前取消了（〔留給接手的人〕，cancelledAt）的不動（returnAsk 也不問）。要退回這一件：拿掉 `move.cancelledAt == nil`
         guard var move = orgMoves.move(moveId), move.isTemp, move.wasApplied, !move.isUndone,
-              move.deletedAt == nil, move.returnedAt == nil else { return 0 }
+              move.deletedAt == nil, move.returnedAt == nil, move.cancelledAt == nil else { return 0 }
         var meetingsChanged = false
         var n = 0
         batched {
@@ -3333,24 +3334,35 @@ class LifeStore: ObservableObject {
               !subordinates.contains(where: { $0.id == item.id }) else { return nil }
         if let linked = orgPeople[pi].linkedSubordinateId, subordinates.contains(where: { $0.id == linked }) { return nil }
         let p0 = orgPeople[pi]
+        // [v4 驗證] 表單沒選職等（新增部屬沒有自由打字的職稱）：照組織頁那一位的職等、職稱帶過來，不然 syncOrgPersonFor
+        // 會把組織頁、名片的「工程師」洗成空的（「名片都留著」）。要退回這一件：刪這一段、下面的 sub 改回 item
+        var sub = item
+        if sub.gradeTitleId == nil, sub.jobTitle.trimmingCharacters(in: .whitespaces).isEmpty {
+            if let g = p0.gradeTitleId, let gt = gradeTitles.first(where: { $0.id == g }) {
+                sub.gradeTitleId = g
+                sub.jobTitle = "\(gt.grade) — \(gt.title)"
+            } else {
+                sub.jobTitle = p0.jobTitle.trimmingCharacters(in: .whitespaces)
+            }
+        }
         let card0: BusinessCard? = p0.linkedBusinessCardId.flatMap { cid in businessCards.first { $0.id == cid } }
         let fromLabel: String = p0.departmentId.flatMap { d in departments.first { $0.id == d } }.map { Self.departmentLabel($0) } ?? ""
-        let toLabel: String = item.departmentId.flatMap { d in departments.first { $0.id == d } }.map { Self.departmentLabel($0) }
-            ?? item.department
+        let toLabel: String = sub.departmentId.flatMap { d in departments.first { $0.id == d } }.map { Self.departmentLabel($0) }
+            ?? sub.department
         let todayKey = OrgMovePlan.dayKey(now)
         let moveId = UUID()
         batched {
-            orgPeople[pi].linkedSubordinateId = item.id
+            orgPeople[pi].linkedSubordinateId = sub.id
             if orgPeople[pi].isInactive {
                 orgPeople[pi].isInactive = false
                 orgPeople[pi].leftDate = nil
             }
-            subordinates.append(item)
-            syncOrgPersonFor(subordinate: item)
+            subordinates.append(sub)
+            syncOrgPersonFor(subordinate: sub)
             if let cid = orgPeople[pi].linkedBusinessCardId, let ci = businessCards.firstIndex(where: { $0.id == cid }) {
                 let cur = businessCards[ci].department.trimmingCharacters(in: .whitespaces)
                 let oldShort = OrgMovePlan.labelShort(fromLabel)
-                if item.departmentId != nil, cur.isEmpty || cur == fromLabel || cur == oldShort {
+                if sub.departmentId != nil, cur.isEmpty || cur == fromLabel || cur == oldShort {
                     businessCards[ci].department = toLabel
                 }
                 let curTitle = businessCards[ci].jobTitle.trimmingCharacters(in: .whitespaces)
@@ -3359,15 +3371,15 @@ class LifeStore: ObservableObject {
                     businessCards[ci].jobTitle = newTitle
                 }
             }
-            let name = item.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            let name = sub.name.trimmingCharacters(in: .whitespacesAndNewlines)
             let fromSide = OrgMoveSide(deptId: p0.departmentId, deptLabel: fromLabel, plant: nil,
                                        gradeTitleId: p0.gradeTitleId, titleLabel: p0.jobTitle)
-            let toSide = OrgMoveSide(deptId: item.departmentId, deptLabel: toLabel, plant: item.plantArea,
-                                     gradeTitleId: item.gradeTitleId, titleLabel: item.jobTitle)
+            let toSide = OrgMoveSide(deptId: sub.departmentId, deptLabel: toLabel, plant: sub.plantArea,
+                                     gradeTitleId: sub.gradeTitleId, titleLabel: sub.jobTitle)
             let before = OrgMoveRestore(orgPersonId: p0.id, orgDeptId: p0.departmentId, orgJobTitle: p0.jobTitle,
                                         orgGradeTitleId: p0.gradeTitleId, cardId: card0?.id, cardDept: card0?.department,
                                         cardJobTitle: card0?.jobTitle, orgInactive: p0.isInactive, orgLeftDate: p0.leftDate)
-            let move = OrgMove(id: moveId, personId: item.id, personKind: "org", personName: name,
+            let move = OrgMove(id: moveId, personId: sub.id, personKind: "org", personName: name,
                                kind: OrgMoveKind.intake.rawValue, effectiveKey: todayKey,
                                handoverByKey: OrgMovePlan.handoverByKey(effectiveKey: todayKey),
                                timing: OrgMoveTiming.now.rawValue, from: fromSide, to: toSide,

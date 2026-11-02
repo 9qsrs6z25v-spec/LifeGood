@@ -1092,7 +1092,8 @@ enum OrgMoveIndex {
                 let at = l.state == OrgMoveLineState.resolved.rawValue ? (l.resolvedAt ?? handed) : handed
                 // [v25.597 轉組織 v4]〔代理〕的：膠囊顯示到回來那天（還了、留給代理人了就收起來）。要退回這一件：刪這三行、
                 // 下面 handoverByKey／closed／proxyUntilKey 改回 byKey／m.isClosed／不給
-                let proxied: Bool = m.isTemp && OrgMovePlan.isProxyLine(l, in: m.allLines)
+                // [v4 驗證] 生效前取消了（〔留給接手的人〕，cancelledAt）的：沒有人離開，照一般「交接自」。要退回這一件：拿掉 `m.cancelledAt == nil &&`
+                let proxied: Bool = m.isTemp && m.cancelledAt == nil && OrgMovePlan.isProxyLine(l, in: m.allLines)
                 let shownUntil: String = proxied ? (m.returnKey ?? byKey) : byKey
                 let shut: Bool = m.isClosed || (proxied && m.returnedAt != nil)
                 let r = Received(moveId: m.id, lineId: l.id, fromId: m.personId, fromName: m.personName,

@@ -18,6 +18,10 @@ import SwiftUI
 // 看板頭像旁膠囊「已轉出」（SubArchivedHeroChip）、「…」〔回到我的部屬〕〔真的刪除…〕那一框（SubArchivedAsk／.subArchivedAsk）；
 // 灰色提示列的「待分派 1」照舊橘點（已轉出那一條是灰的，待分派還是要你處理）；歷程同一天兩列照套用的時間排（調出、回到我的部屬同一天）。
 // 這個檔照舊一個 lifeStore 的寫入都沒有：〔回到我的部屬〕〔真的刪除〕的寫入在 SubordinateDetailView（下一個 runloop）。
+// [v25.597 轉組織 v4] G3（orgmove/build/v4/brief.md §5 G3-3、G3-4）：膠囊「代理 林志豪・1/29 還」（Received.proxyUntilKey；預覽那一行同）、
+// 任務膠囊「從品保課帶過來」（OrgMoveIndex.intakeByItem；任務做完就收）；提示列多轉進來那一條（OrgMovePlan.intakeHint，點了開那張單＝接收清單）；
+// 暫時離開回來那天以後提示列下面〔還給林志豪〕〔留給代理人〕（OrgMoveReturnAskStrip；確認框按下去的下一個 runloop
+// lifeStore.returnOrgMoveTemp——這個檔唯一的一個寫入，不用訂閱，同〔拿回來〕）。SubordinateDetailView 不用改（膠囊、預覽照舊叫 chips(task:)／previewLine）。
 
 // MARK: - 算資料（卡片每次重畫都會算，先擋掉沒有交接單的大多數時候）
 
@@ -56,16 +60,29 @@ enum OrgMoveCardData {
     /// judge §4.6；OrgMoveIndex.receivedChip(task:holderId:todayKey:)）。字同 chips(itemId:)。
     /// 要退回這一件：SubordinateDetailView 的 taskChips 改回 chips(itemId: t.id, …)，刪這支
     static func chips(task t: SubordinateTask, holderId: UUID, now: Date = Date()) -> [ItemChip] {
+        // [v25.597 轉組織 v4] 轉進來接收清單的待辦：青色「從品保課帶過來」（還沒做完才顯示）。要退回這一件：刪 intake 這兩段
+        let intake: [ItemChip] = intakeChips(t)
         guard let r = OrgMoveIndex.receivedChip(task: t, holderId: holderId, todayKey: OrgMovePlan.dayKey(now)) else {
-            return []
+            return intake
         }
-        return chipList(r)
+        return chipList(r) + intake
+    }
+
+    /// [v25.597 轉組織 v4]「從品保課帶過來」（字就是 OrgMoveIndex.intakeByItem 的值；任務做完就收）
+    private static func intakeChips(_ t: SubordinateTask) -> [ItemChip] {
+        guard !t.isCompleted, let text = OrgMoveIndex.intakeByItem[t.id], !text.isEmpty else { return [] }
+        return [ItemChip(id: "intake", text: text, color: .teal, icon: "tray.and.arrow.down")]
     }
 
     /// 紫色「交接自 王小明」（有交接備註多 💬）＋灰色「交接時已逾期」（v1a-1 的字，兩支共用）
+    /// [v25.597 轉組織 v4]〔代理（回來還給本人）〕的：「代理 林志豪・1/29 還」（取代「交接自 林志豪」；備註 💬、交接時已逾期照舊）
     private static func chipList(_ r: OrgMoveIndex.Received) -> [ItemChip] {
         let from = r.fromName.trimmingCharacters(in: .whitespaces).isEmpty ? "這位同仁" : r.fromName
-        let text = "交接自 " + from + (r.memo.isEmpty ? "" : " 💬")
+        var head: String = "交接自 " + from
+        if let until = r.proxyUntilKey {
+            head = "代理 \(from)・\(OrgMovePlan.shortDay(until)) 還"
+        }
+        let text = head + (r.memo.isEmpty ? "" : " 💬")
         var out: [ItemChip] = [ItemChip(id: "handover", text: text, color: .purple, icon: "arrow.left.arrow.right")]
         if r.wasOverdue {
             out.append(ItemChip(id: "handoverLate", text: "交接時已逾期", color: .secondary))
@@ -77,7 +94,20 @@ enum OrgMoveCardData {
     /// hidden：預覽出圖（forExport）不放——交接備註只在 App 內頁與交接單的分享（brief §1-6）
     static func previewLine(itemId: UUID, holderId: UUID, hidden: Bool, now: Date = Date()) -> String? {
         guard !hidden, let r = received(itemId, holderId: holderId, now: now) else { return nil }
-        return OrgMovePlan.receivedPreviewLine(r)
+        return previewText(r)
+    }
+
+    /// [v25.597 轉組織 v4] 預覽那一行：代理的「11/2 起代理 林志豪・1/29 還・備註：…」；其他照 OrgMovePlan.receivedPreviewLine。
+    /// 要退回這一件：兩支 previewLine 改回 OrgMovePlan.receivedPreviewLine(r)，刪這支
+    private static func previewText(_ r: OrgMoveIndex.Received) -> String {
+        guard let until = r.proxyUntilKey else { return OrgMovePlan.receivedPreviewLine(r) }
+        let from = r.fromName.trimmingCharacters(in: .whitespaces).isEmpty ? "這位同仁" : r.fromName
+        let handed = OrgMovePlan.shortDay(OrgMovePlan.dayKey(r.handedAt))
+        let back: String = OrgMovePlan.shortDay(until)
+        var s: String = "\(handed) 起代理 \(from)・\(back) 還"
+        if r.wasOverdue, let k = r.dueKey { s += "（原訂 \(OrgMovePlan.shortDay(k))）" }
+        if !r.memo.isEmpty { s += "・備註：\(r.memo)" }
+        return s
     }
 
     /// [v25.591 轉組織 v1a-2] 任務預覽那一行：同 chips(task:)，兼任分身照 sideRoleLink.taskId 也找得到。
@@ -87,7 +117,7 @@ enum OrgMoveCardData {
               let r = OrgMoveIndex.receivedChip(task: t, holderId: holderId, todayKey: OrgMovePlan.dayKey(now)) else {
             return nil
         }
-        return OrgMovePlan.receivedPreviewLine(r)
+        return previewText(r)
     }
 }
 
@@ -167,19 +197,54 @@ struct OrgMoveHintBars: View {
     /// [v25.592 轉組織 v1b] 先擋改 OrgMovePlan.hasHint：多認得部門還沒改的（「11/1 起調設備課・交接單排好了（16 項）」
     /// 「11/1 起調設備課・已交出 9 項」、接手的人灰色「11/1 起會從王小明接手 6 項」）。
     /// 要退回這一件：改回 OrgMoveCardData.hasOpenMove(personId:book:todayKey:)
+    /// [v25.597 轉組織 v4] 轉進來那一條（OrgMovePlan.intakeHint：「11/16 從品保課轉進來・接收清單 2 項」）放在原人那一條後面；
+    /// 轉進來那張單是 closed，hasHint 不認得，所以另外看（不用建 OrgMoveWorld）。要退回這一件：改回只有 hasHint 那一段、刪 intake
     private var hints: [OrgMoveHint] {
         let now = Date()
+        let todayKey = OrgMovePlan.dayKey(now)
         let book = lifeStore.orgMoves
-        guard OrgMovePlan.hasHint(personId: personId, book: book, todayKey: OrgMovePlan.dayKey(now)) else {
-            return []
+        let intake: OrgMoveHint? = OrgMovePlan.intakeHint(personId: personId, book: book, todayKey: todayKey)
+        guard OrgMovePlan.hasHint(personId: personId, book: book, todayKey: todayKey) else {
+            return intake.map { [$0] } ?? []
         }
         let world = OrgMoveWorld(store: lifeStore)
         var out: [OrgMoveHint] = []
         if let h = OrgMovePlan.personHint(personId: personId, book: book, world: world, now: now) {
             out.append(h)
         }
-        out.append(contentsOf: OrgMovePlan.receiverHints(personId: personId, book: book, world: world, now: now))
+        if let h = intake, !out.contains(where: { $0.id == h.id }) {
+            out.append(h)
+        }
+        let more: [OrgMoveHint] = OrgMovePlan.receiverHints(personId: personId, book: book, world: world, now: now)
+        let seen: Set<String> = Set(out.map(\.id))
+        let rest: [OrgMoveHint] = more.filter { !seen.contains($0.id) }
+        out.append(contentsOf: rest)
         return out
+    }
+
+    /// [v25.597 轉組織 v4] 暫時離開回來那天（或之後）還沒按〔還給本人〕〔留給代理人〕、還有要還的（OrgMovePlan.returnAsk）。
+    /// 先擋：這位沒有「暫時離開、回來那天到了、還沒按」的單就不建 OrgMoveWorld、OrgMoveHolderMap
+    private var returnAsk: OrgMoveReturnAsk? {
+        let todayKey = OrgMovePlan.dayKey(Date())
+        let book = lifeStore.orgMoves
+        let temps: [OrgMove] = book.live.filter { m in
+            m.isTemp && m.personId == personId && m.returnedAt == nil && (m.returnKey ?? "9") <= todayKey
+        }
+        guard !temps.isEmpty else { return nil }
+        let map = OrgMoveHolderMap(world: OrgMoveWorld(store: lifeStore))
+        let sorted: [OrgMove] = temps.sorted { a, b in (a.returnKey ?? "") > (b.returnKey ?? "") }
+        for m in sorted {
+            if let a = OrgMovePlan.returnAsk(m, map: map, todayKey: todayKey) { return a }
+        }
+        return nil
+    }
+
+    /// [v25.597 轉組織 v4] 確認框按下去：下一個 runloop 才寫（框收起來之後；不用訂閱，同〔拿回來〕）
+    private func pickReturn(_ moveId: UUID, _ giveBack: Bool) {
+        let store = lifeStore
+        DispatchQueue.main.async {
+            store.returnOrgMoveTemp(moveId, giveBack: giveBack)
+        }
     }
 
     /// [v25.592 轉組織 v1b] 按過〔現在套用〕〔選部門〕：之後提示列就算全空了，也留一個 0 高的透明底給 .orgMoveHintActions 掛
@@ -195,24 +260,43 @@ struct OrgMoveHintBars: View {
     }
 
     var body: some View {
-        OrgMoveHintBarList(hints: hints, keepHost: keepHost, onOpen: onOpen, onAction: requestAction)
+        OrgMoveHintBarList(hints: hints, returnAsk: returnAsk, keepHost: keepHost, onOpen: onOpen,
+                           onAction: requestAction, onReturn: pickReturn)
             .orgMoveHintActions($actionRequest)
     }
 }
 
 private struct OrgMoveHintBarList: View {
     let hints: [OrgMoveHint]
+    /// [v25.597 轉組織 v4] 回來那天問〔還給本人〕〔留給代理人〕（nil＝不問）：放在那張單的那一條裡；那張單沒有一條就自己一張卡
+    let returnAsk: OrgMoveReturnAsk?
     /// [v25.592 轉組織 v1b] 提示列空了也留 0 高的透明底（OrgMoveHintBars.keepHost）
     let keepHost: Bool
     let onOpen: (UUID) -> Void
     /// [v25.592 轉組織 v1b] 按了一條上的按鈕（moveId、哪一顆）
     let onAction: (UUID, OrgMoveHintAction) -> Void
+    /// [v25.597 轉組織 v4] 確認框按了〔還給林志豪〕（true）／〔留給代理人〕（false）
+    let onReturn: (UUID, Bool) -> Void
+
+    /// 那張單有沒有一條提示列（有就把兩顆放進那一條）
+    private var askHasRow: Bool {
+        guard let a = returnAsk else { return false }
+        return hints.contains { $0.moveId == a.moveId && !$0.isReceiver }
+    }
+
+    private func ask(for h: OrgMoveHint) -> OrgMoveReturnAsk? {
+        guard let a = returnAsk, a.moveId == h.moveId, !h.isReceiver else { return nil }
+        return a
+    }
 
     var body: some View {
-        if !hints.isEmpty {
+        if !hints.isEmpty || returnAsk != nil {
             VStack(spacing: 8) {
                 ForEach(hints) { h in
-                    OrgMoveHintBarRow(hint: h, onOpen: onOpen, onAction: onAction)
+                    OrgMoveHintBarRow(hint: h, returnAsk: ask(for: h), onOpen: onOpen, onAction: onAction, onReturn: onReturn)
+                }
+                if let a = returnAsk, !askHasRow {
+                    OrgMoveReturnAskCard(ask: a, onOpen: onOpen, onReturn: onReturn)
                 }
             }
             .padding(.horizontal)
@@ -230,12 +314,15 @@ private struct OrgMoveHintBarList: View {
 /// 要退回這一件：改回一整顆 Button（上半截 OrgMoveCardHintMain 的內容＋原本的背景、陰影），刪 OrgMoveCardHintActionStrip
 private struct OrgMoveHintBarRow: View {
     let hint: OrgMoveHint
+    /// [v25.597 轉組織 v4] 這一條是暫時離開那張、回來那天到了：最下面〔還給林志豪〕〔留給代理人〕（OrgMoveReturnAskStrip）
+    let returnAsk: OrgMoveReturnAsk?
     let onOpen: (UUID) -> Void
     let onAction: (UUID, OrgMoveHintAction) -> Void
+    let onReturn: (UUID, Bool) -> Void
 
     private var hasActions: Bool { !hint.actions.isEmpty }
     /// 有按鈕時上半截底下留少一點（按鈕那一排自己有下邊距）
-    private var mainBottom: CGFloat { hasActions ? 7 : 11 }
+    private var mainBottom: CGFloat { (hasActions || returnAsk != nil) ? 7 : 11 }
     private var fill: Color { hint.muted ? Color(.tertiarySystemFill) : Color(.systemBackground) }
     private var shadowOpacity: Double { hint.muted ? 0 : 0.05 }
 
@@ -245,6 +332,12 @@ private struct OrgMoveHintBarRow: View {
             if hasActions {
                 OrgMoveCardHintActionStrip(moveId: hint.moveId, actions: hint.actions,
                                            onOpen: onOpen, onAction: onAction)
+            }
+            if let a = returnAsk {
+                OrgMoveReturnAskStrip(ask: a, onReturn: onReturn)
+                    .padding(.leading, 54)
+                    .padding(.trailing, 14)
+                    .padding(.bottom, 11)
             }
         }
         .background(fill)
@@ -357,6 +450,135 @@ private struct OrgMoveCardHintActionStrip: View {
                 onAction(moveId, a)
             }
         }
+    }
+}
+
+// MARK: - [v25.597 轉組織 v4] 回來那天〔還給本人〕〔留給代理人〕（brief §5 G3-3；字在 OrgMovePlan.returnAsk）
+
+/// 兩顆小按鈕〔還給林志豪〕（藍底白字）〔留給代理人〕（淡藍底藍字）；按了先跳確認框，確認框按下去才交給 onReturn（寫 store 在 OrgMoveHintBars，
+/// 下一個 runloop）。不加 OrgMoveHintAction 的 case（不走 .orgMoveHintActions：不用訂閱）。一排放不下（字放大時）就直的排
+struct OrgMoveReturnAskStrip: View {
+    let ask: OrgMoveReturnAsk
+    /// (moveId, giveBack)
+    let onReturn: (UUID, Bool) -> Void
+
+    /// 確認框問的是哪一顆（nil＝沒有在問；true＝還給本人、false＝留給代理人）
+    @State private var confirming: Bool?
+
+    private var confirmShown: Binding<Bool> {
+        Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } })
+    }
+
+    private var confirmTitle: String {
+        confirming == false ? "代理的 \(ask.count) 件留給代理人？" : "把代理的 \(ask.count) 件\(ask.backLabel)？"
+    }
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                buttons
+            }
+            VStack(alignment: .leading, spacing: 6) {
+                buttons
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .alert(confirmTitle, isPresented: confirmShown, presenting: confirming) { giveBack in
+            Button(giveBack ? ask.backLabel : ask.keepLabel) { confirm(giveBack) }
+            Button("取消", role: .cancel) { confirming = nil }
+        } message: { giveBack in
+            Text(giveBack ? "還沒做完的搬回來，做完的不動；按了就不再問。" : "做完的不動；按了就不再問。")
+        }
+    }
+
+    @ViewBuilder
+    private var buttons: some View {
+        OrgMoveReturnAskButton(text: ask.backLabel, prominent: true) { confirming = true }
+        OrgMoveReturnAskButton(text: ask.keepLabel, prominent: false) { confirming = false }
+    }
+
+    /// giveBack 是框打開那一刻的值（presenting 帶進來的；不怕框收起來時 confirming 先被清掉）
+    private func confirm(_ giveBack: Bool) {
+        confirming = nil
+        onReturn(ask.moveId, giveBack)
+    }
+}
+
+/// 一顆：同提示列的小按鈕樣子（藍底白字／淡藍底藍字膠囊）
+private struct OrgMoveReturnAskButton: View {
+    let text: String
+    let prominent: Bool
+    let onTap: () -> Void
+
+    private var textColor: Color { prominent ? Color.white : Color.blue }
+    private var chipFill: Color { prominent ? Color.blue : Color.blue.opacity(0.12) }
+
+    var body: some View {
+        Button(action: onTap) {
+            Text(text)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(textColor)
+                .lineLimit(1)
+                .fixedSize()
+                .padding(.horizontal, 11)
+                .padding(.vertical, 6)
+                .background(chipFill)
+                .clipShape(Capsule())
+                .contentShape(Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// 那張單沒有提示列的時候（例：personHint 先給了另一張排好的單）：自己一張白卡——「林志豪 1/29 回來了」、說明、兩顆；標題點了開那張單
+private struct OrgMoveReturnAskCard: View {
+    let ask: OrgMoveReturnAsk
+    let onOpen: (UUID) -> Void
+    let onReturn: (UUID, Bool) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Button {
+                onOpen(ask.moveId)
+            } label: {
+                OrgMoveReturnAskTexts(ask: ask)
+            }
+            .buttonStyle(.plain)
+            .accessibilityHint("打開交接單")
+            OrgMoveReturnAskStrip(ask: ask, onReturn: onReturn)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.systemBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(Color(.separator).opacity(0.12), lineWidth: 0.75))
+        .shadow(color: .black.opacity(0.05), radius: 6, x: 0, y: 2)
+    }
+}
+
+private struct OrgMoveReturnAskTexts: View {
+    let ask: OrgMoveReturnAsk
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            OrgMoveCardIcon(color: Color.blue, size: 30, iconSize: 12)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(ask.title)
+                    .font(.footnote.weight(.semibold))
+                    .foregroundStyle(Color.primary)
+                    .lineLimit(2)
+                    .fixedSize(horizontal: false, vertical: true)
+                Text(ask.message)
+                    .font(.caption)
+                    .foregroundStyle(Color.secondary)
+                    .lineLimit(3)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 6)
+            OrgMoveLinkLabel(text: "看")
+        }
+        .contentShape(Rectangle())
     }
 }
 

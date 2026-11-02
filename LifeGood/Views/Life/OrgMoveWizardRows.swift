@@ -338,7 +338,7 @@ struct OrgMoveWizAddCustomButton: View {
 // 字一律 OrgMoveKind.label、順序照 OrgMoveKind.wizardCases（主控定的），這裡只排版。
 // 要退回這一段：刪到檔尾，OrgMoveWizard.swift 的 kindCard 換回 v1 那兩顆 OrgMoveWizChip。
 
-/// 「這次是」五顆兩排。一排放不下（小螢幕、大字）就一顆一行（ViewThatFits；不用 ScrollView 把後面幾顆藏起來）
+/// 「這次是」三排（[v25.597 轉組織 v4] 多第三排「會回來」〔暫時離開〕）。一排放不下（小螢幕、大字）就一顆一行（ViewThatFits；不用 ScrollView 把後面幾顆藏起來）
 struct OrgMoveWizKindPicker: View {
     let selected: OrgMoveKind
     let onPick: (OrgMoveKind) -> Void
@@ -352,13 +352,18 @@ struct OrgMoveWizKindPicker: View {
         VStack(alignment: .leading, spacing: 10) {
             OrgMoveWizKindRow(caption: "還是我帶的", kinds: Self.stayKinds, selected: selected, onPick: onPick)
             OrgMoveWizKindRow(caption: "不是我帶的了", kinds: Self.leaveKinds, selected: selected, onPick: onPick)
+            // [v25.597 轉組織 v4] 第三排「會回來」：〔暫時離開〕（brief §3 G1-1）。要退回這一件：刪這一行與 awayKinds，stayKinds 拿掉 `&& $0 != .temp`
+            OrgMoveWizKindRow(caption: "會回來", kinds: Self.awayKinds, selected: selected, onPick: onPick)
         }
     }
 
     /// 第一排：還是我帶的（換單位、只換廠區）
-    static var stayKinds: [OrgMoveKind] { OrgMoveKind.wizardCases.filter { !$0.isLeaving } }
+    /// [v25.597 轉組織 v4] 〔暫時離開〕的 isLeaving 也是 false：濾掉，放第三排
+    static var stayKinds: [OrgMoveKind] { OrgMoveKind.wizardCases.filter { !$0.isLeaving && $0 != .temp } }
     /// 第二排：不是我帶的了（調出我的管轄、離職、退休）
     static var leaveKinds: [OrgMoveKind] { OrgMoveKind.wizardCases.filter { $0.isLeaving } }
+    /// [v25.597 轉組織 v4] 第三排：會回來（暫時離開）
+    static var awayKinds: [OrgMoveKind] { OrgMoveKind.wizardCases.filter { $0 == .temp } }
 }
 
 /// 一排：小灰字＋膠囊（放得下一排，放不下一顆一行）
@@ -406,5 +411,89 @@ private struct OrgMoveWizKindChip: View {
         }
         .buttonStyle(.plain)
         .accessibilityAddTraits(on ? .isSelected : [])
+    }
+}
+
+// MARK: - [v25.597 轉組織 v4] 精靈 v4 多的小零件（orgmove/build/v4/brief.md §3 G1-1）
+// 第 ① 步〔暫時離開〕下面那兩格：〔借調〕〔支援〕〔留停〕＋回來那天。字照 OrgMoveTempKind.label，這裡只排版；
+// 寫草稿在 OrgMoveWizard.swift（onPickKind、returnDate 的 Binding 都走 update：改了就 OrgMovePlan.rebuild）。
+// 要退回這一段：刪到檔尾，OrgMoveWizard.swift 的 infoCard 拿掉 tempFields 那兩行。
+
+/// 「借調／支援／留停」三顆＋一行灰字、「回來那天」日期＋一行灰字
+struct OrgMoveWizTempFields: View {
+    let tempKind: OrgMoveTempKind
+    let returnDate: Binding<Date>
+    /// 回來那天最早可以選的（生效日＋1 天 00:00）
+    let minReturn: Date
+    /// 「1/29（五）回來」
+    let returnText: String
+    let onPickKind: (OrgMoveTempKind) -> Void
+
+    init(tempKind: OrgMoveTempKind, returnDate: Binding<Date>, minReturn: Date, returnText: String,
+         onPickKind: @escaping (OrgMoveTempKind) -> Void) {
+        self.tempKind = tempKind
+        self.returnDate = returnDate
+        self.minReturn = minReturn
+        self.returnText = returnText
+        self.onPickKind = onPickKind
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            kindPart
+            Divider().padding(.leading, 14)
+            returnPart
+        }
+    }
+
+    /// 〔借調〕〔支援〕〔留停〕＋下面一行灰字（選中的那一種的說明）
+    private var kindPart: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                ForEach(OrgMoveTempKind.allCases) { k in
+                    OrgMoveWizKindChip(text: k.label, on: k == tempKind) { onPickKind(k) }
+                }
+                Spacer(minLength: 0)
+            }
+            Text(Self.kindNote(tempKind))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    /// 「回來那天」日期（生效日＋1 天以後）＋那天幾號、下面一行灰字
+    private var returnPart: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack(spacing: 12) {
+                Text("回來那天")
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                Spacer(minLength: 8)
+                DatePicker("回來那天", selection: returnDate, in: minReturn..., displayedComponents: .date)
+                    .labelsHidden()
+                    .datePickerStyle(.compact)
+            }
+            Text(returnText)
+                .font(.caption.weight(.semibold))
+                .monospacedDigit()
+            Text("回來上班的第一天（這天以前都算暫時離開）")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    /// 選中那一種的說明
+    static func kindNote(_ k: OrgMoveTempKind) -> String {
+        switch k {
+        case .loan: return "到別的單位，期滿回來"
+        case .support: return "短期到別處幫忙"
+        case .leave: return "留職停薪：這段期間的請假不算、到期的不算逾期"
+        }
     }
 }

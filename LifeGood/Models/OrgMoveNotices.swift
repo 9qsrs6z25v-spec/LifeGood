@@ -165,7 +165,10 @@ enum OrgMoveNotices {
         // [v25.597 轉組織 v4] 暫時離開回來前 3 天 09:00（orgmove.back.<回來那天>；同一天回來的併一則；按過〔還給本人〕〔留給代理人〕的不排）。
         // 要退回這一件：刪這一段與 backCounts 參數
         var back: [String: [UUID]] = [:]
-        for m in moves where m.isTemp && m.wasApplied && !m.isUndone && !m.isCancelled && m.returnedAt == nil {
+        // [v4 驗證] 生效前〔取消這張單〕〔留給接手的人〕的只記 cancelledAt（state 還是 applied，isCancelled 抓不到）：也不排。
+        // 要退回這一件：拿掉 `&& m.cancelledAt == nil`
+        for m in moves where m.isTemp && m.wasApplied && !m.isUndone && !m.isCancelled && m.returnedAt == nil
+            && m.cancelledAt == nil {
             guard let k = m.returnKey, OrgMovePlan.date(fromKey: k) != nil else { continue }
             back[k, default: []].append(m.id)
         }

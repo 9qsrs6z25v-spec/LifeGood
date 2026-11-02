@@ -190,6 +190,29 @@ struct SubordinateOverviewView: View {
     }
 
 
+    /// [v4 裁定] 部屬總覽最上面轉組織那四張卡（沒有的那張是 EmptyView、不佔位；包成一個是為了外層 VStack 子 view 不超過 10 個）
+    @ViewBuilder
+    private var orgMoveCards: some View {
+        // [v25.592 轉組織 v1b] 「今天生效」：到了、部門還沒改的（沒自動改的、卡住的；judge §3.5、§7 v1b 做好標準 3）。
+        // 沒有就整張不出現、不佔位；點標題開那張交接單（同一個 orgMoveSheet）。要退回這一件：刪這兩行
+        OrgMoveDueCard { id in orgMoveSheet = OrgMoveSheetRequest(moveId: id) }
+            .padding(.horizontal)
+
+        // [v25.597 轉組織 v4]「回來了」：暫時離開回來那天以後、代理的還沒還也還沒留的（〔還給林志豪〕〔留給代理人〕不用訂閱）。
+        // 沒有就整張不出現、不佔位；點標題開那張交接單（同一個 orgMoveSheet）。要退回這一件：刪這兩行
+        OrgMoveReturnCard { id in orgMoveSheet = OrgMoveSheetRequest(moveId: id) }
+            .padding(.horizontal)
+
+        // [v25.590 轉組織 v1a-1] 「待分派 N」〔分給…〕（judge §4.9；沒有待分派時整張不出現、不佔位；〔分給…〕不用訂閱）
+        OrgMovePendingCard { id in orgMoveSheet = OrgMoveSheetRequest(moveId: id) }
+            .padding(.horizontal)
+
+        // [v25.593 轉組織 v2]「我接的（N）」：〔交出去〕給「我」的事（judge §3.6；沒有就整張不出現、不佔位；打勾不用訂閱）。
+        // 要退回這一件：刪這兩行與檔尾的 OrgMoveMineCard
+        OrgMoveMineCard { id in orgMoveSheet = OrgMoveSheetRequest(moveId: id) }
+            .padding(.horizontal)
+    }
+
     var body: some View {
         // body 單次計算，傳入各子區塊，避免各 section 各自重複 flatMap+filter+sort
         // （v25.118 補齊 reports／dayTasks／meetingItems／completedEntries 四項遺漏的同型快取，
@@ -213,19 +236,9 @@ struct SubordinateOverviewView: View {
                         .offset(y: heroAppeared ? 0 : 16)
                         .animation(.spring(response: 0.52, dampingFraction: 0.80), value: heroAppeared)
 
-                    // [v25.592 轉組織 v1b] 「今天生效」：到了、部門還沒改的（沒自動改的、卡住的；judge §3.5、§7 v1b 做好標準 3）。
-                    // 沒有就整張不出現、不佔位；點標題開那張交接單（同一個 orgMoveSheet）。要退回這一件：刪這兩行
-                    OrgMoveDueCard { id in orgMoveSheet = OrgMoveSheetRequest(moveId: id) }
-                        .padding(.horizontal)
-
-                    // [v25.590 轉組織 v1a-1] 「待分派 N」〔分給…〕（judge §4.9；沒有待分派時整張不出現、不佔位；〔分給…〕不用訂閱）
-                    OrgMovePendingCard { id in orgMoveSheet = OrgMoveSheetRequest(moveId: id) }
-                        .padding(.horizontal)
-
-                    // [v25.593 轉組織 v2]「我接的（N）」：〔交出去〕給「我」的事（judge §3.6；沒有就整張不出現、不佔位；打勾不用訂閱）。
-                    // 要退回這一件：刪這兩行與檔尾的 OrgMoveMineCard
-                    OrgMoveMineCard { id in orgMoveSheet = OrgMoveSheetRequest(moveId: id) }
-                        .padding(.horizontal)
+                    // [v4 裁定] 轉組織那四張卡（今天生效、回來了、待分派、我接的）包成一個 @ViewBuilder（外層 VStack 子 view 不超過 10 個；畫面不變）。
+                    // 要退回這一件：把 orgMoveCards 的內容貼回這裡
+                    orgMoveCards
 
                     MacaronDatePicker(selectedDate: $selectedDate)
 

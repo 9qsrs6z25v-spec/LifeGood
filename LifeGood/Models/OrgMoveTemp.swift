@@ -109,7 +109,9 @@ extension OrgMoveIndex {
         var paused: [UUID: OrgMoveDaySpan] = [:]
         var intake: [UUID: String] = [:]
         for m in book.live where !m.isUndone && m.wasApplied {
-            if m.isTemp, let until = m.returnKey, !until.isEmpty, until > m.effectiveKey {
+            // [v4 驗證] 生效前〔取消這張單〕〔留給接手的人〕的（state 還是 applied、只記 cancelledAt；isCancelled 抓不到）：
+            // 暫時離開取消了＝這位同仁沒有離開，不算「借調中」「留停中」、暫停的週報也不免逾期。要退回這一件：拿掉 `m.cancelledAt == nil,`
+            if m.isTemp, m.cancelledAt == nil, let until = m.returnKey, !until.isEmpty, until > m.effectiveKey {
                 aw[m.personId, default: []].append(OrgMoveAway(moveId: m.id, tempKind: m.tempKindValue.rawValue,
                                                                fromKey: m.effectiveKey, untilKey: until,
                                                                returned: m.returnedAt != nil))
@@ -449,8 +451,9 @@ extension OrgMovePlan {
 
     /// 回來那天（或之後）還沒按〔還給本人〕〔留給代理人〕、還有要還的：問一次。不是這種＝nil
     static func returnAsk(_ move: OrgMove, map: OrgMoveHolderMap, todayKey: String) -> OrgMoveReturnAsk? {
+        // [v4 驗證] 生效前取消了（〔留給接手的人〕，cancelledAt）的不問：這位同仁沒有離開。要退回這一件：拿掉 `move.cancelledAt == nil,`
         guard move.isTemp, move.wasApplied, !move.isUndone, move.deletedAt == nil, move.returnedAt == nil,
-              let ret = move.returnKey, todayKey >= ret else { return nil }
+              move.cancelledAt == nil, let ret = move.returnKey, todayKey >= ret else { return nil }
         let n = returnItemCount(move, map: map)
         guard n > 0 else { return nil }
         let person = move.personName.isEmpty ? "這位同仁" : move.personName
@@ -722,7 +725,9 @@ extension OrgMovePlan {
     static func tempPersonHint(personId: UUID, book: OrgMoveBook, world: OrgMoveWorld, now: Date) -> OrgMoveHint? {
         let todayKey = dayKey(now)
         let temps = book.live.filter { m in
+            // [v4 驗證] 生效前取消了（cancelledAt）的不接：要退回這一件：拿掉 `&& m.cancelledAt == nil`
             m.isTemp && m.personId == personId && m.wasApplied && !m.isUndone && m.returnedAt == nil && m.returnKey != nil
+                && m.cancelledAt == nil
         }.sorted { a, b in a.effectiveKey > b.effectiveKey }
         guard let m = temps.first, let ret = m.returnKey else { return nil }
         if m.orgPending && m.effectiveKey <= todayKey { return nil }
