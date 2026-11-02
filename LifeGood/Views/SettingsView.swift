@@ -298,6 +298,10 @@ struct SettingsView: View {
     @State private var transferRemindersOn: Bool = WealthReminders.transfersEnabled
     /// [v25.579] 這支是不是加入別人的共享（「加入共享的這支預設關」那一行）；onAppear、共享狀態一變（下面的共享區塊加入／退出）就重讀
     @State private var transferShareParticipant: Bool = CloudKitManager.shared.isShareParticipant
+    /// [v25.596 轉組織 v3] 「交接提醒（只這台）」（OrgMoveNotices.enabledKey，UserDefaults.standard、不同步、不進備份）。
+    /// 不用 @AppStorage：沒設過時的預設值照「是不是加入別人的共享」算（加入共享的那支＝家人的預設關），只有真的撥了才寫進 UserDefaults。
+    /// 加入共享那一行共用上面的 transferShareParticipant（同一個值）
+    @State private var orgMoveNoticesOn: Bool = OrgMoveNotices.isEnabled
     @State private var reminderExpanded = false
     @State private var dataManagementExpanded = false
     @State private var dataStatsExpanded = false
@@ -1357,6 +1361,8 @@ struct SettingsView: View {
                 wealthReminderToggle
                 // [v25.579 定期轉帳 v2] 定期轉帳那三種提醒（只這台；財富提醒關著時灰掉）；每一條另外有「提醒我」（規則頁）
                 transferReminderToggle
+                // [v25.596 轉組織 v3] 交接提醒（只這台；家人那支預設關）
+                orgMoveNoticeToggle
             }
         } header: {
             Text("會議提醒")
@@ -1446,6 +1452,60 @@ struct SettingsView: View {
     private static let transferReminderHint =
         "自己轉的那天早上 9 點、銀行可能轉不過去的前一晚、銀行設的最後一次前 14 天；只在這支手機響，不同步。通知不寫帳戶、銀行和金額"
     private static let transferReminderShareHint = "加入共享的這支預設關"
+
+    /// [v25.596 轉組織 v3] 「交接提醒（只這台）」（judge §4.11、§7 v3；拆出來，body 裡只放一個名字）。
+    /// 管 orgmove. 開頭的四種：生效前一天 20:00、生效日 08:15、交接完成日 09:00（還有待分派或還沒決定）、你接的交接事項到期那天 09:00。
+    /// 沒設過＝OrgMoveNotices.isEnabled 照「是不是加入別人的共享」算（加入共享的那支預設關）；
+    /// **只有真的撥了才寫 UserDefaults**（onAppear 把值對回去時 v == isEnabled，guard 擋掉，預設值不會被「凍住」）。
+    /// 不跟「財富提醒」連動（不 .disabled）；關掉＝OrgMoveNoticeCenter 把待發、已送達的 orgmove. 全部拿掉
+    private var orgMoveNoticeToggle: some View {
+        Toggle(isOn: $orgMoveNoticesOn) {
+            Label {
+                orgMoveNoticeLabelText
+            } icon: {
+                Image(systemName: "arrow.triangle.swap")
+                    .foregroundStyle(.orange)
+            }
+        }
+        .onChange(of: orgMoveNoticesOn) { _, v in
+            guard v != OrgMoveNotices.isEnabled else { return }
+            UserDefaults.standard.set(v, forKey: OrgMoveNotices.enabledKey)
+            OrgMoveNoticeCenter.shared.rebuildSoon()
+        }
+        .onAppear {
+            // 加入（或退出）共享之後回來看：沒設過的預設值要跟著變
+            transferShareParticipant = CloudKitManager.shared.isShareParticipant
+            orgMoveNoticesOn = OrgMoveNotices.isEnabled
+        }
+        .onReceive(NotificationCenter.default.publisher(for: CloudKitManager.sharingStateDidChangeNotification)) { _ in
+            // 設定頁開著時加入／退出共享：顯示的值、那一行小字馬上對；值相同時 onChange 的 guard 擋掉、不寫 UserDefaults。
+            // 通知不一定在主執行緒發，放回主執行緒（共享一變資料跟著換，$orgMoves 一動 OrgMoveNoticeCenter 自己會重排）
+            DispatchQueue.main.async {
+                transferShareParticipant = CloudKitManager.shared.isShareParticipant
+                orgMoveNoticesOn = OrgMoveNotices.isEnabled
+            }
+        }
+    }
+
+    /// [v25.596] 「交接提醒（只這台）」的標題＋小字（加入共享的那支多一行，共用 transferReminderShareHint）
+    private var orgMoveNoticeLabelText: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(Self.orgMoveNoticeTitle)
+            Text(Self.orgMoveNoticeHint)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if transferShareParticipant {
+                Text(Self.transferReminderShareHint)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// [v25.596] 字一律單一字串常數，不要在 Text(...) 裡用 + 串接
+    private static let orgMoveNoticeTitle = "交接提醒（只這台）"
+    private static let orgMoveNoticeHint =
+        "交接單生效前一天晚上 8 點、生效那天早上 8:15、交接完成日早上 9 點還有待分派時，和你接的交接事項到期那天；只在這支手機響，不同步。通知不寫名字和部門"
 
     /// 說明一次寫成單一字串常數，不要在 Text(...) 裡用 + 串接
     private static let meetingAlertFootnote =

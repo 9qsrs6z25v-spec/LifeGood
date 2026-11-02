@@ -90,6 +90,11 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
             Task { @MainActor in
                 _ = WidgetLink.apply(WidgetLink.url(for: .wealth(id: id), fromWidget: false), store: AppStores.life)
             }
+        } else if let raw = info[OrgMoveNotices.userInfoKey] as? String {
+            // [v25.596 轉組織 v3] 交接提醒 → 人生 › 職涯 › 部屬總覽；只有一張＝總覽打開那張交接單（找不到就停在總覽）
+            Task { @MainActor in
+                OrgMoveNoticeRouter.shared.open(raw)
+            }
         }
         completionHandler()
     }
@@ -189,6 +194,8 @@ struct LifeGoodApp: App {
                     // 掛好監聽（記帳／理財／人生一改，防抖 3 秒重排）、馬上排一次；第二次呼叫什麼都不做。
                     // 同步呼叫、不 await：授權照 MeetingReminders 的慣例，有要排的才問（WealthReminderCenter 裡）
                     WealthReminderCenter.shared.start(expense: expenseStore, finance: financeStore, life: lifeStore)
+                    // [v25.596 轉組織 v3] 交接提醒（orgmove.；字不寫名字、部門）：掛好監聽（交接單、機台、部屬一改防抖 2 秒）、馬上排一次；第二次呼叫什麼都不做
+                    OrgMoveNoticeCenter.shared.start(life: lifeStore)
                     // [財富 v7] 給網頁版的財富數字（life_wealth_facts_v1：合計、暱稱、後 4 碼、存摺上、要繳、交割、定存到期日；
                     // 沒有完整號碼、有效期限）：掛好監聽（防抖 5 秒）、馬上寫一次；跟上次一樣就不寫。第二次呼叫什麼都不做
                     WealthWebFactsWriter.shared.start(expense: expenseStore, finance: financeStore, life: lifeStore)

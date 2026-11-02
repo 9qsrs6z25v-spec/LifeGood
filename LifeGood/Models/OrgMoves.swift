@@ -327,6 +327,8 @@ struct OrgMove: Codable, Equatable, Identifiable {
         // 要退回這一件：刪這兩行
         if head.before != nil, head.before?.orgInactive == nil { head.before?.orgInactive = a.before?.orgInactive ?? b.before?.orgInactive }
         if head.before != nil, head.before?.orgLeftDate == nil { head.before?.orgLeftDate = a.before?.orgLeftDate ?? b.before?.orgLeftDate }
+        // [v25.596 轉組織 v3] 寫上去的離職日（25.595 以前的 App 存回來會少這個）：哪一份有就補回。要退回這一件：刪這一行
+        if head.before != nil, head.before?.orgSetLeftDate == nil { head.before?.orgSetLeftDate = a.before?.orgSetLeftDate ?? b.before?.orgSetLeftDate }
         return head
     }
 
@@ -563,13 +565,17 @@ struct OrgMoveRestore: Codable, Equatable {
     var orgInactive: Bool?
     /// 套用前組織人員的離職日
     var orgLeftDate: Date?
+    // [v25.596 轉組織 v3] 離職、退休寫上去的那個離職日（v2 adjudicate §8-12：原本〔復原〕〔回到我的部屬〕用「離職日那天＝生效日」認，
+    // 套用到復原之間手機換了時區就認不出來）。第一次套用就定下來（〔現在就交接〕到生效那天才寫也用這個）；復原時離職日還是這一刻＝這張單寫的。
+    // 新欄位 Optional＋decodeIfPresent＋init 預設 nil；舊單、25.595 以前存回來沒有＝照舊比日子。要退回這一件：刪這個欄位與 init／init(from:)／CodingKeys 對應的那幾行
+    var orgSetLeftDate: Date?
 
     init(deptId: UUID? = nil, deptText: String? = nil, plant: String? = nil,
          gradeTitleId: UUID? = nil, jobTitle: String? = nil,
          orgPersonId: UUID? = nil, orgDeptId: UUID? = nil, orgJobTitle: String? = nil,
          orgGradeTitleId: UUID? = nil, createdOrgPerson: Bool? = nil,
          cardId: UUID? = nil, cardDept: String? = nil, cardJobTitle: String? = nil,
-         orgInactive: Bool? = nil, orgLeftDate: Date? = nil) {
+         orgInactive: Bool? = nil, orgLeftDate: Date? = nil, orgSetLeftDate: Date? = nil) {
         self.deptId = deptId
         self.deptText = deptText
         self.plant = plant
@@ -585,6 +591,7 @@ struct OrgMoveRestore: Codable, Equatable {
         self.cardJobTitle = cardJobTitle
         self.orgInactive = orgInactive
         self.orgLeftDate = orgLeftDate
+        self.orgSetLeftDate = orgSetLeftDate
     }
 
     init(from decoder: Decoder) throws {
@@ -604,12 +611,14 @@ struct OrgMoveRestore: Codable, Equatable {
         cardJobTitle = try? c.decodeIfPresent(String.self, forKey: .cardJobTitle)
         orgInactive = try? c.decodeIfPresent(Bool.self, forKey: .orgInactive)
         orgLeftDate = try? c.decodeIfPresent(Date.self, forKey: .orgLeftDate)
+        orgSetLeftDate = try? c.decodeIfPresent(Date.self, forKey: .orgSetLeftDate)
     }
 
     private enum CodingKeys: String, CodingKey {
         case deptId, deptText, plant, gradeTitleId, jobTitle, orgPersonId, orgDeptId, orgJobTitle
         case orgGradeTitleId, createdOrgPerson, cardId, cardDept, cardJobTitle
         case orgInactive, orgLeftDate
+        case orgSetLeftDate
     }
 }
 

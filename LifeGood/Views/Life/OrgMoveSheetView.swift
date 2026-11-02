@@ -83,6 +83,8 @@ struct OrgMoveSheetView: View {
     @State private var birthdayNote: String?
     /// [v25.593 轉組織 v2] 自己加的一項〔交出去…〕挑人頁（不在部屬名單的人、我）
     @State private var handOut: OrgMoveHandOutRequest?
+    /// [v25.596 轉組織 v3]〔更新提醒事項（N 件）〕按過的那幾張（件數存在 UserDefaults，改了畫面不會自己重畫：用這個把卡收起來）
+    @State private var remindersLaterDone: Set<UUID> = []
 
     private static let resolvePrefix = "resolve:"
     private static let reassignPrefix = "reassign:"
@@ -156,6 +158,8 @@ struct OrgMoveSheetView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
                     headerCard(s)
+                    // [v25.596 轉組織 v3] 自動套用時沒動的 Apple 提醒事項（存這台；沒有就整張不出現）
+                    remindersLaterCard(s)
                     // [v25.593 轉組織 v2] 回到我的部屬那一張沒有分組（lines 空的）
                     if s.isBack {
                         backNoteCard
@@ -194,6 +198,40 @@ struct OrgMoveSheetView: View {
             .padding(14)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    /// [v25.596 轉組織 v3] 生效那天自動改部門時先沒動的 Apple 提醒事項（OrgMoveReminderLater，存這台、照交接單 id）：
+    /// App 關掉重開也還在；按〔更新提醒事項（N 件）〕＝syncOrgMoveReminders（不用訂閱、不用確認框，同「今天生效」那顆），按完卡收起來。
+    /// 0 件（沒有、復原了、取消了、更新過了）整張不出現、不佔位。要退回這一件：刪掉這個函式、remindersLaterDone 與 page 裡那一行
+    @ViewBuilder
+    private func remindersLaterCard(_ s: OMSheetSnapshot) -> some View {
+        let n = remindersLaterDone.contains(s.moveId) ? 0 : lifeStore.orgMoveRemindersLaterCount(s.moveId)
+        if n > 0 {
+            remindersLaterBody(s.moveId, count: n)
+        }
+    }
+
+    private func remindersLaterBody(_ id: UUID, count n: Int) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Label("Apple 提醒事項還有 \(n) 件沒更新（生效那天自動改部門時先沒動）", systemImage: "checklist")
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button { syncRemindersLater(id) } label: {
+                Label("更新提醒事項（\(n) 件）", systemImage: "checklist")
+                    .font(.subheadline.weight(.semibold))
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 18, style: .continuous))
+    }
+
+    private func syncRemindersLater(_ id: UUID) {
+        _ = lifeStore.syncOrgMoveReminders(id)
+        remindersLaterDone.insert(id)
     }
 
     /// [v25.592 轉組織 v1b] 排好的取消了＝「這張交接單取消了」
@@ -1749,6 +1787,9 @@ private enum OMSheetBuild {
     /// 班（要逐天看撞班：到班表改，或〔拿回來〕再重交）、〔最後一場〕、〔照舊〕的會議不給（LifeStore 也直接 return）
     static func canReassign(_ line: OrgMoveLine, status: OrgMoveLineStatus, map: OrgMoveHolderMap, now: Date) -> Bool {
         guard reassignKinds.contains(status.kind), !line.isLocked else { return false }
+        // [v25.596 轉組織 v3]〔交出去〕那一列 v3 起也會是 ⚠ backOnPerson（東西還在原人身上）：只給〔再交一次〕，不給〔改交給…〕
+        //（交出去的對象不在部屬名單；同 v2 handedOut／mine 不給）。要退回這一件：刪這一行
+        if line.lineAction == .handOut { return false }
         switch line.lineKind {
         case .some(.task), .some(.equipment):
             return true

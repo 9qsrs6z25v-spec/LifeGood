@@ -1324,15 +1324,18 @@ enum OrgMovePlan {
                                    managerId: nil, managerName: nil)
         let changes = deptChanges(draft, world: world)
         let toDept: UUID? = changes ? draft.toDeptId : sub?.departmentId
-        let toGrade: UUID? = draft.toGradeTitleId ?? sub?.gradeTitleId
-        let plant = draft.toPlant.trimmingCharacters(in: .whitespaces)
+        // [v25.596 轉組織 v3] 離職、退休沒有「到」那一邊的廠區、職稱、新主管（v2 adjudicate §4-2-2）：以前只有精靈的 clearPlace 清，
+        // 這裡再擋一次（以後別處組離職的單也不會帶著換廠區、換職稱去套用）。要退回這一件：刪 leave 與下面三處 `leave ? … :`
+        let leave = draft.kind.isLeaveCompany
+        let toGrade: UUID? = leave ? sub?.gradeTitleId : (draft.toGradeTitleId ?? sub?.gradeTitleId)
+        let plant = leave ? "" : draft.toPlant.trimmingCharacters(in: .whitespaces)
         let toSide = OrgMoveSide(deptId: toDept,
                                  deptLabel: changes ? world.deptLabel(toDept) : fromSide.deptLabel,
                                  plant: plant.isEmpty ? sub?.plantArea : plant,
                                  gradeTitleId: toGrade,
                                  titleLabel: world.titleLabel(gradeTitleId: toGrade, jobTitle: sub?.jobTitle ?? ""),
-                                 managerId: draft.toManagerId,
-                                 managerName: draft.toManagerId.map { world.orgPersonName($0) })
+                                 managerId: leave ? nil : draft.toManagerId,
+                                 managerName: leave ? nil : draft.toManagerId.map { world.orgPersonName($0) })
         var lines = draft.lines
         // [v25.591 轉組織 v1a-2] 會議〔交給…〕：新會議的 id、名稱定下來（沒改過名稱＝原本的拿掉人名）
         for i in lines.indices where lines[i].kind == OrgMoveLineKind.meeting.rawValue {
@@ -1749,7 +1752,8 @@ enum OrgMovePlan {
         if line.isCustom { return customStatus(line, move: move) }
         if move.isPlanned { return plannedStatus(line, move: move) }
         // [v25.593 轉組織 v2]〔交出去〕：→ 交出去給 黃冠宇／我接的（○ 還沒收掉、✓ 收掉了）（OrgMoveOut.swift）。要退回這一件：刪這一行
-        if line.lineAction == .handOut { return handOutStatus(line, move: move) }
+        // [v25.596 轉組織 v3] 多傳 map：標成做完、東西卻還在原人身上＝⚠〔再交一次〕。要退回這一件：拿掉 `, map: map`
+        if line.lineAction == .handOut { return handOutStatus(line, move: move, map: map) }
         // [v25.591 轉組織 v1a-2] 會議、議程、班、兼任（v1a-1 存的鎖著的兼任列照舊走下面）
         if line.lineLock != .sideRole, let more = moreStatus(line, in: move, map: map, now: now) {
             return more

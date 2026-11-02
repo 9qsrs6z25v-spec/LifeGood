@@ -135,6 +135,10 @@ enum ReminderCenter {
                          + jobs.filter { $0.style == .alarm })
             .sorted { $0.fireDate < $1.fireDate }
         await MeetingAlarmScheduler.shared.rebuild(alarmJobs)
+
+        // 4) [v25.596 轉組織 v3] 交接提醒（orgmove. 前綴；OrgMoveNotices.swift）跟著一起排：啟動、回前景、會議一改都會走到這裡。
+        // 它自己讀交接單（不經過這裡的參數）、跟上次一樣就不動系統；還沒 start（LifeGoodApp）就什麼都不做。要退回這一件：刪這一行
+        OrgMoveNoticeCenter.shared.rebuildSoon()
     }
 
     /// 「這一天在旅遊期間內嗎」。設定關掉、或沒有任何行程時一律回 false。

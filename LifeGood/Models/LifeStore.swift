@@ -2009,14 +2009,17 @@ class LifeStore: ObservableObject {
     /// [v25.592 轉組織 v1b] 到期自動套用（〔11/1 一起做〕打開 App 自動做）時不碰提醒事項（judge §3.5、風險 #5）：
     /// 那一個批次收集的先不送（applyDueOrgMoves(auto: true) 設、做完還原）
     private var suppressReminderWork = false
-    /// [v25.592 轉組織 v1b] 自動套用時收回的分身、不要了的那幾則提醒事項 id（這一次打開 App 期間記著；「今天生效」〔更新提醒事項〕才刪）
-    private var deferredReminderDeletes: [String] = []
+    // [v25.596 轉組織 v3] 自動套用時收回的分身、不要了的那幾則提醒事項 id 原本只記在記憶體（deferredReminderDeletes；App 關掉就刪不掉了）。
+    // 改成照交接單 id 存在這台（OrgMoveReminderLater，OrgMoveNotices.swift）：applyDueOrgMoves(auto: true) 每一張各記各的，
+    // 「今天生效」或交接單頁〔更新提醒事項〕（syncOrgMoveReminders）取走。要退回這一件：把這個註解換回原本的 deferredReminderDeletes，
+    // flushReminderWork、applyDueOrgMoves、syncOrgMoveReminders 三處照註解改回
 
     private func flushReminderWork() {
         guard !pendingReminderDeletes.isEmpty || !pendingReminderUpserts.isEmpty else { return }
         // [v25.592 轉組織 v1b] 自動套用：刪的先記著、改的不送（syncOrgMoveReminders 照單重算）。要退回這一件：刪這個 if
+        // [v25.596 轉組織 v3] 刪的已經在 applyDueOrgMoves 照每一張存進 OrgMoveReminderLater（這台），這裡只清掉不送。
+        // 要退回這一件：加回 `deferredReminderDeletes.append(contentsOf: pendingReminderDeletes)`
         if suppressReminderWork {
-            deferredReminderDeletes.append(contentsOf: pendingReminderDeletes)
             pendingReminderDeletes = []
             pendingReminderUpserts = []
             return
@@ -3081,8 +3084,12 @@ class LifeStore: ObservableObject {
         batched {
             if OrgMoveKind(rawValue: a.kind)?.isLeaveCompany == true,
                let pi = orgPeople.firstIndex(where: { $0.linkedSubordinateId == personId }), orgPeople[pi].isInactive {
-                let leftKey = orgPeople[pi].leftDate.map { OrgMovePlan.dayKey($0) }
-                if leftKey == nil || leftKey == a.effectiveKey {
+                // [v25.596 轉組織 v3] 離職日是不是那張單寫的：比寫上去的那一刻、沒有才比日子（v2 adjudicate §8-12）。
+                // 要退回這一件：改回 `let leftKey = …dayKey…; if leftKey == nil || leftKey == a.effectiveKey {`
+                let left = orgPeople[pi].leftDate
+                let ours = orgMoves.move(a.moveId).map { OrgMovePlan.orgLeftDateIsOurs(left, move: $0) }
+                    ?? (left.map { OrgMovePlan.dayKey($0) } == a.effectiveKey)
+                if left == nil || ours {
                     orgPeople[pi].isInactive = false
                     orgPeople[pi].leftDate = nil
                 }
@@ -4462,6 +4469,11 @@ class LifeStore: ObservableObject {
         let pid = move.personId
         guard subordinates.contains(where: { $0.id == pid }) else { return false }
         if move.before == nil { move.before = orgMoveRestoreSnapshot(pid) }
+        // [v25.596 轉組織 v3] 離職、退休要寫上去的離職日第一次就定下來（〔現在就交接〕生效那天才寫也用這一刻；復原時拿它比，
+        // 中間換了時區也認得出是這張單寫的：v2 adjudicate §8-12）。套用前已經是已離職的不寫（不會去動）。要退回這一件：刪這個 if
+        if move.isLeaveCompany, move.before != nil, move.before?.orgSetLeftDate == nil, move.before?.orgInactive != true {
+            move.before?.orgSetLeftDate = OrgMovePlan.date(fromKey: move.effectiveKey)
+        }
         var lines = move.allLines
         var meetingsChanged = false
         if phase != .org {
@@ -4711,7 +4723,8 @@ class LifeStore: ObservableObject {
         if move.isLeaveCompany, let pi = orgPeople.firstIndex(where: { $0.linkedSubordinateId == pid }),
            !orgPeople[pi].isInactive {
             orgPeople[pi].isInactive = true
-            orgPeople[pi].leftDate = OrgMovePlan.date(fromKey: move.effectiveKey)
+            // [v25.596 轉組織 v3] 用第一次套用時定下來的那一刻（沒有＝舊單：照生效日 00:00）。要退回這一件：改回 `OrgMovePlan.date(fromKey: move.effectiveKey)`
+            orgPeople[pi].leftDate = move.before?.orgSetLeftDate ?? OrgMovePlan.date(fromKey: move.effectiveKey)
         }
         if let p = move.to.plant, p != (move.from.plant ?? ""), subordinates[si].plantArea != p {
             subordinates[si].plantArea = p
@@ -4940,9 +4953,11 @@ class LifeStore: ObservableObject {
         let deptChanged = move.changesDept
         // [v25.593 轉組織 v2] 離職、退休：組織人員的「已離職」照套用前的樣子放回（離職日還是這張單的生效日才放；你另外改過的不動）。
         // 舊單、25.592 存回來少了 orgInactive＝當 false。要退回這一件：刪這個 if
+        // [v25.596 轉組織 v3] 離職日是不是這張單寫的：比寫上去的那一刻（中間換了時區也認得；v2 adjudicate §8-12）、沒有才比日子。
+        // 要退回這一件：最後一個條件改回 `orgPeople[pi].leftDate.map({ OrgMovePlan.dayKey($0) }) == move.effectiveKey`
         if move.isLeaveCompany, let pi = orgPeople.firstIndex(where: { $0.linkedSubordinateId == pid }),
            orgPeople[pi].isInactive,
-           orgPeople[pi].leftDate.map({ OrgMovePlan.dayKey($0) }) == move.effectiveKey {
+           OrgMovePlan.orgLeftDateIsOurs(orgPeople[pi].leftDate, move: move) {
             orgPeople[pi].isInactive = b.orgInactive ?? false
             orgPeople[pi].leftDate = b.orgLeftDate
         }
@@ -5139,6 +5154,17 @@ class LifeStore: ObservableObject {
             if changed { rebuildMeetingReminders() }
             return
         }
+        // [v25.596 轉組織 v3]〔交出去〕那一列 ⚠「這項還在王小明身上」〔再交一次〕（v2 adjudicate §4-2-1：25.592 的 iPad 不認得〔交出去〕，
+        // 生效那天先打開會把那一列標成做完、東西卻留在原人身上；或還沒更新的 iPad 存回來）：再從原人拿掉一次。
+        // 要退回這一件：刪這個 if 與 redoOrgMoveHandOutBody
+        if l.lineAction == .handOut, !l.isCustom {
+            batched {
+                guard redoOrgMoveHandOutBody(&move, lineId: lineId, now: now) else { return }
+                move.updatedAt = now
+                orgMoves.upsert(move)
+            }
+            return
+        }
         guard let to = OrgMovePlan.receiver(l, in: move).id, to != pid else { return }
         var meetingsChanged = false
         batched {
@@ -5197,6 +5223,53 @@ class LifeStore: ObservableObject {
             orgMoves.upsert(move)
         }
         if meetingsChanged { rebuildMeetingReminders() }
+    }
+
+    /// [v25.596 轉組織 v3]〔交出去〕那一列再做一次（同套用的〔交出去〕：從原人拿掉、原樣存進交接單〔已經存過的不蓋〕、提醒事項刪掉；
+    /// 交接那一刻已經逾期的照樣記一筆扣分留原人〔已經記過的不重記〕）。還沒做完、還在原人身上的才做。呼叫端負責 batched。
+    /// 拿掉之後 OrgMoveIndex.droppedItemIds 照舊收這一列（合併匯入舊備份不讓它長回來）
+    private func redoOrgMoveHandOutBody(_ move: inout OrgMove, lineId: UUID, now: Date) -> Bool {
+        guard let l = move.line(lineId), l.lineAction == .handOut, let ref = l.refId,
+              let si = subordinates.firstIndex(where: { $0.id == move.personId }) else { return false }
+        let handed: Date = move.handedAt ?? move.appliedAt ?? now
+        let pid = move.personId
+        let alreadyLogged = orgHandoffs.all.contains { $0.itemId == ref && $0.fromId == pid && $0.via == "orgMove" }
+        var data: Data?
+        var overdueKey: String?
+        var title = l.title
+        var kindWord = "task"
+        if l.kind == OrgMoveLineKind.report.rawValue {
+            guard let ri = subordinates[si].weeklyReports.firstIndex(where: { $0.id == ref }),
+                  !subordinates[si].weeklyReports[ri].isCompleted else { return false }
+            let removed = subordinates[si].weeklyReports.remove(at: ri)
+            data = try? JSONEncoder().encode(removed)
+            if removed.date < handed { overdueKey = OrgMovePlan.dayKey(removed.date) }
+            title = OrgMovePlan.reportTitle(removed)
+            kindWord = "report"
+        } else if l.kind == OrgMoveLineKind.task.rawValue || l.kind == OrgMoveLineKind.alarmTask.rawValue {
+            guard let ti = subordinates[si].tasks.firstIndex(where: { $0.id == ref }),
+                  !subordinates[si].tasks[ti].isCompleted else { return false }
+            let removed = subordinates[si].tasks.remove(at: ti)
+            data = try? JSONEncoder().encode(removed)
+            if let d = removed.dueDate, d < handed { overdueKey = OrgMovePlan.dayKey(d) }
+            if let rid = removed.reminderId { pendingReminderDeletes.append(rid) }
+            title = OrgMovePlan.taskTitle(removed)
+        } else {
+            return false
+        }
+        if let k = overdueKey, !alreadyLogged {
+            orgHandoffs.append(OrgHandoff(
+                kind: kindWord, itemId: ref, fromId: pid, fromName: subordinates[si].name,
+                toId: nil, toName: nil, title: title,
+                dueKey: k, newDueKey: nil, wasOverdue: true, via: "orgMove", handedAt: handed))
+        }
+        move.updateLine(lineId) { x in
+            if x.removedJSON == nil { x.removedJSON = data }
+            if overdueKey != nil { x.wasOverdue = true }
+            x.state = OrgMoveLineState.done.rawValue
+            x.updatedAt = now
+        }
+        return true
     }
 
     /// 「組織」那一列 ⚠〔再改一次〕（不用訂閱）：部門、廠區、職稱、組織人員、名片、管理人員有一格又回到「從」→ 同一支套用的組織那段再做一次
@@ -5390,8 +5463,16 @@ class LifeStore: ObservableObject {
         if auto { suppressReminderWork = true }
         batched {
             for m in due {
+                // [v25.596 轉組織 v3] 這一張收回的分身、不要了的那幾則提醒事項 id（批次裡 pendingReminderDeletes 只會變長）
+                let mark = pendingReminderDeletes.count
                 if let r = applyDueOrgMoveBody(m.id, now: now, auto: auto, meetingsChanged: &meetingsChanged) {
                     results.append(r)
+                    // [v25.596 轉組織 v3] 自動套用沒動的 Apple 提醒事項存在這台（App 關掉重開，交接單頁照樣〔更新提醒事項〕）。
+                    // 要退回這一件：刪這三行
+                    let added: [String] = pendingReminderDeletes.count > mark ? Array(pendingReminderDeletes[mark...]) : []
+                    if auto && r.applied && (!added.isEmpty || r.reminderCount > 0) {
+                        OrgMoveReminderLater.add(m.id, deletes: added, count: r.reminderCount, now: now)
+                    }
                 }
             }
         }
@@ -5449,7 +5530,10 @@ class LifeStore: ObservableObject {
             // 實際只動 3 則。要退回這一件：拿掉 `, !t.isCompleted`
             guard let t = holder.tasks.first(where: { $0.id == tid }), t.reminderId != nil, !t.isCompleted else { continue }
             let a = OrgMovePlan.resolved(l, in: lines).action
-            if a == .give || a == .drop || a == .closeNow { n += 1 }
+            // [v25.596 轉組織 v3 驗證]〔交出去〕（給不在部屬名單的人、給我）自動套用時那則提醒事項也先沒刪（記在 OrgMoveReminderLater）：
+            // 一起算，不然調出那張「更新提醒事項（1 件）」按了其實動 3 則；只有交出去的有提醒事項時「今天生效」連那顆都不出現。
+            // 要退回這一件：拿掉 `|| a == .handOut`
+            if a == .give || a == .drop || a == .closeNow || a == .handOut { n += 1 }
         }
         return n
     }
@@ -5488,13 +5572,23 @@ class LifeStore: ObservableObject {
                 continue
             }
         }
-        if !deferredReminderDeletes.isEmpty {
-            n += deferredReminderDeletes.count
-            pendingReminderDeletes.append(contentsOf: deferredReminderDeletes)
-            deferredReminderDeletes = []
+        // [v25.596 轉組織 v3] 自動套用時這一張收回的分身、不要了的那幾則（存在這台；App 關掉重開也還在）。
+        // 要退回這一件：換回 `if !deferredReminderDeletes.isEmpty { n += …count; pendingReminderDeletes.append(contentsOf: …); … = [] }`
+        if let later = OrgMoveReminderLater.entry(moveId) {
+            n += later.deletes.count
+            pendingReminderDeletes.append(contentsOf: later.deletes)
+            OrgMoveReminderLater.remove(moveId)
         }
         flushReminderWork()
         return n
+    }
+
+    /// [v25.596 轉組織 v3] 這一張自動套用時沒動、還沒〔更新提醒事項〕的 Apple 提醒事項件數（只這台；0＝沒有）。
+    /// 交接單頁「Apple 提醒事項還有 N 件沒更新」〔更新提醒事項〕用（按了叫 syncOrgMoveReminders）。復原了、刪了的單＝0
+    func orgMoveRemindersLaterCount(_ moveId: UUID) -> Int {
+        guard let move = orgMoves.move(moveId), !move.isUndone, move.deletedAt == nil,
+              let e = OrgMoveReminderLater.entry(moveId) else { return 0 }
+        return e.count > 0 ? e.count : e.deletes.count
     }
 
     /// 〔取消這張單〕（生效前；不用訂閱，judge §6）。排好的（什麼都沒做）：state "cancelled"＋墓碑（live 看不到）。
@@ -7997,6 +8091,7 @@ class LifeStore: ObservableObject {
         wealthTransfers = WealthTransferBook()
         orgHandoffs = OrgHandoffBook()   // [v25.589] 轉組織 v0b
         orgMoves = OrgMoveBook()         // [v25.590] 轉組織 v1a-1（「清除全部資料」例外：交接單平常不給刪）
+        OrgMoveReminderLater.clearAll()  // [v25.596] 轉組織 v3：自動套用時沒動的提醒事項（只在這台）
         companySites.removeAll()
         // 行程的照片檔也要一起清，不然會留下沒人指向的孤兒檔被雲端一直重傳
         for plan in tripPlans {

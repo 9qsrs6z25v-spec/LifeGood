@@ -268,6 +268,8 @@ struct SubordinateOverviewView: View {
             .lateCompletionConfirm($lateRequest)
             // [v5] 部屬今天小工具：點任務列開那件任務的卡片、點生日開生日名單
             .onDeepLinkTeam(openTask: { openPendingTask() }, openBirthdays: { openPendingBirthdays() })
+            // [v25.596 轉組織 v3] 點交接提醒（只有一張）：打開那張交接單（找不到就停在總覽）
+            .onOrgMoveNotice { id in openNoticeMove(id) }
             .sheet(item: $editTarget) { target in
                 // 點項目先顯示預覽卡片（右上角「編輯」才進入編輯）
                 SubordinateItemCard(ref: target.itemRef)
@@ -327,6 +329,31 @@ struct SubordinateOverviewView: View {
     /// [v5] 生日名單（看板蛋糕鈕同一個 sheet）
     private func openPendingBirthdays() {
         if DeepLinkRouter.shared.takeBirthdays() { showBirthdaySheet = true }
+    }
+
+    /// [v25.596 轉組織 v3] 點交接提醒（只有一張）：那張還在才開（同「待分派」卡點標題那一個 orgMoveSheet）；不在了就停在總覽。
+    /// 已經開著別張交接單：先關、下一個 runloop 再開（同一個 sheet(item:) 直接換值不一定會重開）；開著同一張就不動。
+    /// 其他 sheet 開著就不管（SwiftUI 一次一張；brief §10-2）
+    private func openNoticeMove(_ id: UUID) {
+        guard let m = lifeStore.orgMoves.move(id), m.deletedAt == nil else { return }
+        // [v25.596 轉組織 v3 審查] 別的 sheet 開著時連 orgMoveSheet 都不設：設了也開不起來，留下一個沒顯示的值，
+        // 關掉那張再點同一張時會被下面「開著同一張就不動」擋掉。要退回這一件：刪這一行與 otherOverviewSheetOpen
+        guard !otherOverviewSheetOpen else { return }
+        let req = OrgMoveSheetRequest(moveId: m.id)
+        if let cur = orgMoveSheet {
+            guard cur.moveId != m.id else { return }
+            orgMoveSheet = nil
+            DispatchQueue.main.async { orgMoveSheet = req }
+        } else {
+            orgMoveSheet = req
+        }
+    }
+
+    /// [v25.596 轉組織 v3 審查] 部屬總覽上除了交接單以外的 sheet／確認框有沒有開著（點交接提醒時用；brief §10-2）
+    private var otherOverviewSheetOpen: Bool {
+        if editTarget != nil || sessionEdit != nil || teamExportRequest != nil { return true }
+        if addPersonalKind != nil || subAddKind != nil || lateRequest != nil { return true }
+        return showBirthdaySheet || showPerformanceSheet
     }
 
     /// 今天或明天是否有人生日（部屬＋公司組織人員，看板蛋糕鈕亮燈判斷）

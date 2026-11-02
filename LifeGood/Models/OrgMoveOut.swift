@@ -419,7 +419,11 @@ extension OrgMovePlan {
 
     /// 〔交出去〕那一列：→「交出去給 黃冠宇（不在部屬名單）」；給我＝○「我接的・還沒收掉」／✓「11/3 收掉了（我接的）」；
     /// 自己加的一項交出去：○「交出去給 黃冠宇・還沒交」／✓「11/3 已交給 黃冠宇」
-    static func handOutStatus(_ line: OrgMoveLine, move: OrgMove) -> OrgMoveLineStatus {
+    /// [v25.596 轉組織 v3] map（交接單頁、提示列傳）：這一列標成做完了、東西卻還在原人身上（沒做完）＝⚠〔再交一次〕
+    ///（v2 adjudicate §4-2-1：25.592 的 iPad 不認得〔交出去〕，生效那天先打開只標做完、沒拿掉；或還沒更新的 iPad 存回來）。
+    /// nil（其他呼叫端）＝照舊不查。要退回這一件：刪 map 參數與下面那個 if
+    static func handOutStatus(_ line: OrgMoveLine, move: OrgMove, map: OrgMoveHolderMap? = nil) -> OrgMoveLineStatus {
+        if let map, let s = handOutStillOnPerson(line, move: move, map: map) { return s }
         guard let t = handOutTarget(line) else {
             let person = move.personName.isEmpty ? "這位同仁" : move.personName
             return OrgMoveLineStatus(kind: .follow, mark: "・", text: "跟著\(person)", holderId: move.personId, fix: nil, fixLabel: nil)
@@ -441,6 +445,35 @@ extension OrgMovePlan {
         }
         return OrgMoveLineStatus(kind: .handedOut, mark: "→", text: "交出去給 \(t.name)（不在部屬名單）",
                                  holderId: nil, fix: nil, fixLabel: nil)
+    }
+
+    /// [v25.596 轉組織 v3]〔交出去〕的待辦、週報標成做完了，卻還在原人身上、沒做完：⚠（自己加的一項只記在單上，不查）
+    static func handOutStillOnPerson(_ line: OrgMoveLine, move: OrgMove, map: OrgMoveHolderMap) -> OrgMoveLineStatus? {
+        guard !line.isCustom, line.state == OrgMoveLineState.done.rawValue, let ref = line.refId else { return nil }
+        let pid = move.personId
+        let open: Bool
+        if line.kind == OrgMoveLineKind.report.rawValue {
+            open = (map.reports[ref] ?? []).contains { $0.holder == pid && !$0.report.isCompleted }
+        } else if line.kind == OrgMoveLineKind.task.rawValue || line.kind == OrgMoveLineKind.alarmTask.rawValue {
+            open = (map.tasks[ref] ?? []).contains { $0.holder == pid && !$0.task.isCompleted }
+        } else {
+            open = false
+        }
+        guard open else { return nil }
+        let person = move.personName.isEmpty ? "這位同仁" : move.personName
+        let text = line.removedJSON == nil
+            ? "這項還在\(person)身上（可能是還沒更新的 iPad 先做的）"
+            : "這項又回到\(person)身上（可能是還沒更新的 iPad 存回來的）"
+        return OrgMoveLineStatus(kind: .backOnPerson, mark: "⚠", text: text, holderId: pid, fix: .redo, fixLabel: "再交一次")
+    }
+
+    /// [v25.596 轉組織 v3] 組織人員現在的離職日是不是這張離職、退休的單寫的（〔復原〕〔回到我的部屬〕才拿掉「已離職」）：
+    /// 有記寫上去的那一刻（OrgMoveRestore.orgSetLeftDate）就比那一刻（差不到 1 秒；中間換了時區也認得）；沒有（舊單、
+    /// 25.595 以前的 App 存回來）或對不上才照舊比「離職日那天＝生效日」（v2 adjudicate §8-12）
+    static func orgLeftDateIsOurs(_ left: Date?, move: OrgMove) -> Bool {
+        guard let left else { return false }
+        if let set = move.before?.orgSetLeftDate, abs(left.timeIntervalSince(set)) < 1 { return true }
+        return dayKey(left) == move.effectiveKey
     }
 
     /// 「組織」那一列（調出、離職、退休、回到我的部屬；部門、廠區、職稱、管理人員已經對過了才走到這裡）
