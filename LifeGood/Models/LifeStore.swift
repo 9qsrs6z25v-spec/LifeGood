@@ -3146,6 +3146,378 @@ class LifeStore: ObservableObject {
         orgMoves.upsert(move)
     }
 
+    // MARK: - [v25.597 轉組織 v4] 暫時離開：回來那天、改回來那天（orgmove/build/v4/brief.md §2-3；OrgMoveTemp.swift）
+
+    /// 回來那天〔還給本人〕（giveBack: true）／〔留給代理人〕（false）。不用訂閱（同〔拿回來〕：把交出去的收回來）。
+    /// 還給本人＝〔代理〕的那幾列一列一列〔拿回來〕（還在代理人身上、還沒做完的才搬回；做完的、被你改給別人的不動；
+    /// 機台還是代理人負責才換回，它的警報任務一起回）＋管理人員代理人換回這位同仁。留給代理人＝什麼都不搬，只記下來。
+    /// 一次存檔。回傳搬回來的件數（留給代理人＝0）
+    @discardableResult
+    func returnOrgMoveTemp(_ moveId: UUID, giveBack: Bool, now: Date = Date()) -> Int {
+        guard var move = orgMoves.move(moveId), move.isTemp, move.wasApplied, !move.isUndone,
+              move.deletedAt == nil, move.returnedAt == nil else { return 0 }
+        var meetingsChanged = false
+        var n = 0
+        batched {
+            if giveBack {
+                let ids = OrgMovePlan.returnLineIds(move)
+                let undoneBefore = Set(move.allLines.filter { $0.state == OrgMoveLineState.undone.rawValue }.map(\.id))
+                meetingsChanged = undoOrgMoveBody(&move, lineIds: ids, now: now)
+                returnOrgMoveManagerLines(&move, now: now)
+                n = move.allLines.filter { l in
+                    ids.contains(l.id) && l.state == OrgMoveLineState.undone.rawValue && !undoneBefore.contains(l.id)
+                        && l.lineAction != .withEquipment && l.kind != OrgMoveLineKind.alarmTask.rawValue
+                }.count
+            }
+            move.returnedAt = now
+            move.returnChoice = (giveBack ? OrgMoveReturnChoice.back : OrgMoveReturnChoice.keep).rawValue
+            move.updatedAt = now
+            orgMoves.upsert(move)
+        }
+        if meetingsChanged { rebuildMeetingReminders() }
+        return n
+    }
+
+    /// 管理人員〔代理人…（回來換回）〕：代理人拿掉（套用時真的加進去的那位才拿）、這位同仁放回原本的位置。呼叫端負責 batched
+    private func returnOrgMoveManagerLines(_ move: inout OrgMove, now: Date) {
+        let pid = move.personId
+        guard let opId = orgPeople.first(where: { $0.linkedSubordinateId == pid })?.id else { return }
+        var lines = move.allLines
+        for i in lines.indices where lines[i].kind == OrgMoveLineKind.manager.rawValue && lines[i].proxy == true
+            && lines[i].lineAction == .replace && lines[i].state == OrgMoveLineState.done.rawValue {
+            guard let did = lines[i].refId, let di = departments.firstIndex(where: { $0.id == did }) else { continue }
+            if let added = lines[i].itemId, let k = departments[di].managerIds.firstIndex(of: added) {
+                departments[di].managerIds.remove(at: k)
+            }
+            if !departments[di].managerIds.contains(opId) {
+                let at = min(lines[i].slot ?? departments[di].managerIds.count, departments[di].managerIds.count)
+                departments[di].managerIds.insert(opId, at: at)
+            }
+            lines[i].state = OrgMoveLineState.undone.rawValue
+            lines[i].updatedAt = now
+        }
+        move.lines = lines
+    }
+
+    /// 〔改回來那天〕（要訂閱：同改生效日）。要比生效日晚；回來那天按過〔還給本人〕〔留給代理人〕的不能改。
+    /// 暫停的會議照新的日子重排（今天以後的：提早回來＝之後的場次放回；延後＝多取消幾場）。班不重排（已知限制）。一次存檔
+    func setOrgMoveReturnKey(_ moveId: UUID, returnKey: String, now: Date = Date()) {
+        guard var move = orgMoves.move(moveId), move.isTemp, !move.isUndone, move.deletedAt == nil,
+              move.returnedAt == nil, returnKey > move.effectiveKey, returnKey != move.returnKey,
+              OrgMovePlan.date(fromKey: returnKey) != nil else { return }
+        var meetingsChanged = false
+        let today = OrgMovePlan.dayKey(now)
+        batched {
+            if move.wasApplied, let pi = subIndex(move.personId) {
+                let from = max(today, OrgMovePlan.cutKey(move, now: now))
+                var lines = move.allLines
+                for i in lines.indices where lines[i].kind == OrgMoveLineKind.meeting.rawValue
+                    && lines[i].lineAction == .pause && lines[i].state == OrgMoveLineState.done.rawValue {
+                    guard let mid = lines[i].refId,
+                          let mi = subordinates[pi].meetings.firstIndex(where: { $0.id == mid }) else { continue }
+                    var m = subordinates[pi].meetings[mi]
+                    let prior = OrgMovePauseUndo.decode(lines[i].removedJSON) ?? OrgMovePauseUndo()
+                    let left = orgMoveUnpauseBody(&m, undo: prior, fromKey: from)
+                    let again = orgMovePauseBody(&m, fromKey: from, untilKey: returnKey, prior: left)
+                    subordinates[pi].meetings[mi] = m
+                    lines[i].removedJSON = again.encoded()
+                    lines[i].updatedAt = now
+                    meetingsChanged = true
+                }
+                move.lines = lines
+            }
+            move.returnKey = returnKey
+            move.updatedAt = now
+            orgMoves.upsert(move)
+        }
+        if meetingsChanged { rebuildMeetingReminders() }
+    }
+
+    /// 〔暫停到 1/29〕：交接那天（含）～回來那天（不含）還沒取消的場次取消（規則推導的新建一筆取消；原本有覆寫的改成取消）
+    private func applyOrgMovePauseLine(_ line: inout OrgMoveLine, move: OrgMove, person: UUID, now: Date) -> Bool {
+        guard let mid = line.refId, let pi = subIndex(person),
+              let mi = subordinates[pi].meetings.firstIndex(where: { $0.id == mid }),
+              subordinates[pi].meetings[mi].rule != nil, let ret = move.returnKey else {
+            line.state = OrgMoveLineState.skipped.rawValue
+            return false
+        }
+        var m = subordinates[pi].meetings[mi]
+        let undo = orgMovePauseBody(&m, fromKey: OrgMovePlan.cutKey(move, now: now), untilKey: ret,
+                                    prior: OrgMovePauseUndo.decode(line.removedJSON))
+        subordinates[pi].meetings[mi] = m
+        line.removedJSON = undo.encoded()
+        line.state = OrgMoveLineState.done.rawValue
+        return true
+    }
+
+    /// 暫停那一段的場次取消；prior＝之前記的（重做、改回來那天時接著記）
+    private func orgMovePauseBody(_ m: inout SubordinateMeeting, fromKey: String, untilKey: String,
+                                  prior: OrgMovePauseUndo?) -> OrgMovePauseUndo {
+        var created: [UUID] = prior?.createdIds ?? []
+        var flipped: [UUID] = prior?.flippedIds ?? []
+        let firstKey: String = prior?.fromKey ?? fromKey
+        guard let start = OrgMovePlan.date(fromKey: fromKey), let end = OrgMovePlan.date(fromKey: untilKey), start < end else {
+            return OrgMovePauseUndo(createdIds: created, flippedIds: flipped, fromKey: firstKey, untilKey: untilKey)
+        }
+        let sessions = m.expandedOccurrences(from: start, horizon: end)
+        for o in sessions where !o.isCancelled && o.date >= start && o.date < end {
+            if let k = m.occurrences.firstIndex(where: { $0.scheduledDate == o.scheduledDate }) {
+                m.occurrences[k].isCancelled = true
+                let oid = m.occurrences[k].id
+                if !flipped.contains(oid) && !created.contains(oid) { flipped.append(oid) }
+            } else {
+                let n = MeetingOccurrence(scheduledDate: o.scheduledDate, isCancelled: true)
+                created.append(n.id)
+                m.occurrences.append(n)
+            }
+        }
+        return OrgMovePauseUndo(createdIds: created, flippedIds: flipped, fromKey: firstKey, untilKey: untilKey)
+    }
+
+    /// 暫停的場次放回（fromKey 那天以後的；以前的照原本記的）：暫停時新建的空殼拿掉、原本有覆寫的取消拿掉。
+    /// 回傳還留著的那一份（fromKey 以前的那幾場）
+    private func orgMoveUnpauseBody(_ m: inout SubordinateMeeting, undo: OrgMovePauseUndo, fromKey: String) -> OrgMovePauseUndo {
+        let start: Date = OrgMovePlan.date(fromKey: fromKey) ?? Date.distantPast
+        let createdSet = Set(undo.createdIds ?? [])
+        let flippedSet = Set(undo.flippedIds ?? [])
+        var keepCreated: [UUID] = []
+        var keepFlipped: [UUID] = []
+        var out: [MeetingOccurrence] = []
+        for o in m.occurrences {
+            let made = createdSet.contains(o.id)
+            let flip = flippedSet.contains(o.id)
+            guard made || flip else {
+                out.append(o)
+                continue
+            }
+            guard o.effectiveDate >= start, o.isCancelled else {
+                if made { keepCreated.append(o.id) }
+                if flip { keepFlipped.append(o.id) }
+                out.append(o)
+                continue
+            }
+            var back = o
+            back.isCancelled = false
+            if made && !back.isMeaningful { continue }   // 暫停時新建的空殼：拿掉（照規則推導回來）
+            out.append(back)
+        }
+        m.occurrences = out
+        return OrgMovePauseUndo(createdIds: keepCreated, flippedIds: keepFlipped, fromKey: undo.fromKey, untilKey: undo.untilKey)
+    }
+
+    /// 〔暫停到 1/29〕復原（〔復原這次轉組織〕、那一列〔拿回來〕）：今天以後暫停的場次放回
+    private func undoOrgMovePauseLine(_ line: inout OrgMoveLine, person: UUID, now: Date) -> Bool {
+        guard let mid = line.refId, let undo = OrgMovePauseUndo.decode(line.removedJSON), let pi = subIndex(person),
+              let mi = subordinates[pi].meetings.firstIndex(where: { $0.id == mid }) else {
+            line.state = OrgMoveLineState.undone.rawValue
+            return false
+        }
+        var m = subordinates[pi].meetings[mi]
+        let left = orgMoveUnpauseBody(&m, undo: undo, fromKey: OrgMovePlan.dayKey(now))
+        subordinates[pi].meetings[mi] = m
+        line.removedJSON = left.encoded()
+        line.state = OrgMoveLineState.undone.rawValue
+        return true
+    }
+
+    // MARK: - [v25.597 轉組織 v4] 轉進來（judge §3.7；orgmove/build/v4/brief.md §2-3）
+
+    /// 新增部屬時你說〔是，從品保課轉進來〕（要訂閱：同新增部屬）：連到公司組織裡既有的那一位（全公司，不限部門），
+    /// 不另建組織人員和名片（u2 E8）。一次存檔：先設 linkedSubordinateId、再加部屬（syncOrgPersonFor 找到已連結的只更新
+    /// 名字、職稱、部門；部屬沒選部門不蓋）、自動產生的名片部門職稱跟著（你自己改過字的不動）、組織頁標了已離職的拿掉、
+    /// 記一張 kind "in"、personKind "org" 的交接單（state "closed"；接收清單照這張加）。
+    /// 回傳那張單的 id（組織人員找不到、已經連到名單裡的另一位、同 id 的部屬已經在＝nil，什麼都不做）
+    @discardableResult
+    func addSubordinateClaiming(_ item: Subordinate, orgPersonId: UUID, now: Date = Date()) -> UUID? {
+        guard let pi = orgPeople.firstIndex(where: { $0.id == orgPersonId }),
+              !subordinates.contains(where: { $0.id == item.id }) else { return nil }
+        if let linked = orgPeople[pi].linkedSubordinateId, subordinates.contains(where: { $0.id == linked }) { return nil }
+        let p0 = orgPeople[pi]
+        let card0: BusinessCard? = p0.linkedBusinessCardId.flatMap { cid in businessCards.first { $0.id == cid } }
+        let fromLabel: String = p0.departmentId.flatMap { d in departments.first { $0.id == d } }.map { Self.departmentLabel($0) } ?? ""
+        let toLabel: String = item.departmentId.flatMap { d in departments.first { $0.id == d } }.map { Self.departmentLabel($0) }
+            ?? item.department
+        let todayKey = OrgMovePlan.dayKey(now)
+        let moveId = UUID()
+        batched {
+            orgPeople[pi].linkedSubordinateId = item.id
+            if orgPeople[pi].isInactive {
+                orgPeople[pi].isInactive = false
+                orgPeople[pi].leftDate = nil
+            }
+            subordinates.append(item)
+            syncOrgPersonFor(subordinate: item)
+            if let cid = orgPeople[pi].linkedBusinessCardId, let ci = businessCards.firstIndex(where: { $0.id == cid }) {
+                let cur = businessCards[ci].department.trimmingCharacters(in: .whitespaces)
+                let oldShort = OrgMovePlan.labelShort(fromLabel)
+                if item.departmentId != nil, cur.isEmpty || cur == fromLabel || cur == oldShort {
+                    businessCards[ci].department = toLabel
+                }
+                let curTitle = businessCards[ci].jobTitle.trimmingCharacters(in: .whitespaces)
+                let newTitle = orgPeople[pi].jobTitle
+                if curTitle.isEmpty || curTitle == p0.jobTitle.trimmingCharacters(in: .whitespaces) {
+                    businessCards[ci].jobTitle = newTitle
+                }
+            }
+            let name = item.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            let fromSide = OrgMoveSide(deptId: p0.departmentId, deptLabel: fromLabel, plant: nil,
+                                       gradeTitleId: p0.gradeTitleId, titleLabel: p0.jobTitle)
+            let toSide = OrgMoveSide(deptId: item.departmentId, deptLabel: toLabel, plant: item.plantArea,
+                                     gradeTitleId: item.gradeTitleId, titleLabel: item.jobTitle)
+            let before = OrgMoveRestore(orgPersonId: p0.id, orgDeptId: p0.departmentId, orgJobTitle: p0.jobTitle,
+                                        orgGradeTitleId: p0.gradeTitleId, cardId: card0?.id, cardDept: card0?.department,
+                                        cardJobTitle: card0?.jobTitle, orgInactive: p0.isInactive, orgLeftDate: p0.leftDate)
+            let move = OrgMove(id: moveId, personId: item.id, personKind: "org", personName: name,
+                               kind: OrgMoveKind.intake.rawValue, effectiveKey: todayKey,
+                               handoverByKey: OrgMovePlan.handoverByKey(effectiveKey: todayKey),
+                               timing: OrgMoveTiming.now.rawValue, from: fromSide, to: toSide,
+                               state: OrgMoveState.closed.rawValue, handedAt: now, appliedAt: now, closedAt: now,
+                               lines: [], before: before, createdAt: now, updatedAt: now)
+            orgMoves.upsert(move)
+        }
+        return moveId
+    }
+
+    /// 新增部屬時你說〔不是，另一位〕（要訂閱：同新增部屬）：照舊新增，但不認領那幾位同名的組織人員（另建一筆組織人員、名片）
+    func add(_ item: Subordinate, notClaiming: Set<UUID>) {
+        isLoading = true
+        defer { isLoading = false }
+        subordinates.append(item)
+        syncOrgPersonFor(subordinate: item, skipClaim: notClaiming)
+        save()
+    }
+
+    /// 接收清單加幾項（打字、匯入的交接文字；要訂閱：同新增任務）：每一項變成這位同仁的待辦（截止、備註照填；開了 Apple 提醒事項
+    /// 同步就建一則），單上記一列（卡片膠囊「從品保課帶過來」）。equipmentId 有值、那台還沒有負責人＝〔接手〕那台（不另外建待辦）。
+    /// 一次存檔。回傳加了幾項
+    @discardableResult
+    func addOrgMoveIntakeItems(_ moveId: UUID, items: [OrgMoveIntakeItem], now: Date = Date()) -> Int {
+        guard var move = orgMoves.move(moveId), move.isIntake, let si = subIndex(move.personId) else { return 0 }
+        let pid = move.personId
+        var n = 0
+        batched {
+            var lines = move.allLines
+            for it in items {
+                let title = it.title.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !title.isEmpty else { continue }
+                let memo = it.memo.trimmingCharacters(in: .whitespacesAndNewlines)
+                if let eid = it.equipmentId, let ei = equipmentPool.firstIndex(where: { $0.id == eid }),
+                   equipmentPool[ei].ownerId == nil {
+                    equipmentPool[ei].ownerId = pid
+                    lines.append(OrgMoveLine(kind: OrgMoveLineKind.equipment.rawValue, refId: eid, holderId: pid,
+                                             title: equipmentPool[ei].name, action: OrgMoveAction.follow.rawValue,
+                                             memo: memo.isEmpty ? nil : memo, state: OrgMoveLineState.done.rawValue,
+                                             updatedAt: now))
+                    n += 1
+                    continue
+                }
+                let due: Date? = it.dueKey.flatMap { k in
+                    OrgMovePlan.calendar.date(bySettingHour: 17, minute: 0, second: 0, of: OrgMovePlan.date(fromKey: k) ?? now)
+                }
+                let t = SubordinateTask(topic: title, content: "", date: now, dueDate: due, note: memo)
+                subordinates[si].tasks.append(t)
+                pendingReminderUpserts.append((subId: pid, taskId: t.id))
+                lines.append(OrgMoveLine(kind: OrgMoveLineKind.task.rawValue, refId: t.id, holderId: pid, title: title,
+                                         dueKey: it.dueKey, action: OrgMoveAction.follow.rawValue,
+                                         memo: memo.isEmpty ? nil : memo, state: OrgMoveLineState.done.rawValue,
+                                         updatedAt: now))
+                n += 1
+            }
+            move.lines = lines
+            move.updatedAt = now
+            orgMoves.upsert(move)
+        }
+        return n
+    }
+
+    /// 接收清單〔接手〕新部門一台還沒有負責人的機台（要訂閱：同指派）。那台現在沒有負責人才接。一次存檔
+    @discardableResult
+    func claimOrgMoveIntakeEquipment(_ moveId: UUID, equipmentId: UUID, now: Date = Date()) -> Bool {
+        guard var move = orgMoves.move(moveId), move.isIntake, subIndex(move.personId) != nil,
+              let ei = equipmentPool.firstIndex(where: { $0.id == equipmentId }), equipmentPool[ei].ownerId == nil else { return false }
+        let pid = move.personId
+        batched {
+            equipmentPool[ei].ownerId = pid
+            var lines = move.allLines
+            lines.append(OrgMoveLine(kind: OrgMoveLineKind.equipment.rawValue, refId: equipmentId, holderId: pid,
+                                     title: equipmentPool[ei].name, action: OrgMoveAction.follow.rawValue,
+                                     state: OrgMoveLineState.done.rawValue, updatedAt: now))
+            move.lines = lines
+            move.updatedAt = now
+            orgMoves.upsert(move)
+        }
+        return true
+    }
+
+    /// 接收清單〔開一對一〕（要訂閱：同新增會議）：這位同仁名下開一條每週的「1on1」（名稱不放人名：會議名稱就是通知標題）。
+    /// 時段照你其他一對一最常用的那個（OrgMovePlan.intakeOneOnOneSlot）；沒有別的一對一＝明天那個星期幾 10:00、60 分鐘、不提醒。
+    /// 一次存檔。回傳新會議的 id
+    @discardableResult
+    func addOrgMoveIntakeOneOnOne(_ moveId: UUID, now: Date = Date()) -> UUID? {
+        guard var move = orgMoves.move(moveId), move.isIntake, let si = subIndex(move.personId) else { return nil }
+        let world = OrgMoveWorld(store: self)
+        let slot = OrgMovePlan.intakeOneOnOneSlot(world: world, excluding: move.personId)
+        let cal = OrgMovePlan.calendar
+        let tomorrow = cal.date(byAdding: .day, value: 1, to: now) ?? now
+        let wd = slot?.weekday ?? cal.component(.weekday, from: tomorrow)
+        let start = OrgMovePlan.intakeOneOnOneStart(weekday: wd, hour: slot?.hour ?? 10, minute: slot?.minute ?? 0, now: now)
+        let meeting = SubordinateMeeting(topic: "1on1", date: start, durationMinutes: slot?.duration ?? 60,
+                                         rule: MeetingRecurrenceRule(frequency: .weekly, weekdays: [wd]),
+                                         reminderMinutes: slot?.reminder ?? EventReminder.none.rawValue)
+        let pid = move.personId
+        batched {
+            subordinates[si].meetings.append(meeting)
+            var lines = move.allLines
+            lines.append(OrgMoveLine(kind: OrgMoveLineKind.meeting.rawValue, refId: meeting.id, holderId: pid,
+                                     title: meeting.topic, dueKey: OrgMovePlan.dayKey(start),
+                                     action: OrgMoveAction.follow.rawValue, state: OrgMoveLineState.done.rawValue,
+                                     updatedAt: now))
+            move.lines = lines
+            move.updatedAt = now
+            orgMoves.upsert(move)
+        }
+        rebuildMeetingReminders()
+        return meeting.id
+    }
+
+    /// 接收清單拿掉一項（要訂閱：同刪除）：還沒做完的那件待辦一起刪（做完的留著）；接手的機台還是這位負責＝清回沒有負責人；
+    /// 開的一對一還沒開過＝一起刪。那一列記成 undone（兩台合併不會長回來）。一次存檔
+    func removeOrgMoveIntakeLine(_ moveId: UUID, lineId: UUID, now: Date = Date()) {
+        guard var move = orgMoves.move(moveId), move.isIntake, let l = move.line(lineId),
+              l.state != OrgMoveLineState.undone.rawValue else { return }
+        let pid = move.personId
+        var meetingsChanged = false
+        batched {
+            if let si = subIndex(pid), let r = l.refId {
+                switch l.lineKind {
+                case .some(.task):
+                    if let ti = subordinates[si].tasks.firstIndex(where: { $0.id == r }), !subordinates[si].tasks[ti].isCompleted {
+                        let removed = subordinates[si].tasks.remove(at: ti)
+                        if let rid = removed.reminderId { pendingReminderDeletes.append(rid) }
+                    }
+                case .some(.equipment):
+                    if let ei = equipmentPool.firstIndex(where: { $0.id == r }), equipmentPool[ei].ownerId == pid {
+                        equipmentPool[ei].ownerId = nil
+                    }
+                case .some(.meeting):
+                    if let mi = subordinates[si].meetings.firstIndex(where: { $0.id == r }), subordinates[si].meetings[mi].date >= now {
+                        subordinates[si].meetings.remove(at: mi)
+                        meetingsChanged = true
+                    }
+                default:
+                    break
+                }
+            }
+            move.updateLine(lineId) { x in
+                x.state = OrgMoveLineState.undone.rawValue
+                x.updatedAt = now
+            }
+            move.updatedAt = now
+            orgMoves.upsert(move)
+        }
+        if meetingsChanged { rebuildMeetingReminders() }
+    }
+
     // MARK: - 部屬 CRUD
 
     func add(_ item: Subordinate) {
@@ -3485,7 +3857,9 @@ class LifeStore: ObservableObject {
         return unit.isEmpty ? nil : unit
     }
 
-    private func syncOrgPersonFor(subordinate sub: Subordinate) {
+    /// [v25.597 轉組織 v4] skipClaim：新增時你說〔不是，另一位〕的那幾位組織人員（同名同部門也不認領，另建一筆）。
+    /// 要退回這一件：刪這個參數與下面認領那段的 `&& !skipClaim.contains($0.id)`
+    private func syncOrgPersonFor(subordinate sub: Subordinate, skipClaim: Set<UUID> = []) {
         // 解析職稱：若有 gradeTitleId 用 GradeTitle.title，沒有則用 sub.jobTitle
         let resolvedTitle: String = {
             if let gtId = sub.gradeTitleId,
@@ -3518,6 +3892,7 @@ class LifeStore: ObservableObject {
         //    subordinates 曾經整批重來過的話（換手機、首次雲端同步），全公司會整批變兩倍。
         if let i = orgPeople.firstIndex(where: {
             $0.linkedSubordinateId == nil
+                && !skipClaim.contains($0.id)
                 && $0.departmentId == deptId
                 && Self.normalizedPersonName($0.name) == Self.normalizedPersonName(sub.name)
                 && !Self.normalizedPersonName($0.name).isEmpty
@@ -4531,6 +4906,11 @@ class LifeStore: ObservableObject {
         }
         // ③ [v25.591 轉組織 v1a-2] 會議（〔最後一場〕〔交給…〕）、以後的班
         for i in lines.indices where lines[i].state == nil {
+            // [v25.597 轉組織 v4] 暫時離開〔暫停到 1/29〕：這段期間的場次取消（OrgMovePauseUndo）。要退回這一件：刪這個 if
+            if lines[i].kind == OrgMoveLineKind.meeting.rawValue && lines[i].lineAction == .pause {
+                if applyOrgMovePauseLine(&lines[i], move: frozen, person: pid, now: now) { meetingsChanged = true }
+                continue
+            }
             if lines[i].kind == OrgMoveLineKind.meeting.rawValue {
                 if applyOrgMoveMeetingLine(&lines[i], move: frozen, person: pid, now: now) { meetingsChanged = true }
             } else if lines[i].kind == OrgMoveLineKind.shifts.rawValue {
@@ -4834,7 +5214,10 @@ class LifeStore: ObservableObject {
             case .sideRole:
                 undoOrgMoveSideRoleLine(&lines[i], person: pid)
             case .meeting:
-                if undoOrgMoveMeetingLine(&lines[i], person: pid, now: now) { meetingsChanged = true }
+                // [v25.597 轉組織 v4]〔暫停到 1/29〕的放回（今天以後的場次）。要退回這一件：改回只有 else 那一行
+                if lines[i].lineAction == .pause {
+                    if undoOrgMovePauseLine(&lines[i], person: pid, now: now) { meetingsChanged = true }
+                } else if undoOrgMoveMeetingLine(&lines[i], person: pid, now: now) { meetingsChanged = true }
             case .agenda:
                 undoOrgMoveAgendaLine(&lines[i], person: pid)
             case .shifts:
@@ -6315,7 +6698,15 @@ class LifeStore: ObservableObject {
             return
         }
         let cutKey = OrgMovePlan.cutKey(move, now: now)
-        let mine = subordinates[pi].shifts.filter { OrgMovePlan.dayKey($0.date) >= cutKey }.sorted { $0.date < $1.date }
+        // [v25.597 轉組織 v4] 暫時離開只動這段期間的班（回來那天以後的照舊）。要退回這一件：改回
+        // `let mine = subordinates[pi].shifts.filter { OrgMovePlan.dayKey($0.date) >= cutKey }.sorted { $0.date < $1.date }`
+        let endKey: String? = move.isTemp ? move.returnKey : nil
+        let mine = subordinates[pi].shifts.filter { s in
+            let k = OrgMovePlan.dayKey(s.date)
+            guard k >= cutKey else { return false }
+            if let e = endKey { return k < e }
+            return true
+        }.sorted { $0.date < $1.date }
         var cells = line.removedShifts ?? []
         switch line.lineAction {
         case .some(.give):

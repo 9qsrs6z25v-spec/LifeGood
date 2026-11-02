@@ -235,6 +235,8 @@ extension OrgMovePlan {
         case .some(.handOut):
             text = (line.toId == meId) ? "排好了：\(d) 我先接" : "排好了：\(d) 交出去給 \(line.toName ?? "")"
         case .some(.remove), .some(.replace), .some(.add), .some(.keep), .some(.skip): text = line.title
+        // [v25.597 轉組織 v4] 暫時離開的〔暫停〕
+        case .some(.pause): text = "排好了：\(d) 起暫停"
         case .some(.follow), .some(.withEquipment), .none: text = "排好了：跟著\(person)"
         }
         return OrgMoveLineStatus(kind: .planned, mark: "◌", text: text, holderId: move.personId, fix: nil, fixLabel: nil)
@@ -299,6 +301,14 @@ extension OrgMovePlan {
         if m.isUndone { return m.undoneByCancel ? "（已取消）" : "（已復原）" }
         // [v25.593 轉組織 v2] 回到我的部屬那一張什麼都沒交：不寫件數。要退回這一件：刪這一行
         if m.isBack { return "" }
+        // [v25.597 轉組織 v4]「接收清單 3 項」「代理 3・跟著 2（1/29 回來）」。要退回這一件：刪這兩個 if
+        if m.isIntake { return "接收清單 \(m.allLines.count) 項" }
+        if m.isTemp {
+            let p = proxyCount(m.allLines)
+            var t = p > 0 ? "代理 \(p)・跟著 \(follow)" : "交出去 \(given)・跟著 \(follow)"
+            if let r = m.returnKey { t += "（\(shortDay(r)) 回來）" }
+            return t
+        }
         var s = "交出去 \(given)・跟著 \(follow)"
         if m.isHanded { s += "（\(shortDay(m.effectiveKey)) 才改部門）" }
         if m.keepDept == true, m.cancelledAt != nil { s += "（調動取消了）" }
@@ -486,6 +496,8 @@ extension OrgMovePlan {
         let person = m.personName.isEmpty ? "這位同仁" : m.personName
         // [v25.593 轉組織 v2]「王小明 製造一課 → 品保課（調出）」「王小明 離職（製造一課）」。要退回這一件：刪這一行
         if let t = leavingDueTitle(m, world: world) { return t }
+        // [v25.597 轉組織 v4]「林志豪 借調（到 1/29）」。要退回這一件：刪這一行
+        if m.isTemp { return person + " \(m.tempKindValue.label)" + (m.returnKey.map { "（到 \(shortDay($0))）" } ?? "") }
         let f = sideText(OrgMoveSide(deptId: m.from.deptId, deptLabel: m.from.deptLabel), world: world)
         let t = sideText(OrgMoveSide(deptId: m.to.deptId, deptLabel: m.to.deptLabel), world: world)
         let pf = m.from.plant ?? ""

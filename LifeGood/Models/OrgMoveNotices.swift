@@ -92,12 +92,21 @@ enum OrgMoveNotices {
         return "有 \(moves) 份交接還有 \(pending) 件待分派"
     }
     static func mineBody(_ n: Int) -> String { "你接的交接事項有 \(n) 件今天到期" }
+    /// [v25.597 轉組織 v4] 回來前 3 天：「有一位同仁 1/29 回來，有 3 件要還」（好幾位「有 2 位同仁 1/29 回來，有 5 件要還」；
+    /// 沒有要還的「有一位同仁 1/29 回來」）。不寫名字、部門、借調還是留停
+    static func backBody(people: Int, dayKey: String, items: Int) -> String {
+        let who = people == 1 ? "有一位同仁" : "有 \(people) 位同仁"
+        let d = OrgMovePlan.shortDay(dayKey)
+        return items > 0 ? "\(who) \(d) 回來，有 \(items) 件要還" : "\(who) \(d) 回來"
+    }
 
     // MARK: 候選
 
     /// 所有交接提醒：不看時間、不限則數、照日子排（sim_v3.py notice_candidates）。純計算：不碰通知中心。
     /// personIds＝現在還在的部屬 id（人被刪了的那張不提醒：到期也套不了）
-    static func candidates(book: OrgMoveBook, owners: [UUID: UUID], personIds: Set<UUID>) -> [OrgMoveNoticeJob] {
+    /// [v25.597 轉組織 v4] backCounts＝暫時離開那張 id → 要還的件數（OrgMovePlan.returnItemCount；OrgMoveNoticeCenter 照現在的資料算好給）
+    static func candidates(book: OrgMoveBook, owners: [UUID: UUID], personIds: Set<UUID>,
+                           backCounts: [UUID: Int] = [:]) -> [OrgMoveNoticeJob] {
         let moves: [OrgMove] = book.live.filter { !$0.isBack && personIds.contains($0.personId) }
         var out: [OrgMoveNoticeJob] = []
 
@@ -151,6 +160,22 @@ enum OrgMoveNotices {
             guard let f = at(k, hour: 9, minute: 0) else { continue }
             out.append(OrgMoveNoticeJob(key: prefix + "mine." + k, title: title, body: mineBody(mine[k] ?? 0),
                                         fireDate: f, moveId: nil))
+        }
+
+        // [v25.597 轉組織 v4] 暫時離開回來前 3 天 09:00（orgmove.back.<回來那天>；同一天回來的併一則；按過〔還給本人〕〔留給代理人〕的不排）。
+        // 要退回這一件：刪這一段與 backCounts 參數
+        var back: [String: [UUID]] = [:]
+        for m in moves where m.isTemp && m.wasApplied && !m.isUndone && !m.isCancelled && m.returnedAt == nil {
+            guard let k = m.returnKey, OrgMovePlan.date(fromKey: k) != nil else { continue }
+            back[k, default: []].append(m.id)
+        }
+        for k in back.keys.sorted() {
+            let ids = back[k] ?? []
+            guard let f = at(OrgMovePlan.addDays(k, -3), hour: 9, minute: 0) else { continue }
+            let items = ids.reduce(0) { $0 + (backCounts[$1] ?? 0) }
+            out.append(OrgMoveNoticeJob(key: prefix + "back." + k, title: title,
+                                        body: backBody(people: ids.count, dayKey: k, items: items),
+                                        fireDate: f, moveId: ids.count == 1 ? ids.first : nil))
         }
         return out
     }
@@ -221,7 +246,16 @@ final class OrgMoveNoticeCenter {
         var jobs: [OrgMoveNoticeJob] = []
         if enabled {
             let ids = Set(life.subordinates.map(\.id))
-            let all = OrgMoveNotices.candidates(book: life.orgMoves, owners: OrgMoveIndex.equipmentOwners, personIds: ids)
+            // [v25.597 轉組織 v4] 暫時離開還沒回來的：要還的件數照現在的資料算（有這種單才建查表）。要退回這一件：刪 temps／back 兩段、
+            // candidates 拿掉 backCounts
+            let temps = life.orgMoves.live.filter { $0.isTemp && $0.wasApplied && !$0.isUndone && $0.returnedAt == nil }
+            var back: [UUID: Int] = [:]
+            if !temps.isEmpty {
+                let map = OrgMoveHolderMap(world: OrgMoveWorld(store: life))
+                for m in temps { back[m.id] = OrgMovePlan.returnItemCount(m, map: map) }
+            }
+            let all = OrgMoveNotices.candidates(book: life.orgMoves, owners: OrgMoveIndex.equipmentOwners, personIds: ids,
+                                                backCounts: back)
             jobs = OrgMoveNotices.jobs(from: all, now: Date())
         }
         let body = jobs.map { j -> String in

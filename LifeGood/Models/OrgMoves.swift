@@ -147,6 +147,18 @@ struct OrgMove: Codable, Equatable, Identifiable {
     var cancelNote: String?
     /// 生效那天改部門時（排好之後）原人身上多出來、單上沒有的待辦、週報 id（「排好之後多了 2 件」〔加進交接單〕；judge §5-15）
     var lateRefIds: [UUID]?
+    // [v25.597 轉組織 v4] 暫時離開（借調、支援、留停）（judge §7 v4、§2.1 kind "temp"；orgmove/build/v4/brief.md §2-1）。
+    // 新欄位一律 Optional＋decodeIfPresent＋init 預設 nil；25.596 的 App 存回來會少這幾個（merge 從另一份補回）。
+    // 部屬、組織人員、部門一個欄位都不加（舊 iPad 洗不掉）：「借調中」「留停中」照交接單算（OrgMoveIndex.away）。
+    // 要退回這一件：刪這 4 個欄位與 init／init(from:)／CodingKeys／merge 裡對應的那幾行
+    /// "loan" 借調／"support" 支援／"leave" 留停（OrgMoveTempKind；只有 kind "temp"）
+    var tempKind: String?
+    /// 回來那天（回來上班的第一天，「2027-01-29」；只有 kind "temp"）：暫時離開＝生效日（含）～這天（不含）
+    var returnKey: String?
+    /// 回來那天按了〔還給本人〕〔留給代理人〕的那一刻（nil＝還沒問、還沒按）
+    var returnedAt: Date?
+    /// "back"〔還給本人〕／"keep"〔留給代理人〕（OrgMoveReturnChoice）
+    var returnChoice: String?
 
     init(id: UUID = UUID(), personId: UUID, personKind: String? = nil, personName: String,
          kind: String = OrgMoveKind.move.rawValue, effectiveKey: String, handoverByKey: String? = nil,
@@ -155,7 +167,8 @@ struct OrgMove: Codable, Equatable, Identifiable {
          handedAt: Date? = nil, appliedAt: Date? = nil, closedAt: Date? = nil, undoneAt: Date? = nil,
          lines: [OrgMoveLine]? = nil, before: OrgMoveRestore? = nil, retitleBirthday: Bool? = nil,
          createdAt: Date? = nil, updatedAt: Date? = nil, deletedAt: Date? = nil,
-         cancelledAt: Date? = nil, cancelNote: String? = nil, lateRefIds: [UUID]? = nil) {
+         cancelledAt: Date? = nil, cancelNote: String? = nil, lateRefIds: [UUID]? = nil,
+         tempKind: String? = nil, returnKey: String? = nil, returnedAt: Date? = nil, returnChoice: String? = nil) {
         self.id = id
         self.personId = personId
         self.personKind = personKind
@@ -182,6 +195,10 @@ struct OrgMove: Codable, Equatable, Identifiable {
         self.cancelledAt = cancelledAt
         self.cancelNote = cancelNote
         self.lateRefIds = lateRefIds
+        self.tempKind = tempKind
+        self.returnKey = returnKey
+        self.returnedAt = returnedAt
+        self.returnChoice = returnChoice
     }
 
     init(from decoder: Decoder) throws {
@@ -225,6 +242,10 @@ struct OrgMove: Codable, Equatable, Identifiable {
         cancelledAt = try? c.decodeIfPresent(Date.self, forKey: .cancelledAt)
         cancelNote = try? c.decodeIfPresent(String.self, forKey: .cancelNote)
         lateRefIds = try? c.decodeIfPresent([UUID].self, forKey: .lateRefIds)
+        tempKind = try? c.decodeIfPresent(String.self, forKey: .tempKind)
+        returnKey = try? c.decodeIfPresent(String.self, forKey: .returnKey)
+        returnedAt = try? c.decodeIfPresent(Date.self, forKey: .returnedAt)
+        returnChoice = try? c.decodeIfPresent(String.self, forKey: .returnChoice)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -232,6 +253,7 @@ struct OrgMove: Codable, Equatable, Identifiable {
         case from, to, keepDept, note, state, handedAt, appliedAt, closedAt, undoneAt
         case lines, before, retitleBirthday, createdAt, updatedAt, deletedAt
         case cancelledAt, cancelNote, lateRefIds
+        case tempKind, returnKey, returnedAt, returnChoice
     }
 
     var allLines: [OrgMoveLine] { lines ?? [] }
@@ -260,6 +282,12 @@ struct OrgMove: Codable, Equatable, Identifiable {
     var isLeaveCompany: Bool { kindValue?.isLeaveCompany == true }
     /// 回到我的部屬（已轉出的人〔回到我的部屬〕記的那一張；什麼都不搬）
     var isBack: Bool { kind == OrgMoveKind.back.rawValue }
+    /// [v25.597 轉組織 v4] 暫時離開（借調、支援、留停；有回來那天）
+    var isTemp: Bool { kind == OrgMoveKind.temp.rawValue }
+    /// [v25.597 轉組織 v4] 轉進來（從公司組織裡既有的那一位認領成我的部屬；personKind "org"）
+    var isIntake: Bool { kind == OrgMoveKind.intake.rawValue }
+    /// [v25.597 轉組織 v4] 借調／支援／留停（不認得＝借調）
+    var tempKindValue: OrgMoveTempKind { tempKind.flatMap { OrgMoveTempKind(rawValue: $0) } ?? .loan }
     /// 部門有改（換單位或調出、不是〔照舊（只交接）〕、新部門跟舊的不一樣）。
     /// v1a～v1b 寫成 `kind == "move" && keepDept != true && to.deptId != nil && to.deptId != from.deptId` 的地方都換成這一支（調出也改部門）
     var changesDept: Bool {
@@ -329,6 +357,12 @@ struct OrgMove: Codable, Equatable, Identifiable {
         if head.before != nil, head.before?.orgLeftDate == nil { head.before?.orgLeftDate = a.before?.orgLeftDate ?? b.before?.orgLeftDate }
         // [v25.596 轉組織 v3] 寫上去的離職日（25.595 以前的 App 存回來會少這個）：哪一份有就補回。要退回這一件：刪這一行
         if head.before != nil, head.before?.orgSetLeftDate == nil { head.before?.orgSetLeftDate = a.before?.orgSetLeftDate ?? b.before?.orgSetLeftDate }
+        // [v25.597 轉組織 v4] 暫時離開的種類、回來那天、還了沒（25.596 以前的 App 存回來會少這幾個）：哪一份有就補回。
+        // 回來那天你改過的話兩份都有，取的那一份（updatedAt 新的）照留。要退回這一件：刪這四行
+        if head.tempKind == nil { head.tempKind = a.tempKind ?? b.tempKind }
+        if head.returnKey == nil { head.returnKey = a.returnKey ?? b.returnKey }
+        if head.returnedAt == nil { head.returnedAt = a.returnedAt ?? b.returnedAt }
+        if head.returnChoice == nil { head.returnChoice = a.returnChoice ?? b.returnChoice }
         return head
     }
 
@@ -339,6 +373,8 @@ struct OrgMove: Codable, Equatable, Identifiable {
         var l = win
         if l.addedLate == nil { l.addedLate = other.addedLate }
         if sameTime, l.checkedAt == nil { l.checkedAt = other.checkedAt }
+        // [v25.597 轉組織 v4]〔代理（回來還給本人）〕存了就不會清掉（改成〔交給…〕是在精靈裡、還沒存）：一律補回
+        if l.proxy == nil { l.proxy = other.proxy }
         return l
     }
 }
@@ -447,6 +483,10 @@ struct OrgMoveLine: Codable, Equatable, Identifiable {
     var checkedAt: Date?
     /// 排好之後原人才多出來、你按〔加進交接單〕加進來的（交接單那一列多一行灰字「排好之後才加進來的」）
     var addedLate: Bool?
+    /// [v25.597 轉組織 v4]〔代理（回來還給本人）〕：action 照舊是 "give"／"replace"（套用、復原、交接單狀態全部照交給的那一套），
+    /// 這一格記「回來那天要問還不還」。只有暫時離開的單有。25.596 的 App 存回來會少這一格（merge 補回；
+    /// 少了也只是當成一般的〔交給…〕，不會錯搬）。要退回這一件：刪這個欄位與 init／init(from:)／CodingKeys 對應的那幾行
+    var proxy: Bool?
 
     init(id: UUID = UUID(), kind: String, refId: UUID? = nil, itemId: UUID? = nil, parentId: UUID? = nil,
          holderId: UUID? = nil, title: String, dueKey: String? = nil, action: String? = nil,
@@ -455,7 +495,7 @@ struct OrgMoveLine: Codable, Equatable, Identifiable {
          state: String? = nil, resolvedAt: Date? = nil, updatedAt: Date? = nil,
          meetingId: UUID? = nil, newId: UUID? = nil, newTopic: String? = nil, days: [String: String]? = nil,
          removedShifts: [OrgMoveShiftCell]? = nil, prevAssigneeIds: [UUID]? = nil,
-         checkedAt: Date? = nil, addedLate: Bool? = nil) {
+         checkedAt: Date? = nil, addedLate: Bool? = nil, proxy: Bool? = nil) {
         self.id = id
         self.kind = kind
         self.refId = refId
@@ -484,6 +524,7 @@ struct OrgMoveLine: Codable, Equatable, Identifiable {
         self.prevAssigneeIds = prevAssigneeIds
         self.checkedAt = checkedAt
         self.addedLate = addedLate
+        self.proxy = proxy
     }
 
     init(from decoder: Decoder) throws {
@@ -516,6 +557,7 @@ struct OrgMoveLine: Codable, Equatable, Identifiable {
         prevAssigneeIds = try? c.decodeIfPresent([UUID].self, forKey: .prevAssigneeIds)
         checkedAt = try? c.decodeIfPresent(Date.self, forKey: .checkedAt)
         addedLate = try? c.decodeIfPresent(Bool.self, forKey: .addedLate)
+        proxy = try? c.decodeIfPresent(Bool.self, forKey: .proxy)
     }
 
     private enum CodingKeys: String, CodingKey {
@@ -523,6 +565,7 @@ struct OrgMoveLine: Codable, Equatable, Identifiable {
         case newDueKey, wasOverdue, memo, lock, slot, removedJSON, state, resolvedAt, updatedAt
         case meetingId, newId, newTopic, days, removedShifts, prevAssigneeIds
         case checkedAt, addedLate
+        case proxy
     }
 
     // 只在記憶體轉成列舉（不認得的字＝nil：只顯示、不套用）
@@ -750,6 +793,10 @@ enum OrgMoveKind: String {
     case out, resign, retire
     /// [v25.593 轉組織 v2] 回到我的部屬（已轉出的人按〔回到我的部屬〕記的一張：什麼都不搬、只讓這位同仁回到在職名單）
     case back
+    /// [v25.597 轉組織 v4] 暫時離開（借調、支援、留停；有回來那天）：部門、廠區、職稱都不動，期間在名單「借調中・到 1/29」那一區
+    case temp
+    /// [v25.597 轉組織 v4] 轉進來（新增部屬時連到公司組織裡既有的那一位；不經過精靈，LifeStore.addSubordinateClaiming 直接寫）
+    case intake = "in"
 
     /// 調出、離職、退休
     var isLeaving: Bool { self == .out || self == .resign || self == .retire }
@@ -766,10 +813,40 @@ enum OrgMoveKind: String {
         case .resign: return "離職"
         case .retire: return "退休"
         case .back: return "回到我的部屬"
+        case .temp: return "暫時離開"
+        case .intake: return "轉進來"
         }
     }
-    /// 精靈「這次是」那一排（照這個順序；回到我的部屬不在這裡）
-    static let wizardCases: [OrgMoveKind] = [.move, .plant, .out, .resign, .retire]
+    /// 精靈「這次是」那一排（照這個順序；回到我的部屬、轉進來不在這裡）
+    /// [v25.597 轉組織 v4] 最後多〔暫時離開〕（judge §4.2「v4 加 (暫時離開)」）。要退回這一件：拿掉 `, .temp`
+    static let wizardCases: [OrgMoveKind] = [.move, .plant, .out, .resign, .retire, .temp]
+}
+
+/// [v25.597 轉組織 v4] 暫時離開的種類（存字串在 OrgMove.tempKind）
+enum OrgMoveTempKind: String, CaseIterable, Identifiable {
+    /// 借調（到別的單位，期滿回來）
+    case loan
+    /// 支援（短期到別處幫忙）
+    case support
+    /// 留職停薪（留停期間不算請假、到期的不算逾期：主動性不被扣）
+    case leave
+    var id: String { rawValue }
+    /// 精靈的三顆、名單小區、交接單單頭的字
+    var label: String {
+        switch self {
+        case .loan: return "借調"
+        case .support: return "支援"
+        case .leave: return "留停"
+        }
+    }
+}
+
+/// [v25.597 轉組織 v4] 回來那天按的（存字串在 OrgMove.returnChoice）
+enum OrgMoveReturnChoice: String {
+    /// 〔還給本人〕：代理的、還沒做完的搬回這位同仁
+    case back
+    /// 〔留給代理人〕：什麼都不搬
+    case keep
 }
 
 enum OrgMoveState: String {
@@ -855,6 +932,9 @@ enum OrgMoveAction: String {
     /// [v25.593 轉組織 v2] 交出去（給不在部屬名單的人＝組織人員 id，或給「我」＝OrgMovePlan.meId）：從原人拿掉、原樣存進交接單、
     /// 提醒事項刪掉；不算完成、不算任何人的分（交接那一刻已逾期的扣分照留原人）。只有待辦、週報、自己加的一項有（judge §3.6）
     case handOut
+    /// [v25.597 轉組織 v4] 暫停（只有暫時離開）：固定會議〔暫停到 1/29〕＝這段期間的場次取消、回來那天起照常；
+    /// 週報〔暫停〕＝留在這位同仁身上，這段期間到期的不算逾期（judge §7 v4）
+    case pause
 }
 
 enum OrgMoveLineState: String {
@@ -903,6 +983,8 @@ enum OrgMoveIndex {
         let pendingEquipmentIds: [UUID]
         /// [v25.591 轉組織 v1a-2] 哪一種（OrgMoveLineKind 的字：task／report／equipment／meeting／agenda／sideRole／shifts…）
         var lineKind: String = ""
+        /// [v25.597 轉組織 v4]〔代理（回來還給本人）〕的：原人回來那天「2027-01-29」（膠囊「代理 林志豪・1/29 還」；一般的交給＝nil）
+        var proxyUntilKey: String? = nil
     }
 
     /// 任務／週報／機台 id → 最新一張交出它的那一列（接力：王小明 → 陳怡君 → 林志豪，用最新那張）
@@ -1008,11 +1090,17 @@ enum OrgMoveIndex {
                     || (l.action == OrgMoveAction.pending.rawValue && l.state == OrgMoveLineState.resolved.rawValue)
                 guard given else { continue }
                 let at = l.state == OrgMoveLineState.resolved.rawValue ? (l.resolvedAt ?? handed) : handed
+                // [v25.597 轉組織 v4]〔代理〕的：膠囊顯示到回來那天（還了、留給代理人了就收起來）。要退回這一件：刪這三行、
+                // 下面 handoverByKey／closed／proxyUntilKey 改回 byKey／m.isClosed／不給
+                let proxied: Bool = m.isTemp && OrgMovePlan.isProxyLine(l, in: m.allLines)
+                let shownUntil: String = proxied ? (m.returnKey ?? byKey) : byKey
+                let shut: Bool = m.isClosed || (proxied && m.returnedAt != nil)
                 let r = Received(moveId: m.id, lineId: l.id, fromId: m.personId, fromName: m.personName,
                                  toId: to, handedAt: at, dueKey: l.dueKey, wasOverdue: l.wasOverdue == true,
                                  memo: (l.memo ?? "").trimmingCharacters(in: .whitespacesAndNewlines),
-                                 handoverByKey: byKey, closed: m.isClosed, hasPending: hasPending,
-                                 pendingEquipmentIds: pendingEq, lineKind: l.kind)
+                                 handoverByKey: shownUntil, closed: shut, hasPending: hasPending,
+                                 pendingEquipmentIds: pendingEq, lineKind: l.kind,
+                                 proxyUntilKey: proxied ? m.returnKey : nil)
                 if let old = received[ref], old.handedAt > at { continue }
                 received[ref] = r
             }
@@ -1027,6 +1115,8 @@ enum OrgMoveIndex {
         let roster = rosterIndex(book)
         archived = roster.archived
         spans = roster.spans
+        // [v25.597 轉組織 v4] 暫時離開、暫停的週報、轉進來帶過來的事（OrgMoveTemp.swift）。要退回這一件：刪這一行
+        rebuildTemp(book)
     }
 
     // MARK: [v25.593 轉組織 v2] 已轉出、那天在哪個部門（judge §2.2、§3.6、§5-32；orgmove/build/v2/brief.md §2-1）

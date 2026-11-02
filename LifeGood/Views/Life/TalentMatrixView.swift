@@ -92,9 +92,15 @@ extension Subordinate {
     private var overdueOwnIds: Set<UUID> {
         let now = Date()
         let pendingEq: [UUID: Date] = OrgMoveIndex.pendingEquipment[id] ?? [:]
+        // [v25.597 轉組織 v4] 留停那一段到期的不算逾期；〔暫停〕的週報這段期間到期的不算（judge §7 v4「留停不算請假、不扣分」）。
+        // 沒有暫時離開的人不查（快的那條路）。要退回這一件：刪 hasLeave／hasPaused 與下面兩個 if
+        let hasLeave: Bool = OrgMoveIndex.away[id] != nil
+        let hasPaused: Bool = !OrgMoveIndex.pausedReports.isEmpty
+        let pid = id
         let t = tasks.filter { t in
             guard t.sideRoleLink == nil, let due = t.dueDate else { return false }
             if let eid = t.equipmentLink?.equipmentId, let handed = pendingEq[eid], due >= handed { return false }
+            if hasLeave, OrgMoveIndex.onLeave(pid, dayKey: OrgMovePlan.dayKey(due)) { return false }
             if t.isCompleted {
                 guard let done = t.completedAt else { return false }
                 return done > due
@@ -102,6 +108,11 @@ extension Subordinate {
             return due < now
         }.map(\.id)
         let r = weeklyReports.filter { r in
+            if hasLeave || hasPaused {
+                let k = OrgMovePlan.dayKey(r.date)
+                if hasPaused, OrgMoveIndex.reportPaused(r.id, dayKey: k) { return false }
+                if hasLeave, OrgMoveIndex.onLeave(pid, dayKey: k) { return false }
+            }
             if r.isCompleted {
                 guard let done = r.completedAt else { return false }
                 return done > r.date
@@ -109,6 +120,14 @@ extension Subordinate {
             return r.date < now
         }.map(\.id)
         return Set(t).union(r)
+    }
+
+    /// [v25.597 轉組織 v4] 算請假扣分的那幾筆：留停那一段（生效日～回來那天前一天）的請假不算（judge §7 v4；主動性不被扣到 0）
+    private var scoredLeaveRecords: [SubordinateRecord] {
+        let leaves = records.filter { $0.type == .leave && !($0.leaveType?.isScoreExempt ?? false) }
+        guard OrgMoveIndex.away[id] != nil else { return leaves }
+        let pid = id
+        return leaves.filter { !OrgMoveIndex.onLeave(pid, dayKey: OrgMovePlan.dayKey($0.date)) }
     }
 
     /// [v25.589 轉組織 v0b] 交出去時已逾期、扣分留在這位的件數（OrgHandoffIndex，查 life_org_handoffs_v1 那一包）：
@@ -157,7 +176,9 @@ extension Subordinate {
         let ownedMeetings = meetings.count
         let completedReports = weeklyReports.filter { $0.isCompleted }.count
         // 喪假／公假／病假為非個人意願的假別，不列入扣分（LeaveType.isScoreExempt）
-        let leaveHours = records.filter { $0.type == .leave && !($0.leaveType?.isScoreExempt ?? false) }.reduce(0.0) { $0 + ($1.leaveHours ?? 8) }
+        // [v25.597 轉組織 v4] 留停那一段的請假不算（scoredLeaveRecords）。要退回這一件：改回
+        // `records.filter { $0.type == .leave && !($0.leaveType?.isScoreExempt ?? false) }.reduce(…)`
+        let leaveHours = scoredLeaveRecords.reduce(0.0) { $0 + ($1.leaveHours ?? 8) }
         // 權重走 ScoreWeights（進階設定可調；出廠值同原本：60／+3／+1／+3／+2／+3／每 8h -2）
         var score = Double(ScoreWeights.actBase)
         score += Double(taskPoints)                                  // 完成任務（含每題自訂分）
@@ -223,7 +244,9 @@ extension Subordinate {
         let completedItems = itemDone
         let completedReports = weeklyReports.filter { $0.isCompleted }.count
         // 喪假／公假／病假為非個人意願的假別，不列入扣分（LeaveType.isScoreExempt）
-        let leaveHours = records.filter { $0.type == .leave && !($0.leaveType?.isScoreExempt ?? false) }.reduce(0.0) { $0 + ($1.leaveHours ?? 8) }
+        // [v25.597 轉組織 v4] 留停那一段的請假不算（scoredLeaveRecords）。要退回這一件：改回
+        // `records.filter { $0.type == .leave && !($0.leaveType?.isScoreExempt ?? false) }.reduce(…)`
+        let leaveHours = scoredLeaveRecords.reduce(0.0) { $0 + ($1.leaveHours ?? 8) }
         if !meetings.isEmpty { items.append(("會議掛名 ×\(meetings.count)", meetings.count * ScoreWeights.actMeetingOwner)) }
         if defaultTasks > 0 { items.append(("完成任務 ×\(defaultTasks)", defaultTasks * ScoreWeights.actTask)) }
         if !customTasks.isEmpty { items.append(("完成任務（自訂分）×\(customTasks.count)", customTasks.reduce(0, +))) }
@@ -919,6 +942,8 @@ struct TalentMatrixView: View {
                     // [v25.520] 姓名放不下改一行跑馬燈（原本會折成多行）
                     MarqueeText(m.name.isEmpty ? "未命名" : m.name)
                         .font(.subheadline.weight(.bold))
+                    // [v25.597 轉組織 v4] 留停中的同仁：名字下面一顆「留停中・不扣分」（只在 App 內；要退回這一件：刪這一行）
+                    TalentAwayBadge(personId: m.id)
                     // [v3] 象限標籤：直觀顯示此人的矩陣位置，對應象限色
                     let ql = quadrantLabel(m, ctx)
                     HStack(spacing: 5) {
@@ -1485,5 +1510,27 @@ struct TalentStatsView: View {
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
         renderAndShare(content, baseName: "部屬統計_全部圖表")
+    }
+}
+
+// MARK: - [v25.597 轉組織 v4] 人才矩陣「留停中」（judge §7 v4：留停不算請假、不扣分；只在 App 內，小工具、通知不寫）
+
+/// 今天留停中的同仁名字下面那一顆「留停中・不扣分」（其他人不佔位置）。要退回這一件：刪這個 struct 與列表那一行
+private struct TalentAwayBadge: View {
+    let personId: UUID
+
+    private var text: String? {
+        OrgMovePlan.talentAwayBadge(personId: personId, todayKey: OrgMovePlan.dayKey(Date()))
+    }
+
+    var body: some View {
+        if let t = text {
+            Text(t + "・不扣分")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 7).padding(.vertical, 2)
+                .background(Color.secondary.opacity(0.12))
+                .clipShape(Capsule())
+        }
     }
 }

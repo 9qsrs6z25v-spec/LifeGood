@@ -230,7 +230,8 @@ extension OrgMovePlan {
 
     /// 調出、離職、退休：還有沒決定的就不能確認（judge §3.6「交給…（必選）」）。nil＝可以按〔確認交接〕
     static func confirmBlock(_ draft: OrgMoveDraft) -> String? {
-        guard draft.kind.isLeaving else { return nil }
+        // [v25.597 轉組織 v4] 暫時離開：回來那天要比生效日晚、還沒決定的要選（OrgMoveTemp.swift）。要退回這一件：改回 `return nil`
+        guard draft.kind.isLeaving else { return tempConfirmBlock(draft) }
         let t = tally(draft.lines)
         guard t.undecided > 0 else { return nil }
         let when: String
@@ -494,12 +495,17 @@ extension OrgMovePlan {
     /// 歷程那一列的灰字前半（「製造一課 P1 → 品保課」；離職、退休、回到我的部屬只寫一邊）
     static func historyDetail(_ m: OrgMove, from f: String, to t: String) -> String {
         if m.isLeaveCompany || m.isBack { return f }
+        // [v25.597 轉組織 v4]「製造一課 P1・1/29 回來」。要退回這一件：刪這一行
+        if m.isTemp { return m.returnKey.map { "\(f)・\(shortDay($0)) 回來" } ?? f }
         return f == t ? "\(f)（部門照舊）" : "\(f) → \(t)"
     }
 
     /// 歷程、單頭的那個字：轉組織／調出／離職／退休／回到我的部屬
     static func historyWord(_ m: OrgMove) -> String {
         if m.isBack { return "回到我的部屬" }
+        // [v25.597 轉組織 v4]「借調」「支援」「留停」「轉進來」。要退回這一件：刪這兩行
+        if m.isTemp { return m.tempKindValue.label }
+        if m.isIntake { return "轉進來" }
         return leavingWord(m)
     }
 

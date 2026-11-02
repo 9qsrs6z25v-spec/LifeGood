@@ -1217,6 +1217,9 @@ struct AddSubordinateView: View {
     @Environment(\.dismiss) private var dismiss
 
     var editing: Subordinate?
+    /// [v25.597 轉組織 v4] 組織頁〔設成我的部屬〕打開時帶的那一位組織人員（名字、生日、職等先填好；存檔＝轉進來，連到這一位）。
+    /// 主控先放好這一格（G4 的 OrganizationView 用 `AddSubordinateView(editing: nil, claimOrgPersonId: p.id)` 打開）；行為 G3 做
+    var claimOrgPersonId: UUID? = nil
 
     @State private var name = ""
     @State private var hasJoinDate = false
