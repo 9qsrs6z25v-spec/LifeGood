@@ -2923,7 +2923,8 @@ extension CompetencyMath {
     /// ↔ level_detail：那一分的說明（項目自己的蓋過等級表的）；範圍跟等級表不一樣、超過 11 級 nil
     static func levelDetail(scale: CompetencyScale?, item: CompetencyItem?, value v: Int, range r: CompetencyRange) -> String? {
         guard namesAllowed(r), let sc = scale, sc.range == r else { return nil }
-        if let own = item?.levelDetails?.first(where: { $0.value == v })?.detail {
+        // [v25.602 職能雷達 v2] 項目自己的說明標了別的範圍（改範圍前寫的）→ 先不用，照通用說明。要退回這一件：拿掉 `itemDetailsUsable(item, range: r),`
+        if itemDetailsUsable(item, range: r), let own = item?.levelDetails?.first(where: { $0.value == v })?.detail {
             let t: String = own.trimmingCharacters(in: .whitespacesAndNewlines)
             if !t.isEmpty { return t }
         }
@@ -2987,6 +2988,8 @@ extension CompetencyMath {
 
     /// ↔ item_detail_count：項目自己的說明寫了幾分（說明頁那一列「寫了 2 分」）
     static func itemDetailCountText(_ it: CompetencyItem, range r: CompetencyRange) -> String {
+        // [v25.602 職能雷達 v2] 標了別的範圍：「照 1–5 寫的，先不顯示」。要退回這一件：刪這一行
+        if let old = itemDetailsOldRange(it, range: r) { return "照 " + old.text + " 寫的，先不顯示" }
         let n: Int = currentLevelDetails(it.levelDetails, range: r).count
         return n == 0 ? "照通用說明" : "寫了 \(n) 分"
     }
@@ -3286,5 +3289,912 @@ extension CompetencyMath {
         }
         if changed { b.sessions = list }
         return b
+    }
+}
+
+// MARK: - [v25.602 職能雷達 v2] 課的總覽（熱力表、能獨立／能教人、單點風險、找人、課平均雷達、兩人疊圖、一次評全課）、
+//   「能獨立／能教人是第幾級」、項目自己的說明標成舊範圍
+//（radar/judge.md §7 分版表 v2、§4.7、§2.1 independentLevel／trainerLevel、§3.3 第 2 輪 #6、§3.8 課平均與人數、§4.4、§5、§6、§13；
+//  radar/build/v2/brief.md §2；sim_v2.py 一個函式一個函式對照，↔ 後面是 sim 的名字）
+// • 「能獨立」「能教人」是兩條門檻的名字，不是每一分的名字（§13 每一分不預設名字）：還沒設＝nil＝比例 0.5／0.75 最接近的那一級
+//  （四捨五入；1–5 是 3、4，1–10 是 6、8，0–100 是 50、75）。設過的存在 CompetencyScale.independentLevel／trainerLevel（v1a 就宣告了），
+//   設的時候的範圍放 extra「thresholdLow／thresholdHigh」（Competency.swift 一行都沒動；別台改了範圍也換算得回來）。
+// • 能獨立 ≤ 能教人（相等可以：1–2、1–3 這種級數少的範圍照比例本來就會一樣）。改範圍時設過的照比例換到最接近的一級；App 不在更新後自己寫。
+// • 課平均：只算要學、有分數、沒轉出的人（不適用、未評、不用學都不算分母）；能獨立／能教人人數：再扣掉暫時離開中（借調、支援、留停）。
+// • 項目自己的說明（levelDetails）改範圍時標成舊範圍（extra「levelDetailsLow／levelDetailsHigh」）：照新範圍不顯示，改回原來的範圍就回來。
+// • 只在 App 裡：通知、小工具、手錶、鎖定畫面、靈動島一個字都不碰；沒有新的同步鍵、沒有新的模型欄位。
+
+/// 能獨立／能教人是第幾級（現在的範圍）
+struct CompetencyThresholds: Equatable {
+    let independent: Int
+    let trainer: Int
+    /// 使用者自己設過（false＝照比例）
+    let independentSet: Bool
+    let trainerSet: Bool
+    let range: CompetencyRange
+}
+
+/// 熱力表的一位同仁（畫面照轉組織現有的判斷函式算好傳進來：OrgMoveIndex.isArchived、awayNow＋OrgMovePlan.awayText）
+struct CompetencyTeamPerson: Equatable, Identifiable {
+    let id: UUID
+    /// 名字（空白＝「這位同仁」）
+    let name: String
+    let gradeTitleId: UUID?
+    /// 已轉出
+    let archived: Bool
+    /// 今天暫時離開中「借調中・到 1/29」（沒有 nil）
+    let awayText: String?
+}
+
+/// 熱力表看哪一區
+enum CompetencyTeamArea: String, Equatable, CaseIterable, Identifiable {
+    case skill
+    case trait
+
+    var id: String { rawValue }
+    var title: String { self == .skill ? "本職學能" : "人格特質" }
+}
+
+/// 一格是什麼
+enum CompetencyTeamCellKind: Equatable {
+    /// 有分數
+    case value
+    /// 不用學「—」
+    case notRequired
+    /// 未評「·」
+    case unrated
+    /// 不適用「／」
+    case na
+}
+
+/// 熱力表一格
+struct CompetencyTeamCell: Equatable, Identifiable {
+    /// 「人 id|組 id|項目 id」
+    let id: String
+    let personId: UUID
+    let groupId: UUID
+    let itemId: UUID
+    let kind: CompetencyTeamCellKind
+    /// 「4」「≈7.8」「75」「—」「·」「／」
+    let text: String
+    /// 比例（有分數才有）
+    let t: Double?
+    /// 底色五階 0…4（有分數才有；t 0–0.2、0.2–0.4…）
+    let tier: Int?
+    /// ◤ 有分數、沒達到這位現在職等的目標
+    let belowTarget: Bool
+    /// VoiceOver：「王小明，Chemical System・緊急應變，2 分，未達目標 3」
+    let spoken: String
+}
+
+/// 熱力表一列（一位同仁）
+struct CompetencyTeamRow: Equatable, Identifiable {
+    let id: UUID
+    let name: String
+    /// 「E2」（沒設、職等被刪 nil）
+    let gradeShort: String?
+    /// 「借調中・到 1/29」
+    let awayText: String?
+    let archived: Bool
+    /// 跟 columns 同順序
+    let cells: [CompetencyTeamCell]
+}
+
+/// 熱力表一欄（一組 × 一項）
+struct CompetencyTeamColumn: Equatable, Identifiable {
+    /// 「組 id|項目 id」
+    let id: String
+    let groupId: UUID
+    let itemId: UUID
+    /// 欄頭第二行：項目短名，沒有寫名字（「緊急應變」）
+    let itemTitle: String
+    /// 「Chemical System・緊急應變」
+    let fullTitle: String
+    /// 要學、沒轉出（含暫時離開中）的人數；0＝能獨立、能教人寫「—」、不畫框
+    let requiredCount: Int
+    let independentCount: Int
+    let trainerCount: Int
+    /// 能獨立／能教人兩列的字（「3」「—」）
+    let independentText: String
+    let trainerText: String
+    /// 課平均（比例；沒有人有分數 nil）
+    let averageT: Double?
+    /// 「4.33」「4.0」「—」
+    let averageText: String
+    /// 課平均算了幾位
+    let averageCount: Int
+    /// 紅框＝能獨立 ≤ 1；橘框＝能教人 ≤ 1、而且不是紅框
+    let red: Bool
+    let orange: Bool
+}
+
+/// 欄頭第一行（一組佔幾欄）
+struct CompetencyTeamGroupHeader: Equatable, Identifiable {
+    let id: UUID
+    /// 短名或名字「Gas」
+    let title: String
+    let fullTitle: String
+    let isTrait: Bool
+    /// 從 columns 第幾欄開始、佔幾欄
+    let start: Int
+    let count: Int
+}
+
+/// 最上面四張卡
+struct CompetencyTeamCard: Equatable, Identifiable {
+    /// "independent"／"trainer"／"target"／"stale"
+    let id: String
+    /// 「只剩一人能獨立」
+    let title: String
+    let value: Int
+    /// 「1」「3 格」「0 位」「—」
+    let valueText: String
+    /// 下面小字（「Chemical・緊急應變」「還沒評過 1 位」「還沒訂職等目標」）；沒有 nil
+    let note: String?
+    /// value > 0：卡片用紅／橘
+    let alert: Bool
+}
+
+/// 單點風險（點卡片後的那一段字）
+struct CompetencyRiskEntry: Equatable, Identifiable {
+    /// 「independent|欄 id」
+    let id: String
+    /// "independent"／"trainer"
+    let kind: String
+    let columnId: String
+    /// 「Chemical System・緊急應變」
+    let title: String
+    /// 「Chemical System・緊急應變：能獨立的只有陳怡君。陳怡君請假或借調時，沒有第二位能獨立處理。最接近：林志豪 2、王小明 2（都差 1 級）」
+    let text: String
+    /// 〔看林志豪〕打開那位的〔職能〕分頁（沒有最接近的人 nil）
+    let focusPersonId: UUID?
+    let buttonTitle: String?
+}
+
+/// 課的總覽整頁（CompetencyTeamView 只照這個排）
+struct CompetencyTeamModel: Equatable {
+    let area: CompetencyTeamArea
+    let range: CompetencyRange
+    let thresholds: CompetencyThresholds
+    let groups: [CompetencyTeamGroupHeader]
+    let columns: [CompetencyTeamColumn]
+    /// 在職的在前（照名單順序）、已轉出的在後（〔含已轉出〕才有）
+    let rows: [CompetencyTeamRow]
+    /// 四張卡（只剩一人能獨立、只剩一人能教人、未達目標、超過 6 個月沒評）
+    let cards: [CompetencyTeamCard]
+    /// 紅框的欄在前、橘框的在後（欄的順序）
+    let risks: [CompetencyRiskEntry]
+    /// 課平均雷達（每組一張「平均 3 位」；沒有人評過的組不畫）
+    let averageCards: [CompetencyChartModel]
+    /// 「能獨立（≥ 3）」「能教人（≥ 4）」
+    let independentLabel: String
+    let trainerLabel: String
+    /// 「— 不用學・· 未評・／ 不適用・◤ 未達目標」
+    let legend: String
+    /// 還沒設定、這一區沒有項目時的一行（有東西 nil）
+    let emptyText: String?
+    /// 有任何一位有目標（◤ 才有意義）
+    let hasTargets: Bool
+}
+
+/// 〔找人〕的結果
+struct CompetencyFindResult: Equatable {
+    let personIds: [UUID]
+    /// 「陳怡君 4」「林志豪 4（借調中・到 1/29）」
+    let names: [String]
+    /// 「陳怡君 4、林志豪 4」「沒有人 ≥ 5」
+    let text: String
+}
+
+/// 〔一次評全課〕可以選的組
+struct CompetencyBatchChoice: Equatable, Identifiable {
+    let id: UUID
+    let title: String
+    let isTrait: Bool
+}
+
+/// 〔一次評全課〕的一頁（CompetencyRatingRequest.batch；nil＝照舊一位一張）
+struct CompetencyRatingBatch: Equatable {
+    /// 最上面「2／3　陳怡君」
+    let positionText: String
+    /// 「這次評」預設只勾這幾組（跟這一張的組取交集；交集空的照舊全部勾）
+    let groupIds: Set<UUID>
+    /// 後面還有人（右上〔下一位 ›〕）
+    let hasNext: Bool
+}
+
+extension CompetencyMath {
+
+    // MARK: extra 裡的範圍（Competency.swift 不加欄位：設定的範圍放 extra）
+
+    /// 能獨立／能教人設的時候的範圍（CompetencyScale.extra）
+    static let thresholdLowKey: String = "thresholdLow"
+    static let thresholdHighKey: String = "thresholdHigh"
+    /// 項目自己的說明寫的時候的範圍（CompetencyItem.extra）
+    static let detailsLowKey: String = "levelDetailsLow"
+    static let detailsHighKey: String = "levelDetailsHigh"
+    /// 還沒設時照這兩個比例（judge §2.1：出廠 3、4）
+    static let independentRatio: Double = 0.5
+    static let trainerRatio: Double = 0.75
+
+    /// ↔ extra_int：extra 裡的整數（不是數字、不是有限值 nil）
+    static func extraInt(_ extra: [String: JSONValue]?, _ key: String) -> Int? {
+        guard let v = extra?[key], case .number(let d) = v, d.isFinite, abs(d) < 1_000_000 else { return nil }
+        return Int(d.rounded())
+    }
+
+    /// ↔ extra_range：extra 裡存的範圍（兩個都有、合理才算）
+    static func extraRange(_ extra: [String: JSONValue]?, lowKey: String, highKey: String) -> CompetencyRange? {
+        guard let lo = extraInt(extra, lowKey), let hi = extraInt(extra, highKey),
+              CompetencyRange.isValid(low: lo, high: hi) else { return nil }
+        return CompetencyRange(low: lo, high: hi)
+    }
+
+    /// ↔ set_extra_range：寫（r nil＝拿掉）；其他鍵原樣留著；全空回 nil
+    static func settingExtraRange(_ extra: [String: JSONValue]?, _ r: CompetencyRange?,
+                                  lowKey: String, highKey: String) -> [String: JSONValue]? {
+        var e: [String: JSONValue] = extra ?? [:]
+        if let r {
+            e[lowKey] = JSONValue.number(Double(r.low))
+            e[highKey] = JSONValue.number(Double(r.high))
+        } else {
+            e.removeValue(forKey: lowKey)
+            e.removeValue(forKey: highKey)
+        }
+        return e.isEmpty ? nil : e
+    }
+
+    // MARK: 能獨立／能教人是第幾級（judge §2.1、§3.3 第 2 輪 #6、§4.4「v2 等級表多兩個選單」）
+
+    /// ↔ convert_level：一級換到另一個範圍最接近的那一級（四捨五入；1–5 的 3 → 1–10 的 6、4 → 8）
+    static func convertLevel(_ v: Int, from: CompetencyRange, to: CompetencyRange) -> Int {
+        if from == to { return to.clamp(v) }
+        return to.clamp(roundHalfUp(convert(from.clamp(v), from: from, to: to)))
+    }
+
+    /// ↔ thresholds：現在的範圍下能獨立、能教人是第幾級。沒設＝比例 0.5／0.75 最接近的一級；
+    /// 設過的照設的時候的範圍換算（別台改了範圍也對得上）；能教人不會比能獨立低
+    static func thresholds(_ scale: CompetencyScale?, range r: CompetencyRange) -> CompetencyThresholds {
+        let stored: CompetencyRange = extraRange(scale?.extra, lowKey: thresholdLowKey, highKey: thresholdHighKey) ?? r
+        var ind: Int = suggestLevel(independentRatio, r)
+        var tr: Int = suggestLevel(trainerRatio, r)
+        if let v = scale?.independentLevel { ind = convertLevel(v, from: stored, to: r) }
+        if let v = scale?.trainerLevel { tr = convertLevel(v, from: stored, to: r) }
+        if tr < ind { tr = ind }
+        return CompetencyThresholds(independent: ind, trainer: tr, independentSet: scale?.independentLevel != nil,
+                                    trainerSet: scale?.trainerLevel != nil, range: r)
+    }
+
+    /// ↔ threshold_options：選單能選的級（能獨立：最低…能教人；能教人：能獨立…最高）
+    static func thresholdOptions(_ th: CompetencyThresholds, trainer: Bool) -> [Int] {
+        let lo: Int = trainer ? th.independent : th.range.low
+        let hi: Int = trainer ? th.range.high : th.trainer
+        guard lo <= hi else { return [] }
+        return Array(lo...hi)
+    }
+
+    /// ↔ threshold_option_text：選單一項「3 能獨立」（那一分有名字）／「3」
+    static func thresholdOptionText(_ v: Int, scale: CompetencyScale?, range r: CompetencyRange) -> String {
+        if let n = currentLevelNames(scale, range: r)[v] { return "\(v) " + n }
+        return "\(v)"
+    }
+
+    /// ↔ threshold_footer：設定頁那兩列下面的小字
+    static func thresholdFooter(_ th: CompetencyThresholds) -> String {
+        if !th.independentSet && !th.trainerSet {
+            return "還沒設：照範圍的一半、四分之三（\(th.range.text) 是 \(th.independent)、\(th.trainer)）。熱力表的能獨立、能教人人數、紅框橘框照這兩條算。"
+        }
+        return "熱力表的能獨立、能教人人數、紅框橘框照這兩條算；改了馬上重算，以前的分數不動。"
+    }
+
+    /// ↔ setting_threshold：設一條（trainer＝能教人；level nil＝改回照比例）。另一條設過的照現在範圍重寫一次（一起標現在的範圍）。
+    /// 不在範圍裡、能獨立 > 能教人 → nil（不寫）
+    static func settingThreshold(_ book: CompetencySetupBook, scaleId: String, trainer: Bool, level: Int?,
+                                 now: Date) -> CompetencySetupBook? {
+        let r: CompetencyRange = scaleId == CompetencySetupBook.traitScaleId ? book.traitRange : book.skillRange
+        var sc: CompetencyScale = book.scale(scaleId) ?? CompetencyScale(id: scaleId, low: r.low, high: r.high)
+        let th: CompetencyThresholds = thresholds(sc, range: r)
+        var ind: Int? = sc.independentLevel == nil ? nil : th.independent
+        var tr: Int? = sc.trainerLevel == nil ? nil : th.trainer
+        if trainer { tr = level } else { ind = level }
+        if let v = level, !r.contains(v) { return nil }
+        let effInd: Int = ind ?? suggestLevel(independentRatio, r)
+        let effTr: Int = tr ?? suggestLevel(trainerRatio, r)
+        if effInd > effTr { return nil }
+        let any: Bool = ind != nil || tr != nil
+        let newExtra: [String: JSONValue]? = settingExtraRange(sc.extra, any ? r : nil,
+                                                              lowKey: thresholdLowKey, highKey: thresholdHighKey)
+        if sc.independentLevel == ind && sc.trainerLevel == tr && sc.extra == newExtra { return book }
+        sc.independentLevel = ind
+        sc.trainerLevel = tr
+        sc.extra = newExtra
+        sc.updatedAt = now
+        var b: CompetencySetupBook = book
+        b.upsertScale(sc)
+        return b
+    }
+
+    /// ↔ threshold_range_line：改範圍的說明框多一行（設過才有）「能獨立 3 → 6、能教人 4 → 8（照比例換，改完可以在下面改）」
+    static func thresholdRangeLine(scale: CompetencyScale?, from old: CompetencyRange, to new: CompetencyRange) -> String? {
+        guard old != new, let sc = scale, sc.independentLevel != nil || sc.trainerLevel != nil else { return nil }
+        let a: CompetencyThresholds = thresholds(sc, range: old)
+        var parts: [String] = []
+        if sc.independentLevel != nil {
+            parts.append("能獨立 \(a.independent) → \(convertLevel(a.independent, from: old, to: new))")
+        }
+        if sc.trainerLevel != nil {
+            let ni: Int = convertLevel(a.independent, from: old, to: new)
+            let nt: Int = max(convertLevel(a.trainer, from: old, to: new), sc.independentLevel != nil ? ni : 0)
+            parts.append("能教人 \(a.trainer) → \(nt)")
+        }
+        return parts.joined(separator: "、") + "（照比例換，改完可以在下面改）"
+    }
+
+    /// ↔ apply_range_change：改範圍那一次一起做（setCompetencyRange 兩支都叫它；old＝改之前的範圍）：
+    /// ① 設過的能獨立／能教人照比例換到新範圍最接近的一級、標新範圍（沒設的本來就照比例，不寫）；
+    /// ② 這一區的項目自己的說明還沒標範圍的，標成舊範圍（照新範圍不顯示；改回原來的範圍就回來）
+    static func applyingRangeChange(_ book: CompetencySetupBook, scaleId: String, from old: CompetencyRange,
+                                    to new: CompetencyRange, now: Date) -> CompetencySetupBook {
+        guard old != new else { return book }
+        var b: CompetencySetupBook = book
+        if var sc = b.scale(scaleId), sc.independentLevel != nil || sc.trainerLevel != nil {
+            let th: CompetencyThresholds = thresholds(sc, range: old)
+            var ni: Int? = nil
+            var nt: Int? = nil
+            if sc.independentLevel != nil { ni = convertLevel(th.independent, from: old, to: new) }
+            if sc.trainerLevel != nil { nt = convertLevel(th.trainer, from: old, to: new) }
+            if let i = ni, let t = nt, t < i { nt = i }
+            sc.independentLevel = ni
+            sc.trainerLevel = nt
+            sc.extra = settingExtraRange(sc.extra, new, lowKey: thresholdLowKey, highKey: thresholdHighKey)
+            sc.updatedAt = now
+            b.upsertScale(sc)
+        }
+        let isTrait: Bool = scaleId == CompetencySetupBook.traitScaleId
+        var items: [CompetencyItem] = b.allItems
+        var changed = false
+        for i in items.indices {
+            let it: CompetencyItem = items[i]
+            guard it.isLive, (it.groupId == CompetencySetupBook.traitGroupId) == isTrait else { continue }
+            guard !(it.levelDetails ?? []).isEmpty,
+                  extraRange(it.extra, lowKey: detailsLowKey, highKey: detailsHighKey) == nil else { continue }
+            items[i].extra = settingExtraRange(it.extra, old, lowKey: detailsLowKey, highKey: detailsHighKey)
+            items[i].updatedAt = now
+            changed = true
+        }
+        if changed { b.items = items }
+        return b
+    }
+
+    // MARK: 項目自己的說明標成舊範圍（v1b adjudicate 留下的第 1 件）
+
+    /// ↔ item_details_usable：這一項自己的說明能不能用在這個範圍（沒標＝當成現在的範圍寫的）
+    static func itemDetailsUsable(_ it: CompetencyItem?, range r: CompetencyRange) -> Bool {
+        guard let it else { return false }
+        guard let mr = extraRange(it.extra, lowKey: detailsLowKey, highKey: detailsHighKey) else { return true }
+        return mr == r
+    }
+
+    /// ↔ item_details_old_range：標的範圍跟現在不一樣才有（說明頁頂上一行「這些說明是照 1–5 寫的…」）
+    static func itemDetailsOldRange(_ it: CompetencyItem, range r: CompetencyRange) -> CompetencyRange? {
+        guard !(it.levelDetails ?? []).isEmpty,
+              let mr = extraRange(it.extra, lowKey: detailsLowKey, highKey: detailsHighKey), mr != r else { return nil }
+        return mr
+    }
+
+    /// ↔ item_details_old_text：「這些說明是照 1–5 寫的，現在是 1–10，評分時先不顯示。改回 1–5 就會再出現；改一句就照 1–10 用。」
+    static func itemDetailsOldText(_ old: CompetencyRange, now r: CompetencyRange) -> String {
+        "這些說明是照 " + old.text + " 寫的，現在是 " + r.text + "，評分時先不顯示。改回 " + old.text
+            + " 就會再出現；改一句就照 " + r.text + " 用。"
+    }
+
+    /// ↔ hidden_item_details_note：改範圍後設定頁的小提示（這一區有幾項自己的說明先收起來）；沒有 nil
+    static func hiddenItemDetailsNote(_ book: CompetencySetupBook, scaleId: String) -> String? {
+        let isTrait: Bool = scaleId == CompetencySetupBook.traitScaleId
+        let r: CompetencyRange = isTrait ? book.traitRange : book.skillRange
+        var n = 0
+        var oldText: String = ""
+        for it in book.allItems where it.isActive && (it.groupId == CompetencySetupBook.traitGroupId) == isTrait {
+            if let o = itemDetailsOldRange(it, range: r) {
+                n += 1
+                oldText = o.text
+            }
+        }
+        guard n > 0 else { return nil }
+        return "\(n) 項自己的說明是照 " + oldText + " 寫的，評分時先不顯示（改回 " + oldText + " 就會再出現）。"
+    }
+
+    // MARK: 課的總覽（judge §4.7）
+
+    /// ↔ team_tier：底色五階（t 0–0.2 → 0、…、0.8–1 → 4；1–5 的 1～5 剛好一級一階）
+    static func teamTier(_ t: Double) -> Int {
+        let x: Double = (t * 5 + 1e-9).rounded(.down)
+        return min(4, max(0, Int(x)))
+    }
+
+    /// ↔ team_avg_text：課平均最多兩位小數（4.3333 →「4.33」、4 →「4.0」、3.5 →「3.5」）
+    static func teamAverageText(_ x: Double) -> String {
+        let h: Int = Int((abs(x) * 100).rounded())
+        let whole: Int = h / 100
+        let frac: Int = h % 100
+        var s: String
+        if frac == 0 {
+            s = "\(whole).0"
+        } else if frac % 10 == 0 {
+            s = "\(whole).\(frac / 10)"
+        } else {
+            s = "\(whole)." + (frac < 10 ? "0\(frac)" : "\(frac)")
+        }
+        if x < 0 && h != 0 { s = "-" + s }
+        return s
+    }
+
+    /// ↔ team_groups：這一區要畫的組（人格：有項目才有；本職：啟用中的系統）＋軸（0 項的組不畫）
+    static func teamGroups(setup: CompetencySetupBook, area: CompetencyTeamArea) -> [(group: CompetencyGroup, axes: [CompetencyItem])] {
+        var out: [(group: CompetencyGroup, axes: [CompetencyItem])] = []
+        if area == .trait {
+            if let tg = setup.traitGroup {
+                let ax: [CompetencyItem] = setup.axes(for: tg.id)
+                if !ax.isEmpty { out.append((group: tg, axes: ax)) }
+            }
+            return out
+        }
+        for g in setup.activeSystems {
+            let ax: [CompetencyItem] = setup.axes(for: g.id)
+            if !ax.isEmpty { out.append((group: g, axes: ax)) }
+        }
+        return out
+    }
+
+    /// ↔ team_required：這位要不要學這一組（人格特質人人都評；系統：沒勾不用學）
+    static func teamRequired(_ g: CompetencyGroup, personId: UUID, setup: CompetencySetupBook) -> Bool {
+        g.isTrait || !setup.skippedGroupIds(personId).contains(g.id)
+    }
+
+    /// ↔ team_last_day：這位最後一次評分（有格子的、沒刪的）
+    static func teamLastDay(_ sessions: [CompetencySession]) -> String? {
+        sessions.filter { $0.isLive && $0.isByMe && !$0.liveScores.isEmpty }.map { $0.dayKey }.max()
+    }
+
+    /// ↔ team：課的總覽整頁。people＝現在名單（部門篩選後；〔含已轉出〕關著時就沒有已轉出的人）；sessions＝每位的評分；
+    /// grades＝職等表（◤ 照這位現在的職等，v1b 的 resolveTarget）
+    static func teamModel(setup: CompetencySetupBook, people: [CompetencyTeamPerson], sessions: [UUID: [CompetencySession]],
+                          grades: [CompetencyGradeRef], area: CompetencyTeamArea, today: String) -> CompetencyTeamModel {
+        let isTrait: Bool = area == .trait
+        let range: CompetencyRange = isTrait ? setup.traitRange : setup.skillRange
+        let scale: CompetencyScale? = setup.scale(isTrait ? CompetencySetupBook.traitScaleId : CompetencySetupBook.skillScaleId)
+        let th: CompetencyThresholds = thresholds(scale, range: range)
+        let indT: Double = ratio(th.independent, range)
+        let trT: Double = ratio(th.trainer, range)
+        let table: [CompetencyTargetKey: CompetencyTarget] = targetTable(setup)
+        let ordered: [CompetencyTeamPerson] = people.filter { !$0.archived } + people.filter { $0.archived }
+        var cellsOf: [UUID: [CompetencyCellKey: CompetencyCellValue]] = [:]
+        for p in ordered { cellsOf[p.id] = latestCells(sessions[p.id] ?? []) }
+        let gradeOf: [UUID: CompetencyGradeRef] = Dictionary(grades.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+
+        // 要畫的組：有人要學、或有人有分數
+        var groups: [(group: CompetencyGroup, axes: [CompetencyItem])] = []
+        for ga in teamGroups(setup: setup, area: area) {
+            let gid: UUID = ga.group.id
+            let needed: Bool = ordered.contains { p in
+                if teamRequired(ga.group, personId: p.id, setup: setup) { return true }
+                return (cellsOf[p.id] ?? [:]).keys.contains { $0.groupId == gid }
+            }
+            if needed { groups.append(ga) }
+        }
+
+        var headers: [CompetencyTeamGroupHeader] = []
+        var columns: [CompetencyTeamColumn] = []
+        var rowCells: [UUID: [CompetencyTeamCell]] = [:]
+        var averageCards: [CompetencyChartModel] = []
+        var belowCount = 0
+        var hasTargets = false
+        for ga in groups {
+            let g: CompetencyGroup = ga.group
+            headers.append(CompetencyTeamGroupHeader(id: g.id, title: chipTitle(g), fullTitle: g.displayName, isTrait: g.isTrait,
+                                                     start: columns.count, count: ga.axes.count))
+            var raters: Set<UUID> = []
+            var avgTs: [Double?] = []
+            var avgTexts: [String?] = []
+            for item in ga.axes {
+                let key = CompetencyCellKey(groupId: g.id, itemId: item.id)
+                let full: String = g.displayName + "・" + item.displayName
+                var required = 0
+                var ind = 0
+                var tr = 0
+                var ts: [Double] = []
+                for p in ordered {
+                    let req: Bool = teamRequired(g, personId: p.id, setup: setup)
+                    let cell: CompetencyCellValue? = cellsOf[p.id]?[key]
+                    let eligible: Bool = req && !p.archived
+                    var kind: CompetencyTeamCellKind = .unrated
+                    var text: String = "·"
+                    var t: Double? = nil
+                    var below = false
+                    var spoken: String = p.name + "，" + full + "，"
+                    if !req {
+                        kind = .notRequired
+                        text = "—"
+                        spoken += "不用學"
+                    } else if let c = cell {
+                        if c.na {
+                            kind = .na
+                            text = "／"
+                            spoken += "不適用"
+                        } else if let ct = c.ratio {
+                            kind = .value
+                            text = cellText(c, in: range)
+                            t = ct
+                            spoken += text + " 分"
+                        }
+                    } else {
+                        spoken += "未評"
+                    }
+                    if !p.archived, let gidGrade = p.gradeTitleId, gradeOf[gidGrade] != nil,
+                       let rt = resolveTarget(table, gradeId: gidGrade, groupId: g.id, itemId: item.id, fallback: range), req {
+                        hasTargets = true
+                        if let ct = t, ct < rt.ratio - 1e-9 {
+                            below = true
+                            belowCount += 1
+                            spoken += "，未達目標 " + targetValueText(rt, in: range)
+                        }
+                    }
+                    if eligible {
+                        required += 1
+                        if let ct = t {
+                            ts.append(ct)
+                            raters.insert(p.id)
+                            if p.awayText == nil {
+                                if ct >= indT - 1e-9 { ind += 1 }
+                                if ct >= trT - 1e-9 { tr += 1 }
+                            }
+                        }
+                    }
+                    let tier: Int? = t.map { teamTier($0) }
+                    let cellId: String = p.id.uuidString + "|" + g.id.uuidString + "|" + item.id.uuidString
+                    let tc = CompetencyTeamCell(id: cellId, personId: p.id, groupId: g.id, itemId: item.id, kind: kind,
+                                                text: text, t: t, tier: tier, belowTarget: below, spoken: spoken)
+                    rowCells[p.id, default: []].append(tc)
+                }
+                let avg: Double? = ts.isEmpty ? nil : ts.reduce(0, +) / Double(ts.count)
+                let avgText: String = avg.map { teamAverageText(value(atRatio: $0, range)) } ?? "—"
+                let has: Bool = required > 0
+                let red: Bool = has && ind <= 1
+                let orange: Bool = has && !red && tr <= 1
+                let itemTitle: String = cleanShortName(item.shortName, max: itemShortMax) ?? item.displayName
+                columns.append(CompetencyTeamColumn(
+                    id: g.id.uuidString + "|" + item.id.uuidString, groupId: g.id, itemId: item.id, itemTitle: itemTitle,
+                    fullTitle: full, requiredCount: required, independentCount: ind, trainerCount: tr,
+                    independentText: has ? "\(ind)" : "—", trainerText: has ? "\(tr)" : "—",
+                    averageT: avg, averageText: avgText, averageCount: ts.count, red: red, orange: orange))
+                avgTs.append(avg)
+                avgTexts.append(avg == nil ? nil : avgText)
+            }
+            if !raters.isEmpty {
+                averageCards.append(teamAverageCard(group: g, axes: ga.axes, ts: avgTs, texts: avgTexts, count: raters.count,
+                                                    range: range))
+            }
+        }
+
+        var rows: [CompetencyTeamRow] = []
+        for p in ordered {
+            var short: String? = nil
+            if let gid = p.gradeTitleId, let gr = gradeOf[gid] { short = gr.short }
+            rows.append(CompetencyTeamRow(id: p.id, name: p.name, gradeShort: short, awayText: p.awayText,
+                                          archived: p.archived, cells: rowCells[p.id] ?? []))
+        }
+
+        let risks: [CompetencyRiskEntry] = teamRisks(columns: columns, rows: rows, people: ordered, range: range, th: th)
+        let cards: [CompetencyTeamCard] = teamCards(columns: columns, people: ordered, sessions: sessions,
+                                                    belowCount: belowCount, hasTargets: hasTargets, today: today)
+        var legend: String = "— 不用學・· 未評・／ 不適用"
+        if hasTargets { legend += "・◤ 未達目標" }
+        var empty: String? = nil
+        if !setup.isConfigured {
+            empty = "還沒設定職能項目（設定 → 進階設定 → 部屬評分 → 職能項目）"
+        } else if columns.isEmpty {
+            empty = isTrait ? "人格特質還沒有項目" : "還沒有要學的系統項目"
+        }
+        return CompetencyTeamModel(area: area, range: range, thresholds: th, groups: headers, columns: columns, rows: rows,
+                                   cards: cards, risks: risks, averageCards: averageCards,
+                                   independentLabel: "能獨立（≥ \(th.independent)）",
+                                   trainerLabel: "能教人（≥ \(th.trainer)）",
+                                   legend: legend, emptyText: empty, hasTargets: hasTargets)
+    }
+
+    /// ↔ team_cards：最上面四張卡（在職的人才算；已轉出不算）
+    static func teamCards(columns: [CompetencyTeamColumn], people: [CompetencyTeamPerson],
+                          sessions: [UUID: [CompetencySession]], belowCount: Int, hasTargets: Bool,
+                          today: String) -> [CompetencyTeamCard] {
+        let reds: [CompetencyTeamColumn] = columns.filter { $0.red }
+        let oranges: [CompetencyTeamColumn] = columns.filter { $0.orange }
+        var stale = 0
+        var never = 0
+        for p in people where !p.archived {
+            if let d = teamLastDay(sessions[p.id] ?? []) {
+                if isStale(lastDay: d, today: today) { stale += 1 }
+            } else {
+                never += 1
+            }
+        }
+        let c1 = CompetencyTeamCard(id: "independent", title: "只剩一人能獨立", value: reds.count, valueText: "\(reds.count)",
+                                    note: teamColumnsNote(reds), alert: !reds.isEmpty)
+        let c2 = CompetencyTeamCard(id: "trainer", title: "只剩一人能教人", value: oranges.count, valueText: "\(oranges.count)",
+                                    note: teamColumnsNote(oranges), alert: !oranges.isEmpty)
+        let c3 = CompetencyTeamCard(id: "target", title: "未達目標", value: belowCount,
+                                    valueText: hasTargets ? "\(belowCount) 格" : "—",
+                                    note: hasTargets ? nil : "還沒訂職等目標", alert: belowCount > 0)
+        let c4 = CompetencyTeamCard(id: "stale", title: "超過 6 個月沒評", value: stale, valueText: "\(stale) 位",
+                                    note: never > 0 ? "還沒評過 \(never) 位" : nil, alert: stale > 0)
+        return [c1, c2, c3, c4]
+    }
+
+    /// ↔ team_cols_note：卡片下面小字「Chemical・緊急應變」「Chemical・P&ID 等 2 項」
+    static func teamColumnsNote(_ cols: [CompetencyTeamColumn]) -> String? {
+        guard let f = cols.first else { return nil }
+        if cols.count == 1 { return f.fullTitle }
+        return f.fullTitle + " 等 \(cols.count) 項"
+    }
+
+    /// ↔ team_risks：紅框的欄（能獨立）在前、橘框（能教人）在後；每一段字照 §4.7
+    static func teamRisks(columns: [CompetencyTeamColumn], rows: [CompetencyTeamRow], people: [CompetencyTeamPerson],
+                          range: CompetencyRange, th: CompetencyThresholds) -> [CompetencyRiskEntry] {
+        var out: [CompetencyRiskEntry] = []
+        for (ci, col) in columns.enumerated() where col.red {
+            out.append(teamRisk(col: col, index: ci, rows: rows, people: people, range: range, level: th.independent,
+                                trainer: false))
+        }
+        for (ci, col) in columns.enumerated() where col.orange {
+            out.append(teamRisk(col: col, index: ci, rows: rows, people: people, range: range, level: th.trainer,
+                                trainer: true))
+        }
+        return out
+    }
+
+    /// ↔ team_risk：一段字。holder＝要學、在職、不是暫時離開、到那一級的人；最接近＝要學、在職、不是暫時離開、有分數、還沒到的人，
+    /// 差最少級的在前（同分照名字），最多兩位
+    static func teamRisk(col: CompetencyTeamColumn, index ci: Int, rows: [CompetencyTeamRow], people: [CompetencyTeamPerson],
+                         range: CompetencyRange, level: Int, trainer: Bool) -> CompetencyRiskEntry {
+        let word: String = trainer ? "能教人" : "能獨立"
+        let lt: Double = ratio(level, range)
+        let span: Double = Double(range.high - range.low)
+        var holders: [String] = []
+        var awayHolders: [String] = []
+        var near: [(name: String, id: UUID, gap: Double, text: String)] = []
+        for r in rows where !r.archived && ci < r.cells.count {
+            let c: CompetencyTeamCell = r.cells[ci]
+            guard c.kind != .notRequired, let t = c.t else { continue }
+            if t >= lt - 1e-9 {
+                if let a = r.awayText {
+                    awayHolders.append(r.name + a)
+                } else {
+                    holders.append(r.name)
+                }
+            } else if r.awayText == nil {
+                near.append((name: r.name, id: r.id, gap: (lt - t) * span, text: c.text))
+            }
+        }
+        near.sort { a, b in
+            if abs(a.gap - b.gap) > 1e-9 { return a.gap < b.gap }
+            return a.name < b.name
+        }
+        let top = Array(near.prefix(2))
+        var s: String = col.fullTitle + "："
+        if holders.count == 1 {
+            let h: String = holders[0]
+            let tail: String = trainer ? "能教人。" : "能獨立處理。"
+            s += word + "的只有" + h + "。"
+            s += h + "請假或借調時，沒有第二位" + tail
+        } else {
+            s += "現在沒有人" + word
+            s += awayHolders.isEmpty ? "。" : "（" + awayHolders.joined(separator: "、") + "）。"
+        }
+        if top.isEmpty {
+            s += "最接近：沒有（別的同仁還沒評或不用學）。"
+        } else {
+            // [v25.602 v2 裁定] map 寫明回傳 String、拆成區域變數，型別檢查才不會太久（字一樣）
+            let nearTexts: [String] = top.map { (p) -> String in p.name + " " + p.text }
+            s += "最接近：" + nearTexts.joined(separator: "、")
+            let same: Bool = top.count == 1 || abs(top[0].gap - top[top.count - 1].gap) < 1e-9
+            if top.count == 1 {
+                s += "（差 " + numberText(top[0].gap) + " 級）"
+            } else if same {
+                s += "（都差 " + numberText(top[0].gap) + " 級）"
+            } else {
+                let gapTexts: [String] = top.map { (p) -> String in p.name + "差 " + numberText(p.gap) + " 級" }
+                s += "（" + gapTexts.joined(separator: "、") + "）"
+            }
+        }
+        let focus: UUID? = top.first?.id
+        let button: String? = top.first.map { "看" + $0.name }
+        return CompetencyRiskEntry(id: (trainer ? "trainer|" : "independent|") + col.id, kind: trainer ? "trainer" : "independent",
+                                   columnId: col.id, title: col.fullTitle, text: s, focusPersonId: focus, buttonTitle: button)
+    }
+
+    /// ↔ team_avg_card：課平均雷達一張（「Gas System・平均 3 位」；不疊上一次、不疊目標）
+    static func teamAverageCard(group: CompetencyGroup, axes: [CompetencyItem], ts: [Double?], texts: [String?],
+                                count: Int, range: CompetencyRange) -> CompetencyChartModel {
+        let n: Int = axes.count
+        let style: CompetencyChartStyle = chartStyle(axisCount: n)
+        var models: [CompetencyAxisModel] = []
+        for (i, item) in axes.enumerated() {
+            let t: Double? = i < ts.count ? ts[i] : nil
+            let tx: String? = i < texts.count ? texts[i] : nil
+            models.append(CompetencyAxisModel(id: item.id, name: item.displayName, label: axisLabel(item, index: i, style: style),
+                                              state: t == nil ? .unrated : .rated, t: t, valueText: tx, originalText: nil,
+                                              levelText: nil, previousT: nil, previousText: nil, deltaText: nil,
+                                              carriedFrom: nil, archived: false))
+        }
+        let rated: [Double] = ts.compactMap { $0 }
+        let avg: Double? = rated.isEmpty ? nil : rated.reduce(0, +) / Double(rated.count)
+        let dateLine: String = "平均 \(count) 位"
+        let title: String = group.displayName
+        let isRadar: Bool = style == .radar || style == .radarShort
+        var spoken: String = title + "，課平均 \(count) 位，\(n) 項。"
+        var parts: [String] = []
+        for m in models {
+            let vt: String = m.valueText.map { $0 + " 分" } ?? "還沒有人評"
+            parts.append(m.name + " " + vt)
+        }
+        if !parts.isEmpty { spoken += parts.joined(separator: "；") + "。" }
+        var note: String? = nil
+        if style == .bars {
+            note = n <= 2 ? "項目少於 3 個，改用橫條" : "超過 12 項，改用橫條"
+        } else if style != .empty && rated.count > 0 && rated.count < 3 {
+            note = "評了 \(rated.count) 項，還畫不成雷達"
+        }
+        let avgText: String? = avg.map { "平均 " + oneDecimalText(round1(value(atRatio: $0, range))) }
+        return CompetencyChartModel(
+            id: group.id, isTrait: group.isTrait, title: title, dateLine: dateLine, headline: title + "・" + dateLine,
+            averageText: avgText, style: style, axes: models, rings: rings(range), range: range,
+            ratedCount: rated.count, drawsPolygon: rated.count >= 3 && isRadar, hasPrevious: false,
+            legendCurrent: "課平均", legendPrevious: nil, note: note, carriedNote: nil, accessibilityText: spoken,
+            neverRated: rated.isEmpty, averageRatio: avg, previousAverageRatio: nil, filledCount: rated.count,
+            axisCount: n, latestDay: nil, previousDayText: nil)
+    }
+
+    /// ↔ team_pair：兩人疊圖（a＝實線、b＝灰色虛線，線型跟「上一次」一樣：色弱分得出）；這一區每組一張，兩位都不用學的組不畫
+    static func teamPairCards(setup: CompetencySetupBook, area: CompetencyTeamArea, a: CompetencyTeamPerson,
+                              aSessions: [CompetencySession], b: CompetencyTeamPerson,
+                              bSessions: [CompetencySession]) -> [CompetencyChartModel] {
+        let range: CompetencyRange = area == .trait ? setup.traitRange : setup.skillRange
+        let ca: [CompetencyCellKey: CompetencyCellValue] = latestCells(aSessions)
+        let cb: [CompetencyCellKey: CompetencyCellValue] = latestCells(bSessions)
+        var out: [CompetencyChartModel] = []
+        for ga in teamGroups(setup: setup, area: area) {
+            let g: CompetencyGroup = ga.group
+            let ra: Bool = teamRequired(g, personId: a.id, setup: setup)
+            let rb: Bool = teamRequired(g, personId: b.id, setup: setup)
+            guard ra || rb else { continue }
+            out.append(teamPairCard(group: g, axes: ga.axes, a: a, cellsA: ra ? ca : [:], b: b, cellsB: rb ? cb : [:],
+                                    requiredB: rb, range: range))
+        }
+        return out
+    }
+
+    /// ↔ team_pair_card：一張（橫條那一列「4　陳怡君 5」）
+    static func teamPairCard(group g: CompetencyGroup, axes: [CompetencyItem], a: CompetencyTeamPerson,
+                             cellsA: [CompetencyCellKey: CompetencyCellValue], b: CompetencyTeamPerson,
+                             cellsB: [CompetencyCellKey: CompetencyCellValue], requiredB: Bool,
+                             range: CompetencyRange) -> CompetencyChartModel {
+        let n: Int = axes.count
+        let style: CompetencyChartStyle = chartStyle(axisCount: n)
+        var models: [CompetencyAxisModel] = []
+        var aCells: [CompetencyCellValue?] = []
+        var bCells: [CompetencyCellValue?] = []
+        var parts: [String] = []
+        for (i, item) in axes.enumerated() {
+            let key = CompetencyCellKey(groupId: g.id, itemId: item.id)
+            let x: CompetencyCellValue? = cellsA[key]
+            let y: CompetencyCellValue? = cellsB[key]
+            aCells.append(x)
+            bCells.append(y)
+            let state: CompetencyAxisState = x == nil ? .unrated : (x?.na == true ? .na : .rated)
+            let at: String = x.map { cellText($0, in: range) } ?? "未評"
+            let bt: String = requiredB ? (y.map { cellText($0, in: range) } ?? "未評") : "不用學"
+            models.append(CompetencyAxisModel(id: item.id, name: item.displayName, label: axisLabel(item, index: i, style: style),
+                                              state: state, t: x?.ratio, valueText: x.map { cellText($0, in: range) },
+                                              originalText: nil, levelText: b.name + " " + bt, previousT: y?.ratio,
+                                              previousText: y.map { cellText($0, in: range) }, deltaText: nil,
+                                              carriedFrom: nil, archived: false))
+            // [v25.602 v2 裁定] 8 段相加拆成兩段（型別檢查；字一樣）
+            let aPart: String = item.displayName + " " + a.name + " " + at
+            let bPart: String = b.name + " " + bt
+            parts.append(aPart + "、" + bPart)
+        }
+        let rated: Int = models.filter { $0.t != nil }.count
+        let hasB: Bool = models.contains { $0.previousT != nil }
+        let avg: Double? = averageRatio(aCells)
+        let title: String = g.displayName
+        let dateLine: String = a.name + " 比 " + b.name
+        let isRadar: Bool = style == .radar || style == .radarShort
+        var note: String? = nil
+        if style == .bars {
+            note = n <= 2 ? "項目少於 3 個，改用橫條" : "超過 12 項，改用橫條"
+        } else if style != .empty && rated > 0 && rated < 3 {
+            note = "評了 \(rated) 項，還畫不成雷達"
+        }
+        let who: String = a.name + "實線、" + b.name + "灰色虛線。"
+        let spoken: String = title + "，" + who + parts.joined(separator: "；") + "。"
+        let avgText: String? = avg.map { "平均 " + oneDecimalText(round1(value(atRatio: $0, range))) }
+        return CompetencyChartModel(
+            id: g.id, isTrait: g.isTrait, title: title, dateLine: dateLine, headline: title + "・" + dateLine,
+            averageText: avgText, style: style, axes: models, rings: rings(range), range: range, ratedCount: rated,
+            drawsPolygon: rated >= 3 && isRadar, hasPrevious: hasB, legendCurrent: a.name,
+            legendPrevious: hasB ? b.name : nil, note: note, carriedNote: nil, accessibilityText: spoken,
+            neverRated: rated == 0, averageRatio: avg, previousAverageRatio: averageRatio(bCells),
+            filledCount: aCells.compactMap { $0 }.count, axisCount: n, latestDay: nil, previousDayText: nil)
+    }
+
+    /// ↔ team_sorted：點欄頭照這一欄排（有分數的照分數，同分照原來的順序；沒分數的照原來順序排在後面；已轉出永遠在最後）
+    static func teamSortedRows(_ rows: [CompetencyTeamRow], column ci: Int, descending: Bool) -> [CompetencyTeamRow] {
+        func part(_ list: [CompetencyTeamRow]) -> [CompetencyTeamRow] {
+            let indexed: [(i: Int, row: CompetencyTeamRow)] = list.enumerated().map { (i: $0.offset, row: $0.element) }
+            let scored = indexed.filter { ci < $0.row.cells.count && $0.row.cells[ci].t != nil }
+            let rest = indexed.filter { !(ci < $0.row.cells.count && $0.row.cells[ci].t != nil) }
+            let sorted = scored.sorted { x, y in
+                let tx: Double = x.row.cells[ci].t ?? 0
+                let ty: Double = y.row.cells[ci].t ?? 0
+                if abs(tx - ty) > 1e-9 { return descending ? tx > ty : tx < ty }
+                return x.i < y.i
+            }
+            return sorted.map { $0.row } + rest.map { $0.row }
+        }
+        return part(rows.filter { !$0.archived }) + part(rows.filter { $0.archived })
+    }
+
+    // MARK: 〔找人〕（judge §4.7「[Slurry System ▾] [緊急應變 ▾] ≥ [4 能教人 ▾]」）
+
+    /// ↔ find：這一欄 ≥ 那一級的人（在職的、照名單順序；暫時離開的也列、名字後面寫「（借調中・到 1/29）」；已轉出不列）
+    static func findPeople(_ m: CompetencyTeamModel, columnId: String, atLeast v: Int) -> CompetencyFindResult {
+        guard let ci = m.columns.firstIndex(where: { $0.id == columnId }) else {
+            return CompetencyFindResult(personIds: [], names: [], text: "沒有這一項")
+        }
+        let lt: Double = ratio(m.range.clamp(v), m.range)
+        var ids: [UUID] = []
+        var names: [String] = []
+        for r in m.rows where !r.archived && ci < r.cells.count {
+            let c: CompetencyTeamCell = r.cells[ci]
+            guard c.kind == .value, let t = c.t, t >= lt - 1e-9 else { continue }
+            ids.append(r.id)
+            let awayPart: String = r.awayText.map { "（" + $0 + "）" } ?? ""
+            names.append(r.name + " " + c.text + awayPart)
+        }
+        let text: String = names.isEmpty ? "沒有人 ≥ \(m.range.clamp(v))" : names.joined(separator: "、")
+        return CompetencyFindResult(personIds: ids, names: names, text: text)
+    }
+
+    // MARK: 〔一次評全課〕（judge §4.7；擋訂閱）
+
+    /// ↔ batch_choices：可以選的組（人格特質有項目才有、啟用中有項目的系統）
+    static func batchChoices(setup: CompetencySetupBook) -> [CompetencyBatchChoice] {
+        var out: [CompetencyBatchChoice] = []
+        for area in [CompetencyTeamArea.trait, CompetencyTeamArea.skill] {
+            for ga in teamGroups(setup: setup, area: area) {
+                out.append(CompetencyBatchChoice(id: ga.group.id, title: chipTitle(ga.group), isTrait: ga.group.isTrait))
+            }
+        }
+        return out
+    }
+
+    /// ↔ batch_queue：照名單一位一頁：在職（沒轉出；暫時離開的也評）、選的組裡至少一組要學的人
+    static func batchQueue(setup: CompetencySetupBook, people: [CompetencyTeamPerson],
+                           groupIds: Set<UUID>) -> [CompetencyTeamPerson] {
+        let groups: [CompetencyGroup] = batchChoices(setup: setup).filter { groupIds.contains($0.id) }.compactMap { setup.group($0.id) }
+        return people.filter { p in
+            !p.archived && groups.contains { teamRequired($0, personId: p.id, setup: setup) }
+        }
+    }
+
+    /// ↔ batch_position：「2／3　陳怡君」
+    static func batchPositionText(index: Int, total: Int, name: String) -> String {
+        "\(index + 1)／\(total)　" + name
+    }
+
+    /// ↔ batch_done：關掉後的小提示「評好 2／3 位」「3 位都評好了」「這次沒有評」
+    static func batchDoneText(saved: Int, total: Int) -> String {
+        if saved == 0 { return "這次沒有評" }
+        if saved >= total { return "\(total) 位都評好了" }
+        return "評好 \(saved)／\(total) 位"
     }
 }

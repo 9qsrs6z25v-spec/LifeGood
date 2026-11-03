@@ -9346,10 +9346,13 @@ extension LifeStore {
         mutateCompetencySetup { b, now in
             var sc = b.scale(scaleId) ?? CompetencyScale(id: scaleId)
             guard sc.low != low || sc.high != high else { return }
+            let oldRange: CompetencyRange = sc.range   // [v25.602 職能雷達 v2] 改之前的範圍。要退回這一件：刪這一行與下面那一行
             sc.low = low
             sc.high = high
             sc.updatedAt = now
             b.upsertScale(sc)
+            // [v25.602 v2] 設過的能獨立／能教人照比例換、項目自己的說明標成舊範圍（CompetencyMath.applyingRangeChange）
+            b = CompetencyMath.applyingRangeChange(b, scaleId: scaleId, from: oldRange, to: CompetencyRange(low: low, high: high), now: now)
         }
         return true
     }
@@ -9808,6 +9811,7 @@ extension LifeStore {
         let r = CompetencyRange(low: low, high: high)
         mutateCompetencySetup { b, now in
             var sc = b.scale(scaleId) ?? CompetencyScale(id: scaleId)
+            let oldRange: CompetencyRange = sc.range   // [v25.602 職能雷達 v2] 改之前的範圍。要退回這一件：刪這一行與下面那一行
             if sc.low != low || sc.high != high {
                 sc.low = low
                 sc.high = high
@@ -9815,6 +9819,7 @@ extension LifeStore {
                 b.upsertScale(sc)
             }
             b = CompetencyMath.applyingRetarget(b, levels: retarget, range: r, now: now)
+            b = CompetencyMath.applyingRangeChange(b, scaleId: scaleId, from: oldRange, to: r, now: now)   // [v25.602 v2]
         }
         return true
     }
@@ -9844,6 +9849,9 @@ extension LifeStore {
             let merged: [CompetencyLevel]? = CompetencyMath.mergedDetails(existing: it.levelDetails, details: details, range: range)
             guard merged != it.levelDetails else { return }
             it.levelDetails = merged
+            // [v25.602 職能雷達 v2] 標上寫說明時的範圍（之後改範圍，這些說明就不會用在別的範圍）。要退回這一件：刪這兩行
+            it.extra = CompetencyMath.settingExtraRange(it.extra, merged == nil ? nil : range,
+                                                        lowKey: CompetencyMath.detailsLowKey, highKey: CompetencyMath.detailsHighKey)
             it.updatedAt = now
             b.upsertItem(it)
         }
@@ -9865,6 +9873,102 @@ extension LifeStore {
             var r: CompetencyRatingBook = result.ratings
             r.stampFormat()
             if r != competencyRatings { competencyRatings = r }
+        }
+    }
+}
+
+// MARK: - [v25.602 職能雷達 v2] 課的總覽、能獨立／能教人是第幾級、項目自己的說明標範圍
+//（radar/judge.md §7 分版表 v2、§4.7、§2.1、§3.3、§3.8、§4.4、§13；radar/build/v2/brief.md §2.3）
+// 跟上面三段同一套規矩：寫入每支一個 batched（mutateCompetencySetup）、唯讀時不寫、訂閱由畫面擋（看不擋；〔一次評全課〕、改門檻擋）。
+// 名單的「已轉出」「暫時離開中」照轉組織現有的判斷（OrgMoveIndex.isArchived、awayNow＋OrgMovePlan.awayText），轉組織的資料一個字都不改。
+// 沒有新的同步鍵、Competency.swift 一個欄位都沒加。sim：radar/build/v2/sim_v2.py（team、thresholds、set_threshold、find、batch…）。
+
+extension LifeStore {
+    // MARK: 課的總覽（熱力表）
+
+    /// 熱力表的名單：members＝人才矩陣現在的名單（部門篩選、〔含已轉出〕之後的；照順序）
+    func competencyTeamPeople(_ subs: [Subordinate]) -> [CompetencyTeamPerson] {
+        let today: String = OrgMovePlan.dayKey(Date())
+        return subs.map { s -> CompetencyTeamPerson in
+            let n: String = s.name.trimmingCharacters(in: .whitespacesAndNewlines)
+            let away: String? = OrgMoveIndex.awayNow(s.id, todayKey: today).map { OrgMovePlan.awayText($0) }
+            return CompetencyTeamPerson(id: s.id, name: n.isEmpty ? "這位同仁" : n, gradeTitleId: s.gradeTitleId,
+                                        archived: OrgMoveIndex.isArchived(s.id), awayText: away)
+        }
+    }
+
+    /// 這幾位的評分（查 CompetencyIndex）
+    private func competencySessionMap(_ people: [CompetencyTeamPerson]) -> [UUID: [CompetencySession]] {
+        var out: [UUID: [CompetencySession]] = [:]
+        for p in people { out[p.id] = competencySessions(of: p.id) }
+        return out
+    }
+
+    /// 課的總覽整頁（body 裡只叫一次：let m = model）
+    func competencyTeamModel(members: [Subordinate], area: CompetencyTeamArea) -> CompetencyTeamModel {
+        let people: [CompetencyTeamPerson] = competencyTeamPeople(members)
+        return CompetencyMath.teamModel(setup: competencySetup, people: people, sessions: competencySessionMap(people),
+                                        grades: competencyGradeRefs, area: area, today: CompetencyMath.dayKey(Date()))
+    }
+
+    /// 兩人疊圖（a 實線、b 灰色虛線）；兩位有一位不在名單裡回空
+    func competencyPairCards(members: [Subordinate], a: UUID, b: UUID, area: CompetencyTeamArea) -> [CompetencyChartModel] {
+        let people: [CompetencyTeamPerson] = competencyTeamPeople(members)
+        guard let pa = people.first(where: { $0.id == a }), let pb = people.first(where: { $0.id == b }) else { return [] }
+        return CompetencyMath.teamPairCards(setup: competencySetup, area: area, a: pa, aSessions: competencySessions(of: a),
+                                            b: pb, bSessions: competencySessions(of: b))
+    }
+
+    /// 〔一次評全課〕可以選的組
+    var competencyBatchChoices: [CompetencyBatchChoice] { CompetencyMath.batchChoices(setup: competencySetup) }
+
+    /// 〔一次評全課〕要評的人（照名單順序；已轉出不評）
+    func competencyBatchQueue(members: [Subordinate], groupIds: Set<UUID>) -> [CompetencyTeamPerson] {
+        CompetencyMath.batchQueue(setup: competencySetup, people: competencyTeamPeople(members), groupIds: groupIds)
+    }
+
+    /// 點一格的 sheet、熱力表：照摘要卡的選單（目前職等／下一個職等／不疊）挑職等；沒設、被刪、那個職等沒有目標 nil
+    func competencyTargetGrade(for subordinateId: UUID, mode: CompetencyTargetMode) -> CompetencyGradeRef? {
+        CompetencyMath.targetGrade(competencyGradeContext(for: subordinateId), mode: mode,
+                                   table: CompetencyMath.targetTable(competencySetup))
+    }
+
+    // MARK: 能獨立／能教人是第幾級（設定頁本職學能、人格特質各兩列）
+
+    /// 現在的範圍下是第幾級（沒設＝照比例）
+    func competencyThresholds(scaleId: String) -> CompetencyThresholds {
+        let r: CompetencyRange = scaleId == CompetencySetupBook.traitScaleId ? competencySetup.traitRange : competencySetup.skillRange
+        return CompetencyMath.thresholds(competencySetup.scale(scaleId), range: r)
+    }
+
+    /// 設一條（trainer＝能教人；level nil＝改回照比例）。不在範圍裡、能獨立 > 能教人回 false、不寫
+    @discardableResult
+    func setCompetencyThreshold(scaleId: String, trainer: Bool, level: Int?) -> Bool {
+        guard scaleId == CompetencySetupBook.traitScaleId || scaleId == CompetencySetupBook.skillScaleId,
+              !competencySetup.isReadOnlyHere else { return false }
+        guard CompetencyMath.settingThreshold(competencySetup, scaleId: scaleId, trainer: trainer, level: level,
+                                              now: Date()) != nil else { return false }
+        mutateCompetencySetup { b, now in
+            if let nb = CompetencyMath.settingThreshold(b, scaleId: scaleId, trainer: trainer, level: level, now: now) {
+                b = nb
+            }
+        }
+        return true
+    }
+
+    // MARK: 項目自己的說明（v1b 留下的：改範圍後標成舊範圍）
+
+    /// 說明頁〔清掉重寫〕：這一項自己的說明全部拿掉（含別的範圍的）、範圍標記一起拿掉，回到通用說明
+    func clearCompetencyItemLevelDetails(_ itemId: UUID) {
+        mutateCompetencySetup { b, now in
+            guard var it = b.item(itemId), it.isLive else { return }
+            let extra: [String: JSONValue]? = CompetencyMath.settingExtraRange(it.extra, nil, lowKey: CompetencyMath.detailsLowKey,
+                                                                               highKey: CompetencyMath.detailsHighKey)
+            guard it.levelDetails != nil || it.extra != extra else { return }
+            it.levelDetails = nil
+            it.extra = extra
+            it.updatedAt = now
+            b.upsertItem(it)
         }
     }
 }

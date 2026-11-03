@@ -572,6 +572,7 @@ struct OrgSelfMoveDoneStep: View {
                     .font(.title3.weight(.bold))
                 headerTexts
                 buttons
+                CompetencySelfMoveHint()   // [v25.602 職能雷達 v2] 設過職能項目才出現「新單位要學的系統不一樣嗎？」。要退回這一件：刪這一行
             }
             .frame(maxWidth: .infinity)
             .padding(24)

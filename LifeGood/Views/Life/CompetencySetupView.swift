@@ -25,6 +25,12 @@ import SwiftUI
 // 要退回 v1b 這一件：git checkout 92b02fe -- LifeGood/Views/Life/CompetencySetupView.swift（回到 v1a-2；
 //   但 CompetencyTargetsView 就沒有入口了，那個檔要一起換回骨架或刪掉＋pbxproj 四處）。
 // 骨架（主控）：型別名與 init 參數是跨組契約，不准改。這個檔自己的型別一律 CompSetup… 前綴、private。
+// MARK: - [v25.602 職能雷達 v2] 人格特質、本職學能各多兩列「能獨立是第幾級」「能教人是第幾級」（CompSetupThresholdRows；
+//   §13：兩條門檻的名字，不是每一分的名字；還沒設＝照比例；≤ 10 用選單打勾、> 10 用 Stepper＋數字欄；能獨立 ≤ 能教人，相等可以；
+//   〔改回照比例〕；擋訂閱、唯讀不能改；App 不在更新後自動寫）、改範圍說明框多 thresholdRangeLine 那一行（設過才有）、
+//   改完範圍有項目自己的說明先收起來時一行小提示（hiddenItemDetailsNote）（G3；radar/build/v2/brief.md §1-4、§1-5、§1-6、§4 G3-A）。
+// 要退回這一件：刪 CompSetupThresholdRows／CompSetupThresholdLine／CompSetupThresholdField 與兩節裡那一行、
+//   CompSetupRangeRow 的 thresholdLineFor（init 參數、changeText）、兩處呼叫的 thresholdLineFor:、commitRange 裡 hiddenItemDetailsNote 那幾行。
 
 struct CompetencySetupView: View {
     /// 從〔職能〕分頁用 sheet 打開時右上多一顆〔完成〕（從設定頁推進來時不用）
@@ -182,8 +188,11 @@ struct CompetencySetupView: View {
             CompSetupRangeRow(current: setup.traitRange, disabled: readOnly, isPremium: subscription.isPremium,
                               onLocked: { showPremiumAlert = true },
                               retargetFor: { r in retargetPlan(CompetencySetupBook.traitScaleId, r) },
+                              thresholdLineFor: { r in thresholdLine(CompetencySetupBook.traitScaleId, r) },
                               onCommit: { r, lv in commitRange(CompetencySetupBook.traitScaleId, r, lv) })
             namesRow(CompetencySetupBook.traitScaleId)
+            // [v25.602 職能雷達 v2] 能獨立／能教人是第幾級（人格那一份）
+            CompSetupThresholdRows(scaleId: CompetencySetupBook.traitScaleId, onLocked: { showPremiumAlert = true })
             ForEach(items) { it in
                 itemRow(it, trailing: nil)
             }
@@ -207,8 +216,11 @@ struct CompetencySetupView: View {
             CompSetupRangeRow(current: setup.skillRange, disabled: readOnly, isPremium: subscription.isPremium,
                               onLocked: { showPremiumAlert = true },
                               retargetFor: { r in retargetPlan(CompetencySetupBook.skillScaleId, r) },
+                              thresholdLineFor: { r in thresholdLine(CompetencySetupBook.skillScaleId, r) },
                               onCommit: { r, lv in commitRange(CompetencySetupBook.skillScaleId, r, lv) })
             namesRow(CompetencySetupBook.skillScaleId)
+            // [v25.602 職能雷達 v2] 能獨立／能教人是第幾級（本職那一份）
+            CompSetupThresholdRows(scaleId: CompetencySetupBook.skillScaleId, onLocked: { showPremiumAlert = true })
         } header: {
             Text("本職學能")
         } footer: {
@@ -536,6 +548,11 @@ struct CompetencySetupView: View {
                                     grades: lifeStore.competencyGradeRefs)
     }
 
+    /// [v25.602 職能雷達 v2] 改範圍說明框多的一行「能獨立 3 → 6、能教人 4 → 8（照比例換，改完可以在下面改）」（沒設過 nil）
+    private func thresholdLine(_ scaleId: String, _ r: CompetencyRange) -> String? {
+        CompetencyMath.thresholdRangeLine(scale: setup.scale(scaleId), from: range(of: scaleId), to: r)
+    }
+
     private var namesQuestionTitle: String {
         guard let q = namesQuestion else { return "" }
         return CompetencyMath.namesQuestionText(from: q.oldRange, to: q.newRange, withDetails: q.hasDetails)
@@ -635,6 +652,11 @@ struct CompetencySetupView: View {
         let store: LifeStore = lifeStore
         DispatchQueue.main.async {
             let ok: Bool = store.setCompetencyRange(scaleId: scaleId, low: r.low, high: r.high, retarget: levels)
+            // [v25.602 職能雷達 v2] 項目自己的說明照舊範圍寫的 → 名字那一列下面一行小提示（名字的問題照舊接在後面問）。
+            // 要退回這一件：刪這個 if
+            if ok, let note = CompetencyMath.hiddenItemDetailsNote(store.competencySetup, scaleId: scaleId) {
+                showFlash(CompSetupFlash(scaleId: scaleId, text: note))
+            }
             if ok && ask {
                 askNames(CompSetupNamesQuestion(scaleId: scaleId, oldRange: old, newRange: r, hasDetails: hasDetails))
             }
@@ -1067,6 +1089,8 @@ private struct CompSetupRangeRow: View {
     let onLocked: () -> Void
     /// [v25.601 職能雷達 v1b] 改成這個範圍時目標要不要一起換（nil＝這一區沒目標，照 v1a 的說明框）
     let retargetFor: (CompetencyRange) -> CompetencyRetargetPlan?
+    /// [v25.602 職能雷達 v2] 改成這個範圍時說明框多的一行（能獨立／能教人設過才有；nil＝不多）
+    let thresholdLineFor: (CompetencyRange) -> String?
     /// [v25.601 職能雷達 v1b] 第二個參數＝目標換成新範圍的整數（空＝不換）
     let onCommit: (CompetencyRange, [UUID: Int]) -> Void
 
@@ -1084,12 +1108,14 @@ private struct CompSetupRangeRow: View {
 
     init(current: CompetencyRange, disabled: Bool, isPremium: Bool, onLocked: @escaping () -> Void,
          retargetFor: @escaping (CompetencyRange) -> CompetencyRetargetPlan?,
+         thresholdLineFor: @escaping (CompetencyRange) -> String? = { _ in nil },
          onCommit: @escaping (CompetencyRange, [UUID: Int]) -> Void) {
         self.current = current
         self.disabled = disabled
         self.isPremium = isPremium
         self.onLocked = onLocked
         self.retargetFor = retargetFor
+        self.thresholdLineFor = thresholdLineFor
         self.onCommit = onCommit
         _low = State(initialValue: current.low)
         _high = State(initialValue: current.high)
@@ -1129,7 +1155,13 @@ private struct CompSetupRangeRow: View {
     }
 
     /// 說明框的字（CompetencyMath.rangeChangeText）
-    private var changeText: String { CompetencyMath.rangeChangeText(from: current, to: draft) }
+    /// [v25.602 職能雷達 v2] 能獨立／能教人設過時多一行 thresholdRangeLine（alert 與 confirmationDialog 都用這一份）。
+    /// 要退回這一件：改回 CompetencyMath.rangeChangeText(from: current, to: draft)
+    private var changeText: String {
+        let base: String = CompetencyMath.rangeChangeText(from: current, to: draft)
+        guard let line = thresholdLineFor(draft) else { return base }
+        return base + "\n" + line
+    }
 
     private var headerLine: some View {
         HStack {
@@ -1263,6 +1295,273 @@ private struct CompSetupRangeRow: View {
         lowText = String(r.low)
         highText = String(r.high)
         hint = nil
+    }
+}
+
+// MARK: - [v25.602 職能雷達 v2] 能獨立／能教人是第幾級（人格、本職各一份；§13 兩條門檻的名字，不是每一分的名字）
+
+/// 兩列＋一行小字＋（設過才有）〔改回照比例〕。當下寫、不關頁（跟 Stepper 一樣）；擋訂閱、唯讀不能改
+private struct CompSetupThresholdRows: View {
+    let scaleId: String
+    /// 沒訂閱 → 設定頁跳訂閱說明
+    let onLocked: () -> Void
+
+    @EnvironmentObject var lifeStore: LifeStore
+    @EnvironmentObject var subscription: SubscriptionManager
+
+    /// 寫不進去時的一行橘字（「能獨立不能比能教人高」、數字欄夾回）
+    @State private var warning: String?
+
+    init(scaleId: String, onLocked: @escaping () -> Void) {
+        self.scaleId = scaleId
+        self.onLocked = onLocked
+    }
+
+    private var isTrait: Bool { scaleId == CompetencySetupBook.traitScaleId }
+    private var readOnly: Bool { lifeStore.competencyReadOnly }
+    private var scale: CompetencyScale? { lifeStore.competencySetup.scale(scaleId) }
+
+    var body: some View {
+        let th: CompetencyThresholds = lifeStore.competencyThresholds(scaleId: scaleId)
+        let sc: CompetencyScale? = scale
+        CompSetupThresholdLine(title: "能獨立是第幾級", spokenName: "能獨立", value: th.independent,
+                               options: CompetencyMath.thresholdOptions(th, trainer: false),
+                               texts: optionTexts(th, sc), usesButtons: th.range.usesButtons, disabled: readOnly,
+                               onPick: { v, clamped in pick(trainer: false, v, clamped: clamped) })
+        CompSetupThresholdLine(title: "能教人是第幾級", spokenName: "能教人", value: th.trainer,
+                               options: CompetencyMath.thresholdOptions(th, trainer: true),
+                               texts: optionTexts(th, sc), usesButtons: th.range.usesButtons, disabled: readOnly,
+                               onPick: { v, clamped in pick(trainer: true, v, clamped: clamped) })
+        footerLines(th)
+    }
+
+    @ViewBuilder
+    private func footerLines(_ th: CompetencyThresholds) -> some View {
+        Text(footerText(th))
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
+        if let w = warning {
+            Text(w)
+                .font(.caption)
+                .foregroundStyle(.orange)
+        }
+        if (th.independentSet || th.trainerSet) && !readOnly {
+            Button("改回照比例") { resetBoth() }
+                .buttonStyle(.borderless)
+                .font(.subheadline)
+        }
+    }
+
+    /// 選單每一項的字（範圍裡每一級：「3 能獨立」／「3」）；> 10 不用選單，不算
+    private func optionTexts(_ th: CompetencyThresholds, _ sc: CompetencyScale?) -> [Int: String] {
+        guard th.range.usesButtons else { return [:] }
+        var out: [Int: String] = [:]
+        for v in th.range.low...th.range.high {
+            out[v] = CompetencyMath.thresholdOptionText(v, scale: sc, range: th.range)
+        }
+        return out
+    }
+
+    private func footerText(_ th: CompetencyThresholds) -> String {
+        let base: String = CompetencyMath.thresholdFooter(th)
+        return isTrait ? base + Self.traitExtra : base
+    }
+
+    private static let traitExtra = "熱力表〔人格特質〕也照這兩條算。"
+
+    // MARK: 動作
+
+    /// 能不能寫：唯讀 → 不能（不跳訂閱）；沒訂閱 → 跳訂閱說明
+    private func gate() -> Bool {
+        if readOnly { return false }
+        if !subscription.isPremium {
+            onLocked()
+            return false
+        }
+        return true
+    }
+
+    /// 選一級（當下寫）；回 false（能獨立 > 能教人、超出範圍）不寫、一行橘字
+    private func pick(trainer: Bool, _ v: Int, clamped: Bool) {
+        guard gate() else { return }
+        let th: CompetencyThresholds = lifeStore.competencyThresholds(scaleId: scaleId)
+        let ok: Bool = lifeStore.setCompetencyThreshold(scaleId: scaleId, trainer: trainer, level: v)
+        if !ok {
+            warning = Self.orderWarning
+        } else if clamped {
+            let opts: [Int] = CompetencyMath.thresholdOptions(th, trainer: trainer)
+            let lo: Int = opts.first ?? th.range.low
+            let hi: Int = opts.last ?? th.range.high
+            warning = "要在 \(lo)～\(hi) 之間，改成 \(v)"
+        } else {
+            warning = nil
+        }
+    }
+
+    /// 〔改回照比例〕兩條都改回。先改能獨立；不行（能教人設得比照比例的能獨立低）就先改能教人。兩條都沒設一定合理
+    private func resetBoth() {
+        guard gate() else { return }
+        let store: LifeStore = lifeStore
+        let id: String = scaleId
+        if store.setCompetencyThreshold(scaleId: id, trainer: false, level: nil) {
+            store.setCompetencyThreshold(scaleId: id, trainer: true, level: nil)
+        } else {
+            store.setCompetencyThreshold(scaleId: id, trainer: true, level: nil)
+            store.setCompetencyThreshold(scaleId: id, trainer: false, level: nil)
+        }
+        warning = nil
+    }
+
+    private static let orderWarning = "能獨立不能比能教人高"
+}
+
+/// 一列「能獨立是第幾級　3 ▾」（≤ 10：選單打勾）／「能獨立是第幾級　[50]〔－〕〔＋〕」（> 10：數字欄＋Stepper）
+private struct CompSetupThresholdLine: View {
+    let title: String
+    /// VoiceOver「能獨立是第 3 級」
+    let spokenName: String
+    let value: Int
+    /// 能選的級（thresholdOptions）
+    let options: [Int]
+    /// 選單每一項的字（≤ 10 才有）
+    let texts: [Int: String]
+    let usesButtons: Bool
+    let disabled: Bool
+    /// 第二個參數＝數字欄夾回了
+    let onPick: (Int, Bool) -> Void
+
+    init(title: String, spokenName: String, value: Int, options: [Int], texts: [Int: String], usesButtons: Bool,
+         disabled: Bool, onPick: @escaping (Int, Bool) -> Void) {
+        self.title = title
+        self.spokenName = spokenName
+        self.value = value
+        self.options = options
+        self.texts = texts
+        self.usesButtons = usesButtons
+        self.disabled = disabled
+        self.onPick = onPick
+    }
+
+    private var lo: Int { options.first ?? value }
+    private var hi: Int { max(options.last ?? value, lo) }
+
+    private var spoken: String { spokenName + "是第 \(value) 級" }
+
+    private func text(_ v: Int) -> String { texts[v] ?? "\(v)" }
+
+    private var stepValue: Binding<Int> {
+        Binding(get: { value }, set: { v in onPick(v, false) })
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Text(title)
+                .accessibilityHidden(true)
+            Spacer(minLength: 8)
+            if usesButtons {
+                menu
+            } else {
+                CompSetupThresholdField(value: value, bounds: lo...hi, spoken: spoken, onPick: onPick)
+                Stepper(title, value: stepValue, in: lo...hi)
+                    .labelsHidden()
+                    .accessibilityLabel(spokenName + "是第幾級")
+                    .accessibilityValue("第 \(value) 級")
+            }
+        }
+        .disabled(disabled)
+    }
+
+    private var menu: some View {
+        Menu {
+            ForEach(options, id: \.self) { v in
+                menuItem(v)
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Text(text(value))
+                    .monospacedDigit()
+                Image(systemName: "chevron.down")
+                    .font(.caption2)
+            }
+        }
+        .accessibilityLabel(spoken)
+        .accessibilityHint("按兩下改")
+    }
+
+    /// 打勾那一項用 Label（跟 v1b〔目標 E2 ▾〕同一套寫法），沒打勾的用純字
+    @ViewBuilder
+    private func menuItem(_ v: Int) -> some View {
+        if v == value {
+            Button {
+                onPick(v, false)
+            } label: {
+                Label(text(v), systemImage: "checkmark")
+            }
+        } else {
+            Button(text(v)) {
+                onPick(v, false)
+            }
+        }
+    }
+}
+
+/// > 10 的數字欄（照 CompSetupRangeRow 的數字欄：離開欄位時 CompetencyMath.parseInput 夾回；不是數字彈回）
+private struct CompSetupThresholdField: View {
+    let value: Int
+    let bounds: ClosedRange<Int>
+    let spoken: String
+    let onPick: (Int, Bool) -> Void
+
+    @State private var text: String = ""
+    @FocusState private var focused: Bool
+
+    /// 明寫 init：@FocusState private（沒有初始值）可能讓合成的 memberwise init 變 private
+    init(value: Int, bounds: ClosedRange<Int>, spoken: String, onPick: @escaping (Int, Bool) -> Void) {
+        self.value = value
+        self.bounds = bounds
+        self.spoken = spoken
+        self.onPick = onPick
+    }
+
+    private var shownText: String { String(value) }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            TextField("", text: $text)
+                .keyboardType(.numberPad)
+                .multilineTextAlignment(.center)
+                .font(.system(.body, design: .rounded).weight(.semibold))
+                .frame(width: 56)
+                .padding(.vertical, 4)
+                .background(Color(.tertiarySystemFill), in: RoundedRectangle(cornerRadius: 8))
+                .focused($focused)
+                .accessibilityLabel(spoken)
+            if focused {
+                Button("好") { focused = false }
+                    .buttonStyle(.borderless)
+            }
+        }
+        .onAppear { text = shownText }
+        .onChange(of: shownText) { _, v in
+            if !focused { text = v }
+        }
+        .onChange(of: focused) { _, f in
+            if !f { commit() }
+        }
+    }
+
+    /// 離開欄位：沒改不寫；不是數字彈回；超出能選的範圍夾回再寫
+    private func commit() {
+        let typed: String = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard typed != shownText else { return }
+        let r: CompetencyRange = CompetencyRange(low: bounds.lowerBound, high: bounds.upperBound)
+        guard let p = CompetencyMath.parseInput(typed, r) else {
+            text = shownText
+            return
+        }
+        onPick(p.value, p.clamped)
+        text = shownText
     }
 }
 

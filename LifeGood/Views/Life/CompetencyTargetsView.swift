@@ -12,6 +12,8 @@ import SwiftUI
 // • 寫給使用者的字不用「他／她」。通知、小工具、手錶、鎖定畫面一個字都不碰。
 // 要退回這一件：把這個檔換回骨架（只列 targetEditor 的字、沒有 Stepper），或連同設定頁那一節一起拿掉＋pbxproj 四處。
 // 骨架（主控）：型別名與 init 參數是跨組契約，不准改。自己加的型別一律 CompTarget… 前綴、private。
+// MARK: - [v25.602 職能雷達 v2] 這一區（人格特質、本職學能「每項」）還沒訂目標時，Stepper 前多一顆〔用 3〕一按寫起點
+//   （radar/build/v2/brief.md §4 G3-B；擋訂閱照 setLevel 的 gate）。要退回這一件：刪 CompTargetRow 的 showsUseStart、useStartButton 與 body 那個 if。
 
 struct CompetencyTargetsView: View {
     /// 職等 id（GradeTitle.id；已刪除的職等也可以打開：只看、只能〔刪掉這組目標〕）
@@ -270,10 +272,17 @@ private struct CompTargetRow: View {
                 set: { v in _ = onSet(v) })
     }
 
+    /// [v25.602 職能雷達 v2] 這一區（depth 0）還沒訂目標 →〔用 3〕一按寫起點（v1b adjudicate 待辦第 3 件；不改 Stepper 本身）。
+    /// 要退回這一件：刪這個 computed var、body 裡那個 if、useStartButton
+    private var showsUseStart: Bool { editable && row.depth == 0 && row.ownLevel == nil }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 8) {
                 labelPart
+                if showsUseStart {
+                    useStartButton
+                }
                 if editable && row.range.high > 10 {
                     CompTargetNumberField(row: row, onSet: onSet)
                 }
@@ -289,6 +298,14 @@ private struct CompTargetRow: View {
             }
         }
         .padding(.leading, row.depth == 2 ? 12 : 0)
+    }
+
+    /// [v25.602 職能雷達 v2] 〔用 3〕（0–100 是〔用 50〕）：擋訂閱照 onSet 原本的 gate
+    private var useStartButton: some View {
+        Button("用 \(row.startLevel)") { _ = onSet(row.startLevel) }
+            .buttonStyle(.borderless)
+            .font(.caption)
+            .accessibilityLabel("目標用 \(row.startLevel)")
     }
 
     /// 名字＋現在套用的值（VoiceOver 念成一句；Stepper、數字欄、按鈕各自一個元素）

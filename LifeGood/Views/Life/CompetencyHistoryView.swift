@@ -193,14 +193,22 @@ struct CompetencyCellHistorySheet: View {
 
     @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.dismiss) private var dismiss
+    /// [v25.602 職能雷達 v2] 跟摘要卡〔目標 E2 ▾〕同一個選單（這台記住；只讀、不改）。熱力表點格子開的也是這一張，所以一起走。
+    /// 要退回這一件：刪這一行與 targetMode，model 的 grade: 改回 lifeStore.competencyCurrentGrade(for: subordinateId)
+    @AppStorage("competency.targetMode") private var targetModeRaw: String = CompetencyTargetMode.current.rawValue
 
-    /// [v25.601 v1b] 改用 v1b 版：多傳這位現在的職等（目標照「目前職等」，不跟摘要卡的選單走）。要退回這一件：拿掉 grade 參數
+    /// [v25.602 v2] 選單的值（認不得的照「目前職等」）
+    private var targetMode: CompetencyTargetMode {
+        CompetencyTargetMode(rawValue: targetModeRaw) ?? .current
+    }
+
+    /// [v25.601 v1b] 改用 v1b 版：多傳職等。[v25.602 v2] 目標跟摘要卡的選單走：目前職等／下一個職等／不疊（nil＝沒有目標那一行）
     private var model: CompetencyCellHistoryModel {
         CompetencyMath.cellHistory(groupId: groupId, itemId: itemId,
                                    setup: lifeStore.competencySetup,
                                    subordinateId: subordinateId,
                                    sessions: lifeStore.competencySessions(of: subordinateId),
-                                   grade: lifeStore.competencyCurrentGrade(for: subordinateId))
+                                   grade: lifeStore.competencyTargetGrade(for: subordinateId, mode: targetMode))
     }
 
     private var tint: Color {

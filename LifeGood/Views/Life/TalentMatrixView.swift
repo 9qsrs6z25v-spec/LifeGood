@@ -449,6 +449,7 @@ struct TalentMatrixView: View {
                             Text("人才矩陣").tag(0)
                             Text("統計圖表").tag(1)
                             Text("評分加總").tag(2)
+                            Text("職能").tag(3)   // [v25.602 職能雷達 v2] 課的總覽。要退回這一件：刪這一行與下面 tab == 3 那兩行
                         }
                         .pickerStyle(.segmented)
                         .padding(.horizontal)
@@ -459,6 +460,8 @@ struct TalentMatrixView: View {
                             PerformanceSummaryView()
                         } else if members.isEmpty {
                             emptyHint
+                        } else if tab == 3 {
+                            CompetencyTeamView(members: members)   // [v25.602 職能雷達 v2] 部門篩選、〔含已轉出〕共用上面那一排
                         } else if tab == 0 {
                             // [v2] 英雄摘要卡 + section header
                             summaryHeroCard(ctx)

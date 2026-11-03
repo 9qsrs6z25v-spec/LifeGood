@@ -20,6 +20,13 @@ import SwiftUI
 // • 超過 11 級（例 0–100）不做每一分的名字、說明（namesAllowed）。範本的字照舊只在 CompetencyMath.levelTemplates。
 // 要退回這一件：刪掉 details 草稿、CompNamesRow 的說明欄、itemSection、CompetencyItemDetailsView 與 CompNamesItem…／CompNamesDetailRow，
 // done() 改回 setCompetencyLevelNames(scaleId:names:)（系統頁的〔說明〕也要一起退）。
+//
+// MARK: [v25.602 職能雷達 v2] 項目自己的說明照舊範圍寫的（G3；radar/build/v2/brief.md §1-6、§4 G3-C；v1b adjudicate 待辦第 1 件）
+// • 改範圍時共用層把還沒標範圍的說明標成舊範圍（CompetencyMath.applyingRangeChange）；照新範圍評分時不顯示，改回原範圍就回來。
+// • CompetencyItemDetailsView 最上面多一節：橘字 itemDetailsOldText「這些說明是照 1–5 寫的…」＋〔清掉重寫〕
+//  （先擋唯讀與訂閱 → 確認「清掉值班技能自己的說明？」→ 下一個 runloop clearCompetencyItemLevelDetails、草稿清空；不關頁）。
+// • 在新範圍改一句按〔完成〕＝整份改標新範圍（setCompetencyItemLevelDetails 自己標，這個檔不用多寫）。
+// 要退回這一件：刪 oldRangeSection、askClearDetails／clearDetailsNow 與 CompNamesOldRangeRow，sections 裡那一行。
 
 struct CompetencyLevelNamesView: View {
     /// "trait"（人格特質）／"skill"（本職學能）
@@ -559,6 +566,8 @@ struct CompetencyItemDetailsView: View {
                     .foregroundStyle(.orange)
             }
         }
+        // [v25.602 職能雷達 v2] 照舊範圍寫的說明：一行橘字＋〔清掉重寫〕（沒標別的範圍時什麼都不畫）
+        oldRangeSection
         if item == nil {
             messageSection("這一項已經不在了")
         } else if !allowed {
@@ -567,6 +576,27 @@ struct CompetencyItemDetailsView: View {
             detailsSection
             clearSection
         }
+    }
+
+    /// [v25.602 職能雷達 v2] 「這些說明是照 1–5 寫的，現在是 1–10，評分時先不顯示…」＋〔清掉重寫〕
+    @ViewBuilder
+    private var oldRangeSection: some View {
+        if let it = item, let old = CompetencyMath.itemDetailsOldRange(it, range: range) {
+            Section {
+                CompNamesOldRangeRow(text: Self.oldRangeText(old, now: range, allowed: allowed),
+                                     itemName: it.displayName,
+                                     disabled: readOnly,
+                                     canWrite: { askClearDetails() },
+                                     onClear: { clearDetailsNow() })
+            }
+        }
+    }
+
+    /// [v25.602 職能雷達 v2 審查修] 頂上那一行：≤ 11 級照 CompetencyMath.itemDetailsOldText；超過 11 級（例 0–100）不能寫說明，
+    /// 「改一句就照 0–100 用」做不到，拿掉那半句。下一版主控可搬進 CompetencyMath。要退回這一件：改回 itemDetailsOldText(old, now: range)
+    private static func oldRangeText(_ old: CompetencyRange, now r: CompetencyRange, allowed: Bool) -> String {
+        if allowed { return CompetencyMath.itemDetailsOldText(old, now: r) }
+        return "這些說明是照 " + old.text + " 寫的，現在是 " + r.text + "，評分時先不顯示。改回 " + old.text + " 就會再出現。"
     }
 
     private func messageSection(_ text: String) -> some View {
@@ -675,6 +705,27 @@ struct CompetencyItemDetailsView: View {
         details = [:]
     }
 
+    /// [v25.602 職能雷達 v2] 〔清掉重寫〕先擋：唯讀 → 不能（不跳訂閱）；沒訂閱 → 跳訂閱說明（確認框之前擋，免得兩個框疊在一起）
+    private func askClearDetails() -> Bool {
+        if readOnly { return false }
+        if !subscription.isPremium {
+            showPremiumAlert = true
+            return false
+        }
+        return true
+    }
+
+    /// [v25.602 職能雷達 v2] 確認〔清掉〕：說明和範圍標記都拿掉（回到通用說明），草稿一起清空；不關頁，下一個 runloop 才寫 store
+    private func clearDetailsNow() {
+        guard !readOnly, subscription.isPremium, item != nil else { return }
+        let store: LifeStore = lifeStore
+        let id: UUID = itemId
+        details = [:]
+        DispatchQueue.main.async {
+            store.clearCompetencyItemLevelDetails(id)
+        }
+    }
+
     /// 〔完成〕：沒改直接關；有改先擋訂閱（沒訂閱不關頁），關掉之後下一個 runloop 才寫 store
     private func done() {
         guard allowed, !readOnly, item != nil, changed else {
@@ -728,6 +779,59 @@ private struct CompNamesDetailRow: View {
                     .disabled(disabled)
                     .accessibilityLabel(spokenLabel)
             }
+        }
+    }
+}
+
+// MARK: - [v25.602 職能雷達 v2] 說明頁頂上「照舊範圍寫的」一行＋〔清掉重寫〕（確認框掛在按鈕上；這一列自己存要不要問）
+
+private struct CompNamesOldRangeRow: View {
+    /// CompetencyMath.itemDetailsOldText(old, now:)
+    let text: String
+    /// 「值班技能」（確認框標題用）
+    let itemName: String
+    let disabled: Bool
+    /// 擋唯讀、訂閱（回 false＝不問）
+    let canWrite: () -> Bool
+    let onClear: () -> Void
+
+    @State private var showConfirm = false
+
+    init(text: String, itemName: String, disabled: Bool, canWrite: @escaping () -> Bool,
+         onClear: @escaping () -> Void) {
+        self.text = text
+        self.itemName = itemName
+        self.disabled = disabled
+        self.canWrite = canWrite
+        self.onClear = onClear
+    }
+
+    private var confirmTitle: String { "清掉" + itemName + "自己的說明？" }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(text, systemImage: "exclamationmark.triangle.fill")
+                .font(.footnote)
+                .foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+            clearButton
+        }
+        .padding(.vertical, 2)
+    }
+
+    private var clearButton: some View {
+        Button(role: .destructive) {
+            if canWrite() { showConfirm = true }
+        } label: {
+            Label("清掉重寫", systemImage: "trash")
+        }
+        .buttonStyle(.borderless)
+        .disabled(disabled)
+        .confirmationDialog(confirmTitle, isPresented: $showConfirm, titleVisibility: .visible) {
+            Button("清掉", role: .destructive) { onClear() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text("清掉後照每一分的通用說明。")
         }
     }
 }

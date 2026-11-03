@@ -32,6 +32,16 @@ import SwiftUI
 // • 日子轉換：fileprivate compRatingDate 刪掉，改叫 CompetencyMath.noonDate（sim 台北、洛杉磯對過）。
 // 要退回這一件：刪 targetMarks 與它在 openSession／footer 的兩行、CompRatingRowModel 的 targetText／detailLine、
 // CompRatingRowCaption 那兩段、CompRatingFooter.targetLine；noonDate 那一行可以留。
+//
+// [v25.602 職能雷達 v2]〔一次評全課〕模式（radar/build/v2/brief.md §1-12、§4 G2-A；judge §4.7）
+// • request.batch == nil：跟 v1b 一模一樣（新加的都只在 batch 有值時才動；存檔、取消、buildSession 一行都沒動）。
+// • 最上面一行「2／3　陳怡君」（CompRatingBatchHeader；VoiceOver「第 2 位，共 3 位，陳怡君」）。
+// • 「這次評」預設勾 batch.groupIds 跟這一張的組的交集（交集空＝照舊全勾）。
+// • hasNext 時右上〔下一位 ›〕取代右上〔儲存〕（底部那一行的〔儲存〕照舊）：沒改直接 onNext＋dismiss；
+//   有改先問「這一位還沒儲存」〔儲存，下一位〕（存得了才有）〔不儲存，下一位〕〔繼續評分〕（CompRatingNextAsk）。
+// • 按〔儲存〕照原本的存檔（先 dismiss、下一個 runloop 寫 store、onSaved），換下一位由 host 決定。
+// 要退回這一件：刪 batchHasNext／nextTapped／goNext／showNextAsk、toolbar 的 if 那一段、content 的 .modifier、
+// openSession 的 batch 那一行、CompRatingBatchHeader、CompRatingNextAsk、compRatingBatchSpoken。
 
 /// 打開評分畫面的請求（sheet(item:) 用）
 struct CompetencyRatingRequest: Identifiable {
@@ -41,12 +51,16 @@ struct CompetencyRatingRequest: Identifiable {
     var dayKey: String? = nil
     /// [v25.600 v1a-2] 評分紀錄〔改分數〕：要改的就是這一張（同一天兩台各評一張時不會改錯；nil＝照 dayKey 找那一天的）
     var sessionId: UUID? = nil
+    /// [v25.602 v2]〔一次評全課〕的這一頁（「2／3　陳怡君」、預設勾的組、後面還有沒有人）；nil＝照舊一位一張（主控加的契約）
+    var batch: CompetencyRatingBatch? = nil
 }
 
 struct CompetencyRatingSheet: View {
     let request: CompetencyRatingRequest
     /// 存好之後（已經 dismiss）給〔職能〕分頁顯示底部小提示「已儲存 10/30 的評分（12 格）」
     var onSaved: ((String) -> Void)? = nil
+    /// [v25.602 v2]〔一次評全課〕右上〔下一位 ›〕（這一位不存、換下一位；呼叫完由這張自己 dismiss）。nil＝沒有這顆（主控加的契約）
+    var onNext: (() -> Void)? = nil
 
     @EnvironmentObject var lifeStore: LifeStore
     @EnvironmentObject var subscription: SubscriptionManager
@@ -84,6 +98,8 @@ struct CompetencyRatingSheet: View {
     @State private var showDiscard = false
     /// [v25.601 v1b] 每一格的目標（openSession 算；照這位現在的職等，沒職等、沒目標＝空）
     @State private var targetMarks: [CompetencyCellKey: CompetencyTargetMark] = [:]
+    /// [v25.602 v2]〔下一位 ›〕時這一位有改沒存：先問 3 選 1
+    @State private var showNextAsk = false
     @FocusState private var focusedKey: CompetencyCellKey?
     @FocusState private var noteFocused: Bool
 
@@ -115,8 +131,14 @@ struct CompetencyRatingSheet: View {
             Button("取消") { cancelTapped() }
         }
         ToolbarItem(placement: .confirmationAction) {
+            // [v25.602 v2]〔一次評全課〕後面還有人：右上換成〔下一位 ›〕（底部那一行的〔儲存〕照舊）
+            if batchHasNext {
+                Button { nextTapped() } label: { Text("下一位 ›") }
+                    .accessibilityLabel("下一位")
+            } else {
             Button("儲存") { save() }
                 .disabled(!canSave)
+            }
         }
         ToolbarItemGroup(placement: .keyboard) {
             Spacer()
@@ -128,6 +150,10 @@ struct CompetencyRatingSheet: View {
         ScrollViewReader { proxy in
             ScrollView {
                 VStack(alignment: .leading, spacing: 14) {
+                    // [v25.602 v2]〔一次評全課〕最上面一行「2／3　陳怡君」
+                    if let b = request.batch {
+                        CompRatingBatchHeader(text: b.positionText)
+                    }
                     topCard
                     if loaded && sections.isEmpty {
                         CompRatingEmptyNote()
@@ -153,6 +179,9 @@ struct CompetencyRatingSheet: View {
                 }
             }
         }
+        // [v25.602 v2]〔下一位 ›〕有改沒存時的 3 選 1（掛在 content 上，不跟 body 的「不儲存就關掉？」擠同一個 View）
+        .modifier(CompRatingNextAsk(isPresented: $showNextAsk, canSave: canSave,
+                                    onSave: { save() }, onSkip: { goNext() }))
     }
 
     /// [v25.600 職能雷達 v1a-2 裁定] 評分紀錄〔改分數〕打開的那一張：日期不能在這裡改（改了會在別天多存一張、原本那一張還在）；
@@ -498,6 +527,11 @@ struct CompetencyRatingSheet: View {
             included = included.intersection(ids).union(ids.subtracting(oldIds))
         } else {
             included = ids
+            // [v25.602 v2]〔一次評全課〕：預設只勾選的組（跟這一張的組取交集；交集空照舊全勾）
+            if let b = request.batch {
+                let pick: Set<UUID> = ids.intersection(b.groupIds)
+                included = pick.isEmpty ? ids : pick
+            }
         }
         inputText = [:]
         clampNotes = [:]
@@ -707,6 +741,28 @@ struct CompetencyRatingSheet: View {
 
     // MARK: 關掉、儲存
 
+    /// [v25.602 v2]〔一次評全課〕後面還有人（右上〔下一位 ›〕）
+    private var batchHasNext: Bool {
+        request.batch?.hasNext == true
+    }
+
+    /// [v25.602 v2]〔下一位 ›〕：有改沒存先問；沒改直接換下一位
+    private func nextTapped() {
+        endEditing()
+        if hasChanges {
+            showNextAsk = true
+        } else {
+            goNext()
+        }
+    }
+
+    /// [v25.602 v2] 這一位不存、換下一位（host 在 onNext 記下要換人，sheet 關掉後開下一位）
+    private func goNext() {
+        let callback: (() -> Void)? = onNext
+        callback?()
+        dismiss()
+    }
+
     private func cancelTapped() {
         endEditing()
         if hasChanges {
@@ -770,6 +826,52 @@ fileprivate func compRatingSpokenValue(cell: CompetencyDraftCell?, level: String
         parts.append("上次 " + pt)
     }
     return parts.joined(separator: "，")
+}
+
+/// [v25.602 v2] VoiceOver：「2／3　陳怡君」→「第 2 位，共 3 位，陳怡君」（認不出來照原字念）
+fileprivate func compRatingBatchSpoken(_ text: String) -> String {
+    guard let sp = text.range(of: "　") else { return text }
+    let head: String = String(text[..<sp.lowerBound])
+    let name: String = String(text[sp.upperBound...])
+    let parts: [String] = head.components(separatedBy: "／")
+    guard parts.count == 2 else { return text }
+    return "第 " + parts[0] + " 位，共 " + parts[1] + " 位，" + name
+}
+
+// MARK: - [v25.602 v2]〔一次評全課〕的小零件
+
+/// 最上面一行「2／3　陳怡君」
+private struct CompRatingBatchHeader: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.headline)
+            .foregroundStyle(Color.accentColor)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityLabel(compRatingBatchSpoken(text))
+    }
+}
+
+/// 〔下一位 ›〕時這一位有改沒存：〔儲存，下一位〕（存得了才有；存完 host 換下一位）〔不儲存，下一位〕〔繼續評分〕
+private struct CompRatingNextAsk: ViewModifier {
+    @Binding var isPresented: Bool
+    let canSave: Bool
+    let onSave: () -> Void
+    let onSkip: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .confirmationDialog("這一位還沒儲存", isPresented: $isPresented, titleVisibility: .visible) {
+                if canSave {
+                    Button("儲存，下一位") { onSave() }
+                }
+                Button("不儲存，下一位", role: .destructive) { onSkip() }
+                Button("繼續評分", role: .cancel) {}
+            }
+    }
 }
 
 // MARK: - 畫面要的小 struct
