@@ -1,0 +1,5708 @@
+import SwiftUI
+// [v25.568] WealthCoverDepth 用到 UIApplication／UIViewController（照片提醒框等相機收起來再跳）
+import UIKit
+
+// MARK: - 財富的表單、小表單、要確認（v25.564，財富 v3；wealth/judge.md §5、§4.5、§3.5、§5.6）
+//
+// • WealthAccountEditor：新增／編輯銀行帳戶、信用卡、證券戶、保單（從履歷搬出來；類型開了就鎖住）。
+//   存的地方還是 LifeMilestone（身分＋舊欄位，給舊 iPad、網頁版、醫療地圖）＋財富帳本（LifeStore.saveWealthAccount）。
+//   安全碼（使用者第 6 題「我要存」）：「記錄檢核碼（CVV／CVC）」開關＋欄位照留（預設關），CardVault 加密、Face ID 才看得到。
+//   刪除只在編輯頁最下面（FinanceDeleteAlert＋LifeStore.deleteFinanceMilestone；卡先建議〔改成停用〕、銀行先建議〔收起來就好〕）。
+// • 小表單（.presentationDetents([.medium, .large])）：記一筆、轉帳、對存摺、標成已繳、帳單金額不一樣、一次改到別張卡／改到別的帳戶、
+//   排序與收起來、匯率。
+// • WealthChecksSection：財富頁 ②、卡片頁 ② 共用的「要確認」（FinanceCardHeader＋白卡裡 FinanceCheckRow；0 件整區不出現），
+//   按鈕照 WealthCheck.Fix 開表單或叫 LifeStore。
+// 每個表單自己掛 WealthPrivacyCurtain（有號碼的表單 armed）；儲存鈕忙碌守衛；刪除一律先問；先 dismiss、下一個 runloop 才寫 store。
+// 數字一律讀 lifeStore.wealthFacts（打開表單時抓一次存進 @State，打字不重算，judge §4.5）。
+//
+// 分工：G3 實作（這個檔＋ResumeView、MyCalendarView、AddExpenseView）。主控放的入口簽章不改（G1、G2 在叫）。
+//
+// [v25.565] 財富 v4（build/v4/brief.md §G4-6、§G4-7）：
+// • 要確認 #12〔看綁了哪些〕（WealthCheck.Fix.openCard）：WealthChecksSection(onOpenCard:) 交給呼叫端（財富頁開卡片頁、卡片頁捲到
+//   定期扣款）；沒給就自己開 WealthFormSheet.card（WealthCardPage 捲到 .recurring）。看卡片頁不擋訂閱。
+// • 信用卡表單「提醒我繳卡費」：WealthCardPrefs.remind（v2 留好的欄位；開＝存 nil、關＝存 false）。通知不寫卡名、金額、號碼。
+//
+// [v25.566] 財富 v5（build/v5/brief.md §G3；定存表單本身在 WealthDepositForms.swift）：
+// • 要確認三個新按鈕（WealthChecksSection.tap）：#13〔改成轉活存〕〔改成本息續存〕〔轉活存〕〔本息續存〕＝Fix.setMaturity
+//   （下一個 runloop 叫 LifeStore.setTimeDepositOnMaturity；不擋訂閱，跟標成已繳一樣是處理到期的事）；舊的定存帳戶〔補資料〕＝
+//   Fix.editTimeDeposit（開 WealthTimeDepositSheet，要訂閱）；#14 存款保險〔知道了〕＝Fix.quietInsurance（這家銀行一年內不再提）。
+// • WealthFormSheet.timeDeposit(accountId:editing:)：要確認、表單裡開定存表單。
+// • 轉帳表單換匯模式 WealthTransferSheet(…, exchange: true)：同一個帳戶兩個幣別互轉也是轉帳（兩筆同一個 transferPairId，
+//   LifeStore.addTransfer 放寬成「不同帳戶，或同一個帳戶不同幣別」）。帳戶有兩個以上幣別＝自己換（台幣 → 第一個外幣）；
+//   只有一個外幣＝從存摺上台幣最多的另一個活存換進來（v2 就能換匯）。同一個帳戶時兩邊幣別一定不一樣。
+// • 銀行帳戶表單「種類與幣別」footer 多一句：定存不是帳戶種類，存好帳戶後到帳戶頁〔＋ 定存〕記。
+//
+// [v25.567] 財富 v6（build/v6/brief.md §G3；連動小表單本身在 WealthLinkForms.swift）：
+// • 要確認三個新按鈕（WealthChecksSection.tap，都不擋訂閱）：#15〔是同一張，連起來〕＝Fix.linkPolicy（下一個 runloop
+//   LifeStore.linkPolicy）；保單頁〔年繳〕＝Fix.setPolicyCycle；#16〔搬到薪轉〕＝Fix.moveSettlements → 先開
+//   WealthSettlementMoveSheet 看會動到哪些。〔改繳法〕捲到保費（WealthEditorFocus.premium）、〔選交割銀行〕捲到交割銀行。
+// • WealthFormSheet 多 .settlementMove(brokerId:)、.policyLink(policyId:)。
+// • 保單表單（judge §5.4）：從哪扣＝WealthPayFromMenu（銀行＋幣別或卡，同記帳選單）；存檔後 LifeStore.savePolicyPremium
+//   （沒連就自動建一筆記帳固定支出（保險），連著就改那一筆；半年繳、躉繳不建）；沒連、記帳裡已經有一樣的保費先問
+//   〔用那一筆〕〔另外新建〕；連著記帳時保費、繳法、從哪扣、下次扣款日讀記帳那一筆（保費只有一份）；被保險人、要保人、
+//   受益人可以從「家人」選；刪連著記帳的保單先問〔只解開連結〕〔連記帳的保費一起刪〕。〔補保單〕＝WealthAccountEditor(fromExpense:)
+//   帶入記帳那一筆、存檔連它。
+// • 證券戶表單：改交割銀行而且還有股票用別的銀行交割 → 問「這 N 檔的交割銀行也一起改嗎？以前的交割不動」
+//   〔一起改〕＝LifeStore.moveBrokerStocks（今天起的交割搬過去，以前的照舊）〔只改證券戶〕。
+// • 第 6 題：這版不碰卡號、安全碼、帳號（CardVault 那幾段照 v3）。保單號碼照 judge §7.1「編輯表單同卡片頁」：
+//   編輯時只露後 4 碼（CardVault.maskedTail），點了過 Face ID 才看得到、改得到；存法 v7 起改密文（見下面 v25.568）。
+//
+// [v25.568] 財富 v7（build/v7/brief.md §4 G1；judge §5.1–5.4、§7.1、§7.2；樣稿③-C1，但安全碼照留）：
+// • 有效期限、保單號碼、悠遊卡／一卡通／Happy Go 改密文（WealthVaultBook，同步鍵 life_wealth_vault_v1；
+//   LifeStore.saveWealthAccount(…, vault:) 整筆換掉）。里程碑上保單號碼、票證號只留後 4 碼，有效期限寫 nil。
+//   完整帳號的密文照舊在帳本 accountNumberCipher，里程碑只留後 4 碼。
+// • 存檔一律走 WealthSecrets.sealPlan（sealVault）：完整的封成密文、4 個字以內照存明碼、解鎖了但這台解不開又沒重打＝原封不動。
+// • 這台還沒同步到金鑰（CardVault.keyMissingHere）：你新打的號碼（卡號、檢核碼、有效期限、票證號、保單號碼、完整帳號）
+//   擋下並說明（CardVault.keyMissingMessage）、整張表單不存；原本的密文、舊明碼原封不動（舊明碼等金鑰同步過來自動搬）。
+// • 有效期限、票證號跟卡號同一顆 Face ID（unlockCard）；保單號碼 Face ID 才看得到、改得到（unlockPolicyNumber）。
+// • 第 6 題「我要存」：「記錄檢核碼（CVV／CVC）」開關、預設、存法照舊（加密存、Face ID 才看得到）。
+// • 照片拍到像完整卡號的數字（16 位）提醒（WealthPhotoScan：手機內建的 Vision，不上網）：只看這次新加的照片，
+//   〔刪掉這張〕〔留著〕，不擋存檔；PDF 不看。
+//
+// [v25.575] 定期轉帳 v1a（transfer/build/v1a/brief.md §6 G3；judge §3.5、§3.6、§4.2、§4.8、§5）：
+// • 要確認四個新按鈕（WealthChecksSection.tap，都不擋訂閱）：〔看這一期〕＝WealthFormSheet.transferPeriod（G4 的一期小表單）、
+//   〔沒轉成〕＝下一個 runloop LifeStore.setTransferStatus、〔結束這條〕＝先問「『薪轉 → 零用錢』最後一次是 11/27？」
+//  （WealthCheckAsk.endTransfer；收起來／找不到的帳戶記 endedBy）再 LifeStore.endTransferRule、〔看這條〕＝WealthFormSheet.transferRule。
+// • 〔轉帳過去〕（WealthFormSheet.transfer(…, showsCover: true)）：WealthTransferSheet(showsCover:) 最上面一行
+//  「補到 30 天內都夠：4,600（11/13 起會不夠，最低 11/20 −4,600）」（「到」那個帳戶的 Account.coverLine）。
+// • 單次轉帳存檔前掃備註：像帳號的數字（10 位以上）先問〔只留後 4 碼〕〔不是帳號，照存〕（WealthAccountLikeAlert，G4 也能用）。
+// • 對存摺：那天有定期轉帳的期，日期下面每一邊一列「這天還有：來自 薪轉 +3,000（定期・每週五）」〔存摺上已經有了〕〔還沒有〕
+//  （WealthAnchorSideRow；預設照現在記的 late）；〔還沒有〕＝「App 算的」加 TransferSide.appDelta，存檔（一般、漏記的支出兩條路）
+//   後同一個 runloop LifeStore.setTransferLate。記成利息、手續費那兩條路不記 late。
+// • 刪銀行〔收起來就好〕確認框多一句（WealthBankDeleteDialog(transferNote:)＝WealthFacts.hideTransferSentence）。
+//
+// [v25.577] 定期轉帳 v1b（transfer/build/v1b/brief.md §6 G3；judge §4.6、§4.8、§5）：
+// • 要確認〔接著轉〕（WealthChecksSection.tap，Fix.resumeTransferRule）：下一個 runloop LifeStore.resumeTransferRule（不擋訂閱）。
+// • 單次轉帳存檔前（像帳號那一問之後、真的寫之前）：台幣、不是換匯、不是〔轉帳過去〕、兩個不同帳戶 → facts.transferDuplicate
+//   找得到同兩個帳戶、同金額、前後 3 天的那一期就先問「這筆跟定期轉帳『薪轉 → 存錢』11/6 那期一樣，App 已經算進去了」
+//   〔不用記了〕（關掉、什麼都不存）〔還是要記（另外多轉一筆）〕〔取消〕（WealthTransferDuplicateDialog）。
+// • 〔轉帳過去〕小表單最下面：「到」那個帳戶第一筆不夠扣的是每月的固定支出 → 「『房貸』每月 10 日都要從這裡扣：」
+//   〔改成每月定期轉帳〕＝巢狀 sheet WealthTransferRuleForm(preset: facts.monthlyTransferPreset(…))；不另外擋訂閱
+//  （〔轉帳過去〕打開這張表時擋過了）；新增表單關掉後這張留著（存好了那一行就不見）。
+//
+// [v25.579] 定期轉帳 v2 會提醒你（transfer/build/v2/brief.md §6 G2；judge §3.6、§4.8 v2）：
+// • 要確認三個新按鈕（WealthChecksSection.tap，都不擋訂閱）：
+//   〔轉好了〕（今天那一期）〔今天轉好了〕（〔還沒〕掛滿 7 天）＝Fix.transferDoneToday：轉出或轉進的帳戶今天對過存摺
+//  （facts.transferReconciledToday）先問「今天對存摺的時候，這筆轉了嗎？」〔還沒，對完才轉的〕（對過的那一邊記 late）
+//   〔轉了，存摺上已經有了〕（那一邊 late 拿掉）；兩邊都沒對過＝下一個 runloop 直接 LifeStore.markTransferDone(day: 今天)。
+//   〔還沒…〕＝Fix.askTransferNotYet：先問〔還沒，算在明天〕（"notYet"）〔這期不轉〕（"skip"）→ LifeStore.setTransferStatus。
+//   〔已經續設〕＝Fix.renewTransferEnd：開 WealthFormSheet.transferRenew → WealthTransferRenewSheet（G1 的「銀行那邊設到哪天」）。
+//   〔轉了〕〔這期不轉了〕〔看這一期〕〔知道了〕是既有的 Fix（setTransferStatus／openTransferPeriod／dismiss）。
+// • 多問的那一句：WealthChecksTransferAsk＋WealthChecksTransferDialog（confirmationDialog；拆成 ViewModifier，同 WealthCheckAskDialog）；
+//   選了之後確認框先收好、下一個 runloop 才寫（這一列會跟著不見）。
+//
+// [v25.581] 定期轉帳 v3 以前湊的找出來（transfer/build/v3/brief.md §6 G2；judge §3.6、§3.8、§4.1、§4.8 v3、§6、第 8、9 題）：
+// • 要確認兩個新 Fix（WealthChecksSection.tap）：
+//   〔改成定期轉帳〕〔合成一條定期轉帳〕〔設成每月都轉〕＝Fix.newTransferRule：要訂閱（是新增）→ WealthFormSheet.transferNew(preset:)
+//  （WealthTransferRuleForm(preset:)，帶好從、到、金額、每月幾日；存檔時記帳那筆照 v1a「是同一筆嗎？」問，你不按就不動）。
+//   〔是同一筆…〕＝Fix.askTransferItem：不擋訂閱 → facts.transferItemAsk → WealthChecksTransferAsk.sameItem 確認框
+//   〔是：記帳那筆從下一期起結束〕（endRecurring）〔是，但記帳照記（還能花先扣掉）〕（excludeExpenseFromWealth）／
+//   收入〔是：那筆收入從下個月起結束〕（endRecurringIncome）；確認框先收好、下一個 runloop 才寫。
+// • 對存摺（WealthAnchorSheet）：新的一筆、台幣、沒選差額原因（或「不知道」）、差額剛好是前 1～7 天某一期（facts.transferMiss）→
+//   按〔存〕時、真的寫之前先問（WealthAnchorMissDialog）〔那期沒轉成〕（差額寫 diffAfter、那一期 "failed"）〔不是，照存摺就好〕
+//  （照原本存）；零用錢帳戶（facts.isPocketAccount）多〔不是，記成「零用錢」支出〕；〔取消〕回表單。
+//   零用錢帳戶存摺比 App 少 1 元以上：差額那段多〔把差的 11,500 記成「零用錢」支出〕＋小字（直接存，不再問；
+//   LifeStore.savePocketAnchor：記帳一筆變動支出＋這個帳戶一筆扣款＋這次對存摺，同一天，存摺不會再扣一次）。都不擋訂閱
+//  （對存摺表單打開時擋過了）。改以前的對存摺、外幣那一格都不問、不出現。
+// • 單次轉帳表單（WealthTransferSheet）最下面「每個月都會轉？」〔改成定期轉帳〕（不是換匯、不是〔轉帳過去〕、從到都選了、兩邊台幣、
+//   金額 ≥ 1；WealthTransferFinds.monthlyPreset(fromId:toId:amount:on:)）→ 巢狀 WealthTransferRuleForm(preset:)。不另外擋訂閱
+//  （同 v1b〔改成每月定期轉帳〕：轉帳表單每個入口打開時都擋過了）。新增表單關掉後：剛存的規則已經算到這筆
+//  （facts.transferDuplicate 有、而且打開前沒有那一期）＝轉帳表單一起關（不用再記）；沒有＝留著讓你存這筆。
+
+/// 表單的類型（開了就鎖住）
+enum WealthAccountKind: String, CaseIterable, Identifiable {
+    case bank, card, broker, policy
+
+    var id: String { rawValue }
+
+    /// 里程碑的子分類 → 表單類型（沒有子分類＝nil：那是一件財富大事，用原本的里程碑表單）
+    init?(sub: FinanceSubCategory?) {
+        switch sub {
+        case .bank?: self = .bank
+        case .creditCard?: self = .card
+        case .securities?: self = .broker
+        case .insurance?: self = .policy
+        case nil: return nil
+        }
+    }
+
+    var sub: FinanceSubCategory {
+        switch self {
+        case .bank: return .bank
+        case .card: return .creditCard
+        case .broker: return .securities
+        case .policy: return .insurance
+        }
+    }
+
+    /// 「銀行帳戶」「信用卡」「證券戶」「保單」（＋選單、表單標題「新增銀行帳戶」）
+    var title: String {
+        switch self {
+        case .bank: return "銀行帳戶"
+        case .card: return "信用卡"
+        case .broker: return "證券戶"
+        case .policy: return "保單"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .bank: return "building.columns.fill"
+        case .card: return "creditcard.fill"
+        case .broker: return "chart.line.uptrend.xyaxis"
+        case .policy: return "cross.case.fill"
+        }
+    }
+}
+
+/// 從要確認點進表單時先捲到哪一段
+enum WealthEditorFocus: String {
+    case cardDays, payFrom, settlement
+    /// [v25.567] 保單的保費那一段（要確認〔改繳法〕、保單頁「繳費」沒填）
+    case premium
+}
+
+// MARK: - 新增／編輯財富帳戶（judge §5；樣稿③-C1，但安全碼照留——使用者第 6 題「我要存」）
+
+/// 常用清單（只是字，不放商標）
+enum WealthNameLists {
+    static let banks: [String] = [
+        "台灣銀行", "土地銀行", "合作金庫", "第一銀行", "華南銀行", "彰化銀行", "兆豐銀行", "國泰世華", "中國信託",
+        "台北富邦", "玉山銀行", "台新銀行", "永豐銀行", "元大銀行", "凱基銀行", "星展銀行", "滙豐銀行", "中華郵政",
+        "LINE Bank", "將來銀行", "樂天銀行"
+    ]
+    static let brokers: [String] = [
+        "元大證券", "凱基證券", "富邦證券", "國泰證券", "永豐金證券", "群益金鼎證券", "統一證券", "元富證券",
+        "玉山證券", "台新證券", "中信證券", "兆豐證券", "華南永昌證券"
+    ]
+    static let insurers: [String] = [
+        "國泰人壽", "富邦人壽", "南山人壽", "新光人壽", "台灣人壽", "中國人壽", "全球人壽", "三商美邦人壽",
+        "遠雄人壽", "安聯人壽", "保誠人壽", "富邦產險", "國泰產險", "新光產險"
+    ]
+    static let purposes: [String] = ["薪轉", "扣款", "存錢", "外幣", "零用"]
+}
+
+/// 存檔前在主執行緒封好的密文（加密失敗就不存）
+struct WealthSealed {
+    var accountCipher: Data? = nil
+    var cardNumber: Data? = nil
+    var security: Data? = nil
+    var cardLast4: String? = nil
+    /// [v25.568] 這一筆的號碼密文（有效期限、保單號碼、票證號；LifeStore.saveWealthAccount(vault:) 整筆換掉）
+    var vault = WealthVaultEntry()
+    /// [v25.568] 里程碑上保單號碼、三種票證要寫的字（後 4 碼、4 個字以內的、或這台還沒同步到金鑰時原封不動的舊明碼）；
+    /// 沒有 key＝寫 nil
+    var plain: [WealthSecretField: String] = [:]
+    /// [v25.568] 里程碑 expiryDate 要寫的（v7 起只有「這台還沒同步到金鑰時原封不動的舊明碼」才會有值）
+    var expiryDate: Date? = nil
+    /// [v25.568] 這台還沒同步到金鑰時原封不動的舊完整帳號（里程碑 accountNumber 寫它）；nil＝照 accountTail
+    var accountPlain: String? = nil
+}
+
+/// 表單上的欄位（一個 struct 存全部：@State 少、帶入／存檔是純函式，型別檢查不爆）
+struct WealthAccountForm {
+    // 共通
+    /// 銀行／發卡銀行／券商／保險公司
+    var name = ""
+    /// 暱稱（保單：保單名稱）
+    var nickname = ""
+    var note = ""
+    /// 開戶日／核卡日／生效日
+    var date = Date()
+    var photos: [String] = []
+    // 銀行、證券戶的帳號（第 7 題：預設只存末 4 碼；開關打開才加密存完整帳號）
+    var branch = ""
+    var last4 = ""
+    var storeFullNumber = false
+    var fullNumber = ""
+    var accountCipher: Data? = nil
+    var accountUnlocked = true
+    /// 解鎖了但這台裝置解不開（沒有金鑰）：欄位空著，沒重打就把原本的密文原封帶回（別台解得開，不能洗掉）
+    var accountVaultLost = false
+    /// 里程碑上是舊的明碼完整帳號（存檔後搬進密文、里程碑只留末 4 碼，brief §1-4）
+    var legacyFullNumber = false
+    var bankType: BankAccountType = .savings
+    /// 台幣以外勾的幣別
+    var currencies: [String] = []
+    /// 新增：今天存摺上有多少（幣別 → 打的字）
+    var openings: [String: String] = [:]
+    var purpose = ""
+    var colorId: Int? = nil
+    var countsInCash = true
+    // 信用卡
+    var cardName = ""
+    var faceColor = 0
+    /// [v25.565] 提醒我繳卡費（帳本 WealthCardPrefs.remind：nil／true＝提醒、false＝這張不提醒；沒設過＝開）
+    var remind = true
+    /// 1–31；0＝沒填
+    var billingDay = 0
+    var paymentDay = 0
+    var limitText = ""
+    var payMode: WealthPayMode = .autoFull
+    /// 卡：扣款帳戶／通常從；保單：從哪扣
+    var payFrom: UUID? = nil
+    var cardNumber = ""
+    var cardLast4 = ""
+    var cardCipher: Data? = nil
+    var securityCipher: Data? = nil
+    var cardUnlocked = true
+    /// 解鎖了但這台裝置解不開卡號／檢核碼（沒有金鑰）：沒重打就原封帶回密文
+    var cardVaultLost = false
+    var securityVaultLost = false
+    var wantsSecurity = false
+    var security = ""
+    var hasExpiry = false
+    var expiry = Date()
+    var annualFeeText = ""
+    var waiveAmountText = ""
+    var waiveCountText = ""
+    /// 卡片年度從幾月起（0＝日曆年）
+    var feeYearStart = 0
+    var perks = ""
+    var easyCard = ""
+    var iPass = ""
+    var happyGo = ""
+    // 證券戶
+    var settlementBankId: UUID? = nil
+    var secType: SecuritiesAccountType = .regular
+    // 保單
+    var policyKind: WealthPolicyKind = .medical
+    var insured = ""
+    var policyholder = ""
+    var beneficiary = ""
+    var premiumText = ""
+    var payCycle: WealthPolicyCycle = .year
+    var payYearsText = ""
+    var hasNextDue = false
+    var nextDue = Date()
+    var coverageUntil = ""
+    var coverageText = ""
+    var policyNumber = ""
+    /// [v25.567] 保單的從哪扣（銀行＋幣別或卡；同記帳選單 WealthPayFromMenu）。卡照舊用 payFrom
+    var payChoice = WealthPayFromChoice()
+    // [v25.568] 號碼密文（有效期限、保單號碼、票證號；build/v7/brief.md §4 G1-3）
+    /// 打開表單時密文那一包的這一筆（沒重打、解不開、沒解鎖時原封帶回）
+    var vaultBase = WealthVaultEntry()
+    /// 打開表單時里程碑那幾欄的字（保單號碼、三種票證；v7 起多半是後 4 碼）
+    var originalPlain: [WealthSecretField: String] = [:]
+    /// 打開表單時里程碑上的有效期限（v7 起只有還沒搬的舊明碼才有）
+    var originalExpiry: Date? = nil
+    /// 解鎖了但這台解不開（還沒同步到金鑰）、欄位空著的那幾種：沒重打就原封帶回
+    var lostFields: Set<WealthSecretField> = []
+    /// 里程碑上舊的完整明碼帳號（還沒搬成密文；沒有＝""）
+    var originalAccountRaw = ""
+
+    static func trimmed(_ s: String) -> String? {
+        let t = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? nil : t
+    }
+
+    /// 帳號末 4 碼：有打用打的；沒打但有解開的完整帳號，取最後 4 個數字
+    var accountTail: String {
+        let typed = WealthFormText.digits(last4, limit: 4)
+        if !typed.isEmpty { return typed }
+        guard accountUnlocked, storeFullNumber else { return "" }
+        let d = fullNumber.filter { $0.isASCII && $0.isNumber }
+        return String(d.suffix(4))
+    }
+
+    /// [v25.568] 票證那三格的字（悠遊卡、一卡通、Happy Go；有效期限、保單號碼不在這裡＝""）
+    func ticket(_ t: WealthSecretField) -> String {
+        switch t {
+        case .easyCard: return easyCard
+        case .iPass: return iPass
+        case .happyGo: return happyGo
+        case .expiry, .policy: return ""
+        }
+    }
+
+    /// [v25.568] 解鎖後填票證（一卡通照舊能分組就每四碼一個「-」）
+    mutating func setTicket(_ t: WealthSecretField, _ v: String) {
+        switch t {
+        case .easyCard:
+            easyCard = v
+        case .iPass:
+            iPass = CardVault.isSafeToRegroup(v) ? CardVault.grouped(v, limit: CardVault.iPassDigits) : v
+        case .happyGo:
+            happyGo = v
+        case .expiry, .policy:
+            break
+        }
+    }
+
+    /// [v25.568] 票證三格打得到字：解鎖了，或這張卡的票證沒有密文（照舊明碼，跟以前一樣不鎖）
+    var ticketsEditable: Bool { cardUnlocked || !vaultBase.hasTicketCipher }
+
+    /// 新增銀行帳戶「今天存摺上有多少」：幣別 → 數字（空著的不寫）
+    var openingBalances: [String: Double] {
+        var out: [String: Double] = [:]
+        for code in ["NT$"] + currencies {
+            if let t = openings[code], let v = WealthFormText.number(t) { out[code] = v }
+        }
+        return out
+    }
+
+    /// 里程碑標題（履歷、行事曆照讀）：有暱稱「薪轉（台新銀行）」；不然照以前的規則（分行不再寫進標題）
+    func title(kind: WealthAccountKind) -> String {
+        let n = name.trimmingCharacters(in: .whitespaces)
+        let nick = nickname.trimmingCharacters(in: .whitespaces)
+        if !nick.isEmpty { return nick + "（" + n + "）" }
+        switch kind {
+        case .bank, .broker:
+            return "開戶 " + n
+        case .card:
+            let c = cardName.trimmingCharacters(in: .whitespaces)
+            return c.isEmpty ? n + " 信用卡" : n + " " + c
+        case .policy:
+            return n + " " + policyKind.shortTitle
+        }
+    }
+}
+
+extension WealthAccountForm {
+    /// 編輯：從里程碑＋帳本帶入。[v25.568] vault：密文那一包的這一筆（LifeStore.wealthVault.entry(m.id)）
+    static func load(_ m: LifeMilestone, kind: WealthAccountKind, book: WealthBook,
+                     vault: WealthVaultEntry) -> WealthAccountForm {
+        var f = WealthAccountForm()
+        let prefs = book.account(m.id)
+        f.nickname = prefs.nickname ?? ""
+        f.note = m.note
+        f.date = m.date
+        f.photos = m.photoFileNames ?? []
+        switch kind {
+        case .bank, .broker:
+            f.name = m.bankName ?? ""
+            f.branch = m.branchName ?? ""
+            f.loadAccountNumber(m, prefs: prefs)
+            f.bankType = m.bankAccountType ?? .savings
+            f.currencies = (prefs.currencies ?? []).filter { !FinanceRates.isNTD($0) }
+            f.purpose = prefs.purpose ?? ""
+            f.colorId = prefs.colorId
+            f.countsInCash = prefs.countInCash != false
+            f.settlementBankId = prefs.settlementBankId
+            f.secType = m.securitiesAccountType ?? .regular
+        case .card:
+            f.loadCard(m, book: book, vault: vault)
+        case .policy:
+            f.loadPolicy(m, book: book, vault: vault)
+        }
+        return f
+    }
+
+    mutating func loadAccountNumber(_ m: LifeMilestone, prefs: WealthAccountPrefs) {
+        let raw = (m.accountNumber ?? "").trimmingCharacters(in: .whitespaces)
+        let digits = raw.filter { $0.isASCII && $0.isNumber }
+        // [v25.568] 舊的完整明碼：跟搬家同一條（WealthSecrets.isFull：超過 4 個字）。有密文也記著——
+        // 明碼一定比密文新（還沒更新的 iPad 寫回來的、這台還沒同步到金鑰搬不了），存檔時不能把它換成後 4 碼弄丟
+        if WealthSecrets.isFull(raw) { originalAccountRaw = raw }
+        if let c = prefs.accountNumberCipher {
+            accountCipher = c
+            storeFullNumber = true
+            accountUnlocked = false
+        } else if !originalAccountRaw.isEmpty {
+            legacyFullNumber = true
+            storeFullNumber = true
+            fullNumber = raw
+        }
+        last4 = prefs.accountLast4 ?? String(digits.suffix(4))
+    }
+
+    mutating func loadCard(_ m: LifeMilestone, book: WealthBook, vault: WealthVaultEntry) {
+        let cp = book.card(m.id)
+        name = m.bankName ?? ""
+        cardName = m.cardName ?? ""
+        faceColor = cp.faceColor ?? WealthFacts.defaultFaceColor(m.id)
+        remind = cp.remind != false
+        if let b = m.billingDay { billingDay = Swift.min(Swift.max(b, 1), 31) }
+        if let p = m.paymentDay { paymentDay = Swift.min(Swift.max(p, 1), 31) }
+        if let l = m.creditLimit, l > 0 { limitText = WealthFormat.grouped(l, decimals: 0) }
+        payMode = cp.mode
+        payFrom = m.linkedBankMilestoneId
+        cardLast4 = m.cardLastFour ?? ""
+        cardCipher = m.cardNumberCipher
+        securityCipher = m.cardSecurityCipher
+        // [v25.568] 有效期限、票證號的密文也跟卡號同一把鎖（Face ID 才看得到、改得到）
+        let noCardCipher: Bool = m.cardNumberCipher == nil && m.cardSecurityCipher == nil
+        cardUnlocked = noCardCipher && m.expiryDate == nil && vault.expiryCipher == nil && !vault.hasTicketCipher
+        wantsSecurity = m.cardSecurityCipher != nil
+        // 有沒有有效期限：還沒搬的明碼或密文那一包有一個就算有（鎖著時顯示「••/••」）
+        hasExpiry = m.expiryDate != nil || vault.expiryCipher != nil
+        expiry = m.expiryDate ?? Date()
+        originalExpiry = m.expiryDate
+        vaultBase = vault
+        if let a = m.annualFee, a > 0 { annualFeeText = WealthFormText.editable(a) }
+        if let w = cp.feeWaiveAmount, w > 0 { waiveAmountText = WealthFormText.editable(w) }
+        if let n = cp.feeWaiveCount, n > 0 { waiveCountText = "\(n)" }
+        feeYearStart = cp.feeYearStartMonth ?? 0
+        perks = cp.perksNote ?? ""
+        easyCard = m.easyCardNumber ?? ""
+        let rawIPass = m.iPassNumber ?? ""
+        iPass = CardVault.isSafeToRegroup(rawIPass)
+            ? CardVault.grouped(rawIPass, limit: CardVault.iPassDigits) : rawIPass
+        happyGo = m.happyGoNumber ?? ""
+        // [v25.568] 打開時那三格的字（v7 起多半是後 4 碼；一卡通記分組後的，跟欄位上的一樣，沒改就不算新打的）
+        for t in WealthSecretField.tickets {
+            if let v = Self.trimmed(ticket(t)) { originalPlain[t] = v }
+        }
+    }
+
+    mutating func loadPolicy(_ m: LifeMilestone, book: WealthBook, vault: WealthVaultEntry) {
+        let pp = book.policy(m.id)
+        name = m.insuranceCompany ?? ""
+        policyKind = pp.kind ?? WealthPolicyKind.from(legacy: m.insuranceType)
+        insured = pp.insured ?? ""
+        policyholder = pp.policyholder ?? ""
+        beneficiary = m.beneficiary ?? ""
+        if let p = m.premiumAmount, p > 0 { premiumText = WealthFormText.editable(p) }
+        payCycle = pp.cycle ?? .year
+        if let y = pp.payYears, y > 0 { payYearsText = "\(y)" }
+        payFrom = pp.payFromId
+        if let d = pp.nextDue {
+            hasNextDue = true
+            nextDue = d
+        }
+        coverageUntil = pp.coverageUntil ?? ""
+        coverageText = (pp.coverageItems ?? []).joined(separator: "\n")
+        // [v25.568] 里程碑上 v7 起只留後 4 碼；完整的在密文那一包（Face ID 解鎖時才解開）
+        policyNumber = m.policyNumber ?? ""
+        if let p = Self.trimmed(policyNumber) { originalPlain[.policy] = p }
+        vaultBase = vault
+    }
+
+    /// [v25.567] 連著記帳的保費（或〔補保單〕帶進來的那一筆）：保費、繳法、從哪扣、下次扣款日讀記帳那一筆
+    /// （保費只有一份；judge §5.4-3）
+    mutating func loadPremium(from e: Expense, today: Date) {
+        premiumText = e.amount > 0 ? WealthFormText.editable(e.amount) : ""
+        if let c = WealthPolicyLink.cycle(of: e.recurrence) { payCycle = c }
+        payChoice = WealthPayFromChoice.of(e)
+        payFrom = payChoice.cardId ?? payChoice.bankId
+        if let next = e.nextFixedDueDate(onOrAfter: today, calendar: WealthCal.calendar) {
+            hasNextDue = true
+            nextDue = next
+        } else {
+            hasNextDue = false
+        }
+    }
+
+    /// 寫進里程碑（身分＋舊欄位，給舊 iPad、網頁版、醫療地圖）。m 是 store 裡最新的那一筆（或新的）
+    func apply(to m: inout LifeMilestone, kind: WealthAccountKind, sealed: WealthSealed) {
+        m.title = title(kind: kind)
+        m.date = date
+        m.category = .achievement
+        m.financeSubCategory = kind.sub
+        m.note = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        m.photoFileNames = photos.isEmpty ? nil : photos
+        let n: String? = Self.trimmed(name)
+        let tail = accountTail
+        // [v25.568] 里程碑上永遠不寫完整號碼（只有「這台還沒同步到金鑰時原封不動的舊明碼」例外：sealed.accountPlain）
+        let accountShown: String? = sealed.accountPlain ?? (tail.isEmpty ? nil : tail)
+        switch kind {
+        case .bank:
+            m.bankName = n
+            m.branchName = Self.trimmed(branch)
+            m.accountNumber = accountShown
+            m.bankAccountType = bankType
+        case .broker:
+            m.bankName = n
+            m.accountNumber = accountShown
+            m.securitiesAccountType = secType
+        case .card:
+            applyCard(to: &m, issuer: n, sealed: sealed)
+        case .policy:
+            m.insuranceCompany = n
+            // [v25.568] 後 4 碼（完整的在密文那一包 sealed.vault.policyCipher）
+            m.policyNumber = sealed.plain[.policy]
+            // 舊資料的車險讀進來是「其他」（WealthPolicyKind.from(legacy:)）；沒換險種就照舊留車險，
+            // 不然存一次就變成壽險（醫療地圖、舊 iPad 照讀這一欄）
+            if !(policyKind == .other && m.insuranceType == .car) {
+                m.insuranceType = policyKind.legacyType
+            }
+            m.premiumAmount = WealthFormText.number(premiumText).flatMap { $0 > 0 ? $0 : nil }
+            m.beneficiary = Self.trimmed(beneficiary)
+        }
+    }
+
+    private func applyCard(to m: inout LifeMilestone, issuer: String?, sealed: WealthSealed) {
+        m.bankName = issuer
+        m.cardName = Self.trimmed(cardName)
+        m.cardLastFour = sealed.cardLast4
+        m.creditLimit = WealthFormText.limit(limitText)
+        m.annualFee = WealthFormText.number(annualFeeText).flatMap { $0 > 0 ? $0 : nil }
+        m.billingDay = billingDay > 0 ? billingDay : nil
+        m.paymentDay = paymentDay > 0 ? paymentDay : nil
+        m.linkedBankMilestoneId = payFrom
+        m.cardNumberCipher = sealed.cardNumber
+        m.cardSecurityCipher = sealed.security
+        // [v25.568] 有效期限 v7 起是密文（sealed.vault.expiryCipher）：這裡只有「這台還沒同步到金鑰時原封不動的舊明碼」
+        // 才有值；沒解鎖時 sealed.expiryDate 就是原本的
+        m.expiryDate = sealed.expiryDate
+        // [v25.568] 票證號只留後 4 碼（完整的在密文那一包）
+        m.easyCardNumber = sealed.plain[.easyCard]
+        m.iPassNumber = sealed.plain[.iPass]
+        m.happyGoNumber = sealed.plain[.happyGo]
+    }
+
+    /// 帳本 accounts[id]（base＝存檔那一刻帳本裡的，只改表單管的欄位）
+    func accountPrefs(_ base: WealthAccountPrefs, kind: WealthAccountKind, sealed: WealthSealed) -> WealthAccountPrefs {
+        var p = base
+        p.nickname = Self.trimmed(nickname)
+        let tail = accountTail
+        switch kind {
+        case .bank:
+            p.accountLast4 = tail.isEmpty ? nil : tail
+            p.accountNumberCipher = sealed.accountCipher
+            p.currencies = currencies.isEmpty ? nil : currencies
+            p.purpose = Self.trimmed(purpose)
+            p.colorId = colorId
+            p.countInCash = countsInCash ? nil : false
+        case .broker:
+            p.accountLast4 = tail.isEmpty ? nil : tail
+            p.accountNumberCipher = sealed.accountCipher
+            p.settlementBankId = settlementBankId
+        case .card, .policy:
+            break
+        }
+        return p
+    }
+
+    /// 帳本 cards[id]：卡費怎麼繳（改了才 setMode：改成自己繳／每次問我從今天起才追）、卡面色、年費、回饋小抄
+    func cardPrefs(_ base: WealthCardPrefs, now: Date) -> WealthCardPrefs {
+        var c = base
+        if c.mode != payMode { c.setMode(payMode, now: now) }
+        c.faceColor = faceColor
+        // [v25.565] 開＝存 nil（跟沒設過一樣）、關＝存 false（WealthReminders 只看 != false）
+        c.remind = remind ? nil : false
+        c.perksNote = Self.trimmed(perks)
+        c.feeWaiveAmount = WealthFormText.number(waiveAmountText).flatMap { $0 > 0 ? $0 : nil }
+        let count: Int? = Int(waiveCountText.trimmingCharacters(in: .whitespaces))
+        c.feeWaiveCount = count.flatMap { $0 > 0 ? $0 : nil }
+        c.feeYearStartMonth = feeYearStart > 0 ? feeYearStart : nil
+        return c
+    }
+
+    /// 帳本 policies[id]
+    func policyPrefs(_ base: WealthPolicyPrefs) -> WealthPolicyPrefs {
+        var p = base
+        p.coverageKind = policyKind.rawValue
+        p.insured = Self.trimmed(insured)
+        p.policyholder = Self.trimmed(policyholder)
+        p.payCycle = payCycle.rawValue
+        let years: Int? = Int(payYearsText.trimmingCharacters(in: .whitespaces))
+        p.payYears = payCycle == .single ? nil : years.flatMap { $0 > 0 ? $0 : nil }
+        p.coverageUntil = Self.trimmed(coverageUntil)
+        let lines: [String] = coverageText.split(separator: "\n").map { $0.trimmingCharacters(in: .whitespaces) }
+        let items: [String] = lines.filter { !$0.isEmpty }
+        p.coverageItems = items.isEmpty ? nil : items
+        p.nextDue = hasNextDue ? WealthCal.day(nextDue) : nil
+        // [v25.567] 從哪扣讀 payChoice（卡優先）；連著記帳時 savePolicyPremium 會再照記帳那一筆寫一次
+        p.payFromId = payChoice.cardId ?? payChoice.bankId
+        return p
+    }
+}
+
+/// [v25.563] 信用卡改扣款帳戶時問「從哪一期起」（D10）。v3 從履歷搬過來（履歷不再編輯財富帳戶）。
+/// 拆成 modifier：表單的修飾器鏈已經很長，不再往 body 裡塞閉包
+struct CardDebitChangeDialog: ViewModifier {
+    @Binding var isPresented: Bool
+    let title: String
+    /// 「11 月帳單」
+    let nextLabel: String
+    let onNext: () -> Void
+    let onAll: () -> Void
+
+    private var nextButtonTitle: String { "從下一期（\(nextLabel)）起" }
+
+    func body(content: Content) -> some View {
+        content.confirmationDialog(title, isPresented: $isPresented, titleVisibility: .visible) {
+            Button(nextButtonTitle) { onNext() }
+            Button("以前的帳單也改") { onAll() }
+            Button("取消", role: .cancel) { }
+        } message: {
+            Text("選下一期：以前的帳單照舊算在原本的帳戶，財富頁銀行的數字不會突然變。")
+        }
+    }
+}
+
+/// 卡號保管室的說明／錯誤（拆成 modifier，坑 #7）
+struct WealthVaultMessageAlert: ViewModifier {
+    @Binding var message: String?
+
+    func body(content: Content) -> some View {
+        content.alert("卡號與安全資訊", isPresented: Binding(
+            get: { message != nil },
+            set: { if !$0 { message = nil } }
+        )) {
+            Button("好") { message = nil }
+        } message: {
+            Text(message ?? "")
+        }
+    }
+}
+
+/// [v25.568] 這次新加的照片好像拍到完整卡號（judge §7.2、§8 v7；WealthPhotoScan）：〔刪掉這張〕〔留著〕。
+/// 只提醒、不擋存檔（拆成 modifier，坑 #7）
+fileprivate struct WealthPhotoHitAlert: ViewModifier {
+    @Binding var hit: WealthPhotoHit?
+    let onDelete: (WealthPhotoHit) -> Void
+
+    private var isPresented: Binding<Bool> {
+        Binding(get: { hit != nil }, set: { if !$0 { hit = nil } })
+    }
+
+    func body(content: Content) -> some View {
+        content.alert(WealthPhotoHit.title, isPresented: isPresented, presenting: hit) { h in
+            Button("刪掉這張", role: .destructive) { onDelete(h) }
+            Button("留著", role: .cancel) {}
+        } message: { h in
+            Text(h.message)
+        }
+    }
+}
+
+/// [v25.568] 這個 App 的視窗上蓋了幾層畫面（從根往上數 presentedViewController：表單 sheet、全螢幕相機、看大圖、提醒框…）。
+/// 照片提醒框等表單上面沒有別的畫面再跳（WealthAccountEditor.waitUntilFormOnTop）。量不到＝0
+@MainActor
+fileprivate enum WealthCoverDepth {
+    static func current() -> Int {
+        let scenes = UIApplication.shared.connectedScenes.compactMap { $0 as? UIWindowScene }
+        let scene = scenes.first { $0.activationState == .foregroundActive } ?? scenes.first
+        guard let root = scene?.keyWindow?.rootViewController else { return 0 }
+        var depth = 0
+        var top: UIViewController? = root.presentedViewController
+        while let vc = top {
+            depth += 1
+            top = vc.presentedViewController
+        }
+        return depth
+    }
+}
+
+/// 刪銀行先問〔收起來就好〕〔仍要刪除〕（judge §5.6；拆成 modifier，坑 #7）。
+/// [v25.575] transferNote：有還在跑的定期轉帳碰到這個帳戶時多一句「有 1 條定期轉帳轉進這裡，會一起結束」
+/// （WealthFacts.hideTransferSentence；結束本身在 LifeStore.setWealthHidden／deleteFinanceMilestone 裡）
+struct WealthBankDeleteDialog: ViewModifier {
+    @Binding var isPresented: Bool
+    let title: String
+    let onHide: () -> Void
+    let onDelete: () -> Void
+    var transferNote: String? = nil
+
+    private var message: String {
+        let base = "收起來：不算進合計、選單不出現，以前的帳照算，可以再打開。"
+        guard let note = transferNote, !note.isEmpty else { return base }
+        return base + note + "。"
+    }
+
+    func body(content: Content) -> some View {
+        content.confirmationDialog(title, isPresented: $isPresented, titleVisibility: .visible) {
+            Button("收起來就好") { onHide() }
+            Button("仍要刪除", role: .destructive) { onDelete() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text(message)
+        }
+    }
+}
+
+/// [v25.567] 保單、證券戶存檔／刪除前多問的一句（judge §5.4-3 去重、§4.3 ⑥、§5.6 刪保單）
+enum WealthEditorAsk: Identifiable {
+    /// 保單沒連、記帳裡已經有一樣的保費（line「每年 8/15・24,000・刷 CUBE」）
+    case useExpense(expenseId: UUID, line: String)
+    /// 證券戶改了交割銀行：這 N 檔也一起改嗎？
+    case brokerStocks(count: Int, bankId: UUID, bankName: String)
+    /// 刪連著記帳的保單（line「國泰人壽醫療險（每年 8/15・24,000・刷 CUBE）」）
+    case policyDelete(expenseId: UUID, line: String)
+
+    var id: String {
+        switch self {
+        case .useExpense(let e, _): return "use-" + e.uuidString
+        case .brokerStocks(let n, let b, _): return "stocks-\(n)-" + b.uuidString
+        case .policyDelete(let e, _): return "delpolicy-" + e.uuidString
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .useExpense(_, let line):
+            return "記帳裡已經有一筆一樣的保費（" + line + "）：用那一筆？"
+        case .brokerStocks(let n, _, _):
+            return "這 \(n) 檔的交割銀行也一起改嗎？以前的交割不動"
+        case .policyDelete:
+            return "記帳裡的保費要一起刪嗎？"
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .useExpense:
+            return "用那一筆：保單連著它（保費、繳法、從哪扣照記帳那一筆），在記帳改金額、扣款，保單跟著，記帳不會多一筆。"
+                + "另外新建：照這張保單的保費在記帳另外建一筆（從下一次扣款起；半年繳、躉繳不建）。"
+        case .brokerStocks(let n, _, let name):
+            return "一起改：這 \(n) 檔今天起的交割從「" + name + "」扣，以前的交割照舊留在原本的帳戶。"
+                + "只改證券戶：股票照舊從原本的帳戶交割，之後新增的股票才預設「" + name + "」。"
+        case .policyDelete(_, let line):
+            return "要刪掉這張保單（無法復原）。它連著記帳的保費「" + line + "」。"
+                + "只解開連結：記帳的保費照留、照扣，稅務頁照算。"
+                + "一起刪：記帳裡這筆固定支出整筆刪掉，以前扣的期數也一起拿掉。"
+        }
+    }
+}
+
+/// [v25.567] 上面那一句的確認框（拆成 modifier：表單 body 的修飾器鏈已經很長，坑 #7）
+struct WealthEditorAskDialog: ViewModifier {
+    @Binding var ask: WealthEditorAsk?
+    let onUseExpense: (UUID) -> Void
+    let onCreateNew: () -> Void
+    /// true＝一起改
+    let onMoveStocks: (Bool) -> Void
+    /// true＝連記帳的保費一起刪
+    let onDeletePolicy: (Bool) -> Void
+
+    private var isPresented: Binding<Bool> {
+        Binding(get: { ask != nil }, set: { if !$0 { ask = nil } })
+    }
+
+    func body(content: Content) -> some View {
+        content.confirmationDialog(ask?.title ?? "", isPresented: isPresented, titleVisibility: .visible,
+                                   presenting: ask) { a in
+            buttons(a)
+        } message: { a in
+            Text(a.message)
+        }
+    }
+
+    @ViewBuilder
+    private func buttons(_ a: WealthEditorAsk) -> some View {
+        switch a {
+        case .useExpense(let eid, _):
+            Button("用那一筆") { onUseExpense(eid) }
+            Button("另外新建") { onCreateNew() }
+            Button("取消", role: .cancel) {}
+        case .brokerStocks:
+            Button("一起改") { onMoveStocks(true) }
+            Button("只改證券戶") { onMoveStocks(false) }
+            Button("取消", role: .cancel) {}
+        case .policyDelete:
+            Button("只解開連結") { onDeletePolicy(false) }
+            Button("連記帳的保費一起刪", role: .destructive) { onDeletePolicy(true) }
+            Button("取消", role: .cancel) {}
+        }
+    }
+}
+
+/// 新增／編輯財富帳戶（judge §5）。onSaved：存好之後（履歷的里程碑表單要跟著關）。
+/// [v25.567] fromExpense：財富頁 ⑦〔補保單〕帶進來的記帳保費（新增保單：保費、繳法、從哪扣、下次扣款日、保險公司先帶好，存檔連它）
+struct WealthAccountEditor: View {
+    let kind: WealthAccountKind
+    var editing: LifeMilestone? = nil
+    var focus: WealthEditorFocus? = nil
+    var onSaved: (() -> Void)? = nil
+    var fromExpense: UUID? = nil
+
+    @EnvironmentObject var lifeStore: LifeStore
+    @EnvironmentObject var expenseStore: ExpenseStore
+    @EnvironmentObject var financeStore: FinanceStore
+    @EnvironmentObject var subscription: SubscriptionManager
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var f = WealthAccountForm()
+    /// 新增時里程碑的 id（照片檔名一打開就要用）
+    @State private var draftId = UUID()
+    @State private var loaded = false
+    @State private var isSaving = false
+    /// 選單（打開時抓一次）
+    @State private var banks: [WealthFormAccountChoice] = []
+    @State private var cards: [WealthFormAccountChoice] = []
+    /// 設定裡的外幣（銀行帳戶勾幣別）
+    @State private var foreignCodes: [String] = []
+    /// 編輯前的扣款帳戶（帳戶已經不在了＝nil）
+    @State private var originalPayFrom: UUID?
+    /// 「編輯 CUBE」
+    @State private var editName = ""
+    @State private var unlocking = false
+    @State private var vaultMessage: String?
+    @State private var askDebitChange = false
+    @State private var askBankDelete = false
+    /// [v25.575] 刪銀行確認框多一句（有定期轉帳碰到這個帳戶：「有 1 條定期轉帳轉進這裡，會一起結束」；按刪除時抓一次）
+    @State private var bankDeleteTransferNote: String?
+    @State private var pendingDelete: FinanceDeletionImpact?
+    @State private var showPremium = false
+    /// 保單選了儲蓄險／車險／房屋險（導走，不在這裡記）
+    @State private var redirect: Int?
+    /// [v25.567] 保單連著的記帳保費（打開時抓一次；〔補保單〕＝fromExpense）與「國泰人壽醫療險（每年 8/15）」
+    @State private var linkedExpenseId: UUID?
+    @State private var linkedLine = ""
+    /// [v25.567] 證券戶打開時的交割銀行（存檔時比對有沒有改）
+    @State private var originalSettlement: UUID?
+    /// [v25.567] 存檔／刪除前多問的一句
+    @State private var ask: WealthEditorAsk?
+    /// [v25.567] 被保險人／要保人／受益人的「家人」選單（本人＋家庭成員）
+    @State private var familyNames: [String] = []
+    /// [v25.567] 編輯保單時保單號碼先遮住（只露後 4 碼），Face ID 才打開
+    @State private var policyNumberLocked = false
+    /// [v25.568] 這次新加的照片好像拍到完整卡號（WealthPhotoScan；只提醒、不擋存檔）
+    @State private var photoHit: WealthPhotoHit?
+    /// [v25.568] 打開表單時畫面蓋了幾層（WealthCoverDepth；0＝量不到）。比它多＝相機、相簿、看大圖還蓋在表單上，提醒框先等
+    @State private var photoBaseDepth: Int = 0
+
+    private static let redirects: [(title: String, message: String)] = [
+        ("儲蓄險", "儲蓄險在理財 › 儲蓄險記，會算現在值多少、到期領多少。"),
+        ("車險", "車險到理財 › 車子那張卡記，保費、到期日跟著車子。"),
+        ("房屋險", "房屋險到理財 › 房屋那張卡記。")
+    ]
+
+    private var navTitle: String {
+        if editing != nil { return "編輯 " + (editName.isEmpty ? kind.title : editName) }
+        return "新增" + kind.title
+    }
+
+    private var canSave: Bool {
+        guard redirect == nil else { return false }
+        return !f.name.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    private var hasUnsavedPhotoChanges: Bool { f.photos != (editing?.photoFileNames ?? []) }
+
+    /// 編輯中的卡改了扣款帳戶 → 存檔前問從哪一期起
+    private var debitChangeNeedsAsking: Bool {
+        guard kind == .card, editing != nil else { return false }
+        return originalPayFrom != f.payFrom
+    }
+
+    /// 「下一期」＝明天起刷的那一期（結帳日用表單上的；沒填先當 25 日）
+    private var nextStatement: (key: String, label: String) {
+        WealthCardCycle.nextStatement(billingDay: f.billingDay > 0 ? f.billingDay : nil, now: Date())
+    }
+
+    private var debitChangeTitle: String {
+        guard let id = f.payFrom else { return "這張卡不再設扣款帳戶，從哪一期開始？" }
+        let name: String = banks.first(where: { $0.id == id })?.name ?? "新的帳戶"
+        return "卡費改從「" + name + "」扣，從哪一期開始？"
+    }
+
+    private var bankDeleteTitle: String {
+        "刪除" + (editName.isEmpty ? f.name : editName) + "？"
+    }
+
+    // MARK: 主體（修飾器拆兩段：表單一段、彈窗一段；坑 #7）
+
+    var body: some View {
+        NavigationStack {
+            ScrollViewReader { proxy in
+                editorForm(proxy)
+            }
+            .navigationTitle(navTitle)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                WealthSaveToolbar(title: "存", isSaving: isSaving, disabled: !canSave,
+                                  onCancel: { cancel() }, onSave: { requestSave() })
+            }
+            .onAppear { load() }
+        }
+        .modifier(WealthVaultMessageAlert(message: $vaultMessage))
+        .modifier(WealthPhotoHitAlert(hit: $photoHit, onDelete: { h in deleteHitPhoto(h) }))
+        .modifier(CardDebitChangeDialog(isPresented: $askDebitChange, title: debitChangeTitle,
+                                        nextLabel: nextStatement.label,
+                                        onNext: { save(payFromAll: false) },
+                                        onAll: { save(payFromAll: true) }))
+        .modifier(WealthBankDeleteDialog(isPresented: $askBankDelete, title: bankDeleteTitle,
+                                         onHide: { hideBank() }, onDelete: { confirmBankDelete() },
+                                         transferNote: bankDeleteTransferNote))
+        .modifier(askDialog)
+        .modifier(FinanceDeleteAlert(pending: $pendingDelete,
+                                     onDisable: { m in disableCard(m) },
+                                     onDelete: { m in deleteAccount(m) }))
+        .premiumLockAlert(isPresented: $showPremium)
+        .interactiveDismissDisabled(hasUnsavedPhotoChanges)
+        .presentationDetents([.large])
+        // 打到一半的號碼不收回，只蓋（這張表單是 sheet，掛在 App 最外層蓋不到，所以自己掛）
+        .modifier(WealthPrivacyCurtain(armed: true))
+    }
+
+    /// [v25.567] 保單「用那一筆？」、證券戶「這 N 檔也一起改嗎？」、刪保單「記帳裡的保費要一起刪嗎？」
+    private var askDialog: WealthEditorAskDialog {
+        WealthEditorAskDialog(ask: $ask,
+                              onUseExpense: { eid in save(payFromAll: nil, useExpense: eid) },
+                              onCreateNew: { save(payFromAll: nil) },
+                              onMoveStocks: { all in save(payFromAll: nil, moveStocks: all) },
+                              onDeletePolicy: { both in deleteLinkedPolicy(alsoExpense: both) })
+    }
+
+    private func editorForm(_ proxy: ScrollViewProxy) -> some View {
+        Form {
+            kindSections
+            photoSection
+            if editing != nil {
+                deleteSection
+            }
+        }
+        .task(id: loaded) { await scrollToFocus(proxy) }
+    }
+
+    @ViewBuilder
+    private var kindSections: some View {
+        switch kind {
+        case .bank: bankSections
+        case .card: cardSections
+        case .broker: brokerSections
+        case .policy: policySections
+        }
+    }
+
+    /// 從要確認點進來：捲到那一段
+    private func scrollToFocus(_ proxy: ScrollViewProxy) async {
+        guard loaded, let target = focus else { return }
+        try? await Task.sleep(nanoseconds: 350_000_000)
+        withAnimation(.easeInOut(duration: 0.25)) {
+            proxy.scrollTo(target.rawValue, anchor: .top)
+        }
+    }
+
+    // MARK: 共用列
+
+    /// 銀行名（常用清單＋自己打）
+    private func nameRow(_ placeholder: String, list: [String]) -> some View {
+        HStack {
+            TextField(placeholder, text: $f.name)
+            Menu {
+                ForEach(list, id: \.self) { n in
+                    Button(n) { f.name = n }
+                }
+            } label: {
+                Image(systemName: "list.bullet.circle")
+                    .font(.title3)
+                    .foregroundStyle(Color.accentColor)
+            }
+            .accessibilityLabel("常用清單")
+        }
+    }
+
+    /// 6 個色點（卡面色；銀行帳戶的顏色也用這 6 個）。selected nil＝沒選
+    private func colorDots(_ title: String, selected: Int?, onPick: @escaping (Int) -> Void) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            HStack(spacing: 8) {
+                ForEach(0..<6, id: \.self) { i in
+                    colorDot(i, on: selected == i, onPick: onPick)
+                }
+            }
+        }
+    }
+
+    private func colorDot(_ i: Int, on: Bool, onPick: @escaping (Int) -> Void) -> some View {
+        let fill = LinearGradient(colors: [WealthCardPalette.top(i, dark: false), WealthCardPalette.bottom(i, dark: false)],
+                                  startPoint: .topLeading, endPoint: .bottomTrailing)
+        return Button {
+            onPick(i)
+        } label: {
+            Circle()
+                .fill(fill)
+                .frame(width: 24, height: 24)
+                .overlay(Circle().stroke(Color.primary.opacity(on ? 0.85 : 0), lineWidth: 2).padding(-3))
+                .padding(3)
+        }
+        .buttonStyle(.borderless)
+        .accessibilityLabel(WealthCardPalette.names[i])
+        .accessibilityAddTraits(on ? .isSelected : [])
+    }
+
+    /// 一顆膠囊（卡費怎麼繳、險種）
+    private func chip(_ title: String, on: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+                .padding(.horizontal, 8)
+                .frame(maxWidth: .infinity, minHeight: 34)
+                .foregroundStyle(on ? Color.white : Color.primary)
+                .background(on ? Color.indigo : Color(.tertiarySystemFill), in: Capsule())
+        }
+        .buttonStyle(.borderless)
+        .accessibilityAddTraits(on ? .isSelected : [])
+    }
+
+    private var noteRow: some View {
+        TextField("備註（選填）", text: $f.note, axis: .vertical)
+            .lineLimit(1...4)
+    }
+
+    // MARK: 銀行帳戶（§5.1）
+
+    @ViewBuilder
+    private var bankSections: some View {
+        Section {
+            nameRow("銀行", list: WealthNameLists.banks)
+            TextField("暱稱（選填，例：薪轉）", text: $f.nickname)
+            TextField("分行（選填）", text: $f.branch)
+        } header: {
+            WealthFormHeader(title: "這個帳戶", icon: "building.columns.fill", color: .blue)
+        }
+        accountNumberSection
+        bankTypeSection
+        if editing == nil {
+            openingSection
+        }
+        Section {
+            purposePicker
+            colorDots("顏色", selected: f.colorId, onPick: { i in f.colorId = (f.colorId == i) ? nil : i })
+            Toggle("算進存款合計", isOn: $f.countsInCash)
+            DatePicker("開戶日", selection: $f.date, displayedComponents: .date)
+            noteRow
+        } header: {
+            WealthFormHeader(title: "其他", icon: "slider.horizontal.3", color: .secondary)
+        } footer: {
+            Text("小孩的戶頭可以列著、不算進存款合計。")
+        }
+    }
+
+    private var accountNumberSection: some View {
+        Section {
+            HStack {
+                Text("帳號末 4 碼")
+                Spacer()
+                TextField("7890", text: $f.last4)
+                    .keyboardType(.numberPad)
+                    .multilineTextAlignment(.trailing)
+                    .font(.body.monospaced())
+                    .frame(maxWidth: 120)
+                    .onChange(of: f.last4) { _, v in
+                        let d = WealthFormText.digits(v, limit: 4)
+                        if d != v { f.last4 = d }
+                    }
+            }
+            Toggle("存完整帳號（加密）", isOn: $f.storeFullNumber.animation())
+            if f.storeFullNumber {
+                fullNumberRow
+            }
+        } header: {
+            WealthFormHeader(title: "帳號", icon: "lock.shield.fill", color: .red)
+        } footer: {
+            Text(accountFootnote)
+        }
+    }
+
+    private var accountFootnote: String {
+        if f.legacyFullNumber {
+            // [v25.568] 這台還沒同步到金鑰時存檔照舊留著（WealthSecrets.sealPlan .plain），同步過來自動加密（LifeStore.migrateWealthSecrets）
+            return "以前記的完整帳號還沒加密：這台有金鑰時存檔就會改成加密；還沒同步到金鑰的話先照舊留著，同步過來會自動加密。"
+                + "列表、選單只露末 4 碼。"
+        }
+        return "列表、選單、卡面只用末 4 碼。完整帳號要打開開關才存，加密後才存起來，要看得先過 Face ID。"
+    }
+
+    @ViewBuilder
+    private var fullNumberRow: some View {
+        if f.accountUnlocked {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(f.legacyFullNumber ? "完整帳號（舊的，還沒加密）" : "完整帳號")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                SecureField("打完整帳號", text: $f.fullNumber)
+                    .keyboardType(.numbersAndPunctuation)
+                    .font(.body.monospaced())
+                    .onChange(of: f.fullNumber) { _, v in fullNumberChanged(v) }
+            }
+        } else {
+            Button {
+                unlockAccount()
+            } label: {
+                HStack {
+                    Text("完整帳號").foregroundStyle(Color.primary)
+                    Spacer()
+                    Text("•••• " + f.last4)
+                        .font(.body.monospaced())
+                        .foregroundStyle(.secondary)
+                    Image(systemName: unlocking ? "hourglass" : "lock.fill")
+                        .font(.caption)
+                        .foregroundStyle(Color.orange)
+                }
+                .contentShape(Rectangle())
+            }
+            .disabled(unlocking)
+        }
+    }
+
+    /// 打了完整帳號：末 4 碼跟著帶
+    private func fullNumberChanged(_ v: String) {
+        let d = v.filter { $0.isASCII && $0.isNumber }
+        if d.count >= 4 { f.last4 = String(d.suffix(4)) }
+    }
+
+    private var bankTypeSection: some View {
+        Section {
+            if f.bankType == .fixed {
+                LabeledContent("種類", value: "定存（以前記的）")
+            } else {
+                Picker("種類", selection: $f.bankType) {
+                    Text(BankAccountType.savings.rawValue).tag(BankAccountType.savings)
+                    Text(BankAccountType.foreign.rawValue).tag(BankAccountType.foreign)
+                }
+                .pickerStyle(.segmented)
+            }
+            LabeledContent("台幣", value: "一定有")
+            ForEach(foreignCodes, id: \.self) { code in
+                Toggle(code, isOn: currencyBinding(code))
+            }
+        } header: {
+            WealthFormHeader(title: "種類與幣別", icon: "dollarsign.circle.fill", color: .teal)
+        } footer: {
+            Text(bankTypeFootnote)
+        }
+    }
+
+    /// [v25.566] 定存不是帳戶種類（judge §5.1、§5.5）：記在帳戶裡
+    private static let depositTypeHint = "定存不是帳戶種類：存好帳戶後，到帳戶頁按〔＋ 定存〕記本金、利率、到期日。"
+
+    /// 「種類與幣別」footer：外幣一句＋[v25.566] 定存一句
+    private var bankTypeFootnote: String {
+        let currencies: String = foreignCodes.isEmpty
+            ? "要記外幣，先到設定 › 匯率加幣別。"
+            : "勾這個帳戶有的外幣；存提款、對存摺都分幣別記。"
+        return currencies + "\n" + Self.depositTypeHint
+    }
+
+    private func currencyBinding(_ code: String) -> Binding<Bool> {
+        Binding(
+            get: { f.currencies.contains(code) },
+            set: { on in
+                if on {
+                    if !f.currencies.contains(code) { f.currencies.append(code) }
+                } else {
+                    f.currencies.removeAll { $0 == code }
+                }
+            }
+        )
+    }
+
+    private var openingCodes: [String] { ["NT$"] + f.currencies }
+
+    private var openingSection: some View {
+        Section {
+            ForEach(openingCodes, id: \.self) { code in
+                openingRow(code)
+            }
+        } header: {
+            WealthFormHeader(title: "今天存摺上有多少", icon: "checkmark.seal.fill", color: .orange)
+        } footer: {
+            Text("不知道可以先空著。存成第一次「對存摺」，以前的每一筆不用補，之後記的都從這裡往後算。")
+        }
+    }
+
+    private func openingRow(_ code: String) -> some View {
+        HStack {
+            Text(code == "NT$" ? "台幣" : code)
+            Spacer()
+            TextField(code == "NT$" ? "例：128,400" : "例：3,200.00", text: openingBinding(code))
+                .keyboardType(.decimalPad)
+                .multilineTextAlignment(.trailing)
+        }
+    }
+
+    private func openingBinding(_ code: String) -> Binding<String> {
+        Binding(get: { f.openings[code] ?? "" }, set: { f.openings[code] = $0 })
+    }
+
+    private var purposeOptions: [String] {
+        var list = WealthNameLists.purposes
+        let p = f.purpose.trimmingCharacters(in: .whitespaces)
+        if !p.isEmpty && !list.contains(p) { list.append(p) }
+        return list
+    }
+
+    private var purposePicker: some View {
+        Picker("用途", selection: $f.purpose) {
+            Text("不填").tag("")
+            ForEach(purposeOptions, id: \.self) { p in
+                Text(p).tag(p)
+            }
+        }
+    }
+
+    // MARK: 信用卡（§5.2；安全碼照留）
+
+    @ViewBuilder
+    private var cardSections: some View {
+        Section {
+            nameRow("發卡銀行", list: WealthNameLists.banks)
+            TextField("卡名（例：CUBE 卡）", text: $f.cardName)
+            TextField("暱稱（選填）", text: $f.nickname)
+            colorDots("卡面顏色", selected: f.faceColor, onPick: { i in f.faceColor = i })
+        } header: {
+            WealthFormHeader(title: "這張卡", icon: "creditcard.fill", color: .orange)
+        } footer: {
+            Text("發卡銀行只是卡上印的銀行，跟卡費從哪個帳戶扣可以不一樣（玉山的卡可以從台新扣）。")
+        }
+        cardBillSection
+        payModeSection
+        remindSection
+        cardVaultSection
+        cardFeeSection
+        Section {
+            ticketRows
+        } header: {
+            WealthFormHeader(title: "綁定的票證與會員", icon: "wallet.pass.fill", color: .teal)
+        } footer: {
+            Text(Self.ticketFootnote)
+        }
+        Section {
+            DatePicker("核卡日", selection: $f.date, displayedComponents: .date)
+            noteRow
+        } header: {
+            WealthFormHeader(title: "其他", icon: "slider.horizontal.3", color: .secondary)
+        }
+    }
+
+    /// [v25.568] 綁定的票證與會員：有密文、還沒解鎖＝每個有值的只露後 4 碼（跟卡號同一顆 Face ID）；
+    /// 不然照舊三格（沒有密文的舊明碼跟以前一樣不鎖）。拆出來（坑 #7）
+    @ViewBuilder
+    private var ticketRows: some View {
+        if f.ticketsEditable {
+            ticketFields
+        } else if lockedTickets.isEmpty {
+            lockedTicketRow("票證號碼", value: "未填")
+        } else {
+            ForEach(lockedTickets, id: \.self) { t in
+                lockedTicketRow(Self.ticketLabel(t), value: CardVault.maskedTail(f.ticket(t)))
+            }
+        }
+    }
+
+    /// 鎖著時要列的票證（里程碑那一欄有字的；空的＝沒有這個號碼）
+    private var lockedTickets: [WealthSecretField] {
+        WealthSecretField.tickets.filter { (t: WealthSecretField) -> Bool in
+            !f.ticket(t).trimmingCharacters(in: .whitespaces).isEmpty
+        }
+    }
+
+    @ViewBuilder
+    private var ticketFields: some View {
+        TextField("悠遊卡卡號（選填）", text: $f.easyCard)
+            .keyboardType(.numbersAndPunctuation)
+        TextField("一卡通卡號（選填，16 碼）", text: $f.iPass)
+            .keyboardType(.numberPad)
+            .font(.body.monospaced())
+            .onChange(of: f.iPass) { _, v in
+                let g = CardVault.grouped(v, limit: CardVault.iPassDigits)
+                if g != v { f.iPass = g }
+            }
+        TextField("Happy Go 卡號（選填）", text: $f.happyGo)
+            .keyboardType(.numbersAndPunctuation)
+        if hasLostTicket {
+            Text("這台還沒同步到金鑰，看不到原本存的票證號碼；空著不動的話，存檔時原本存的照樣留著。")
+                .font(.caption)
+                .foregroundStyle(Color.orange)
+        }
+    }
+
+    private var hasLostTicket: Bool {
+        WealthSecretField.tickets.contains { (t: WealthSecretField) -> Bool in f.lostFields.contains(t) }
+    }
+
+    /// 一個鎖著的票證：「悠遊卡　•••• 4321 🔒」，點了 Face ID（unlockCard：卡號、有效期限、票證一起解）
+    private func lockedTicketRow(_ title: String, value: String) -> some View {
+        Button {
+            unlockCard()
+        } label: {
+            HStack {
+                Text(title).foregroundStyle(Color.primary)
+                Spacer()
+                Text(value)
+                    .font(.body.monospaced())
+                    .foregroundStyle(.secondary)
+                Image(systemName: unlocking ? "hourglass" : "lock.fill")
+                    .font(.caption)
+                    .foregroundStyle(Color.orange)
+            }
+            .contentShape(Rectangle())
+        }
+        .disabled(unlocking)
+    }
+
+    private static func ticketLabel(_ t: WealthSecretField) -> String {
+        switch t {
+        case .easyCard: return "悠遊卡"
+        case .iPass: return "一卡通"
+        case .happyGo: return "Happy Go"
+        case .expiry, .policy: return t.title
+        }
+    }
+
+    static let ticketFootnote = "票證號碼加密後才存，列表、卡片頁只露後 4 碼；要看或修改先過 Face ID（跟卡號一起解開）。"
+
+    private var cardBillSection: some View {
+        Section {
+            dayWheelRow("結帳日", selection: $f.billingDay)
+                .id(WealthEditorFocus.cardDays.rawValue)
+            dayWheelRow("繳款截止日", selection: $f.paymentDay)
+            limitRow
+        } header: {
+            WealthFormHeader(title: "帳單", icon: "calendar", color: .orange)
+        } footer: {
+            Text(cardDaysFootnote)
+        }
+    }
+
+    private var cardDaysFootnote: String {
+        if f.billingDay > 0, f.paymentDay > 0, f.paymentDay <= f.billingDay {
+            return "截止日比結帳日小，就是下個月 \(f.paymentDay) 日。小月沒有那一天就取月底。"
+        }
+        if f.billingDay == 0 || f.paymentDay == 0 {
+            return "沒填的話先當每月 25 日結帳、隔月 15 日繳；照帳單上寫的填，數字才準。"
+        }
+        return "叫法跟帳單一樣；小月沒有那一天就取月底。"
+    }
+
+    /// 一個轉盤一列（兩個轉盤並排時會搶到對方的手勢，所以分兩列）
+    private func dayWheelRow(_ title: String, selection: Binding<Int>) -> some View {
+        HStack {
+            Text(title)
+            Spacer()
+            Picker(title, selection: selection) {
+                Text("沒填").tag(0)
+                ForEach(1...31, id: \.self) { d in
+                    Text("每月 \(d) 日").tag(d)
+                }
+            }
+            .pickerStyle(.wheel)
+            .frame(width: 150, height: 96)
+            .clipped()
+        }
+    }
+
+    private var limitRow: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack {
+                Text("額度")
+                Spacer()
+                TextField("68,000 或 6.8萬", text: $f.limitText)
+                    .keyboardType(.numbersAndPunctuation)
+                    .multilineTextAlignment(.trailing)
+            }
+            if let v = WealthFormText.limit(f.limitText) {
+                Text("＝ " + v.ntdWanString)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private var payModeSection: some View {
+        Section {
+            LazyVGrid(columns: [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)], spacing: 8) {
+                ForEach(WealthPayMode.allCases) { m in
+                    chip(m.title, on: f.payMode == m, action: { f.payMode = m })
+                }
+            }
+            .padding(.vertical, 4)
+            Text(payModeNote)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            payFromPicker
+                .id(WealthEditorFocus.payFrom.rawValue)
+        } header: {
+            WealthFormHeader(title: "卡費怎麼繳", icon: "arrow.uturn.left.circle.fill", color: .orange)
+        } footer: {
+            Text("發卡銀行跟扣款帳戶可以不一樣（玉山的卡從台新扣）。")
+        }
+    }
+
+    private var payModeNote: String {
+        switch f.payMode {
+        case .autoFull:
+            return "每期在繳款截止日從扣款帳戶扣全額。"
+        case .autoMin:
+            return "截止日只扣最低應繳（約 10%），剩下的算進下期帳單，會有循環利息。"
+        case .manual:
+            return "你自己繳。過了截止日還沒標已繳，App 當作你從「通常從」的帳戶在截止日繳了全額，隔天在要確認問你一次。"
+        case .askEachTime:
+            return "過了截止日不當作已繳，在要確認問你繳了沒；還沒繳就算逾期。"
+        }
+    }
+
+    /// [v25.565] 提醒我繳卡費（WealthCardPrefs.remind；通知由 WealthReminders 排，不寫卡名、金額、號碼）
+    private var remindSection: some View {
+        Section {
+            Toggle("提醒我繳卡費", isOn: $f.remind)
+        } header: {
+            WealthFormHeader(title: "提醒", icon: "bell.badge.fill", color: .orange)
+        } footer: {
+            Text(Self.remindFootnote)
+        }
+    }
+
+    static let remindFootnote =
+        "截止前 3 天、當天早上 9 點；自動扣的卡只在可能不夠扣時提醒。通知不寫卡名和金額。"
+        + "設定裡的「財富提醒」關掉就全部不提醒。"
+
+    private var payFromPicker: some View {
+        Picker(f.payMode.isAuto ? "扣款帳戶" : "通常從", selection: $f.payFrom) {
+            Text("不設").tag(nil as UUID?)
+            ForEach(banks) { c in
+                Text(c.label).tag(c.id as UUID?)
+            }
+        }
+    }
+
+    private var cardVaultSection: some View {
+        Section {
+            cardNumberRows
+            cardExpiryRows
+            cardSecurityRows
+        } header: {
+            WealthFormHeader(title: "卡號與安全", icon: "lock.shield.fill", color: .red)
+        } footer: {
+            Text(Self.cardVaultFootnote)
+        }
+    }
+
+    static let cardVaultFootnote =
+        "完整卡號、有效期限、檢核碼、票證號碼會加密後才存起來，金鑰放在系統鑰匙圈，備份檔與桌面網頁版都讀不到明碼。"
+        + "要看或修改一定要先通過 Face ID 或裝置密碼。檢核碼預設不記，由你自己決定。"
+
+    @ViewBuilder
+    private var cardNumberRows: some View {
+        if f.cardUnlocked {
+            HStack {
+                Text("卡號")
+                Spacer()
+                TextField("打完整卡號，加密存", text: $f.cardNumber)
+                    .keyboardType(.numberPad)
+                    .multilineTextAlignment(.trailing)
+                    .font(.body.monospaced())
+                    .onChange(of: f.cardNumber) { _, v in cardNumberChanged(v) }
+            }
+        } else {
+            Button {
+                unlockCard()
+            } label: {
+                HStack {
+                    Text("卡號").foregroundStyle(Color.primary)
+                    Spacer()
+                    Text(CardVault.masked(lastFour: f.cardLast4))
+                        .font(.body.monospaced())
+                        .foregroundStyle(.secondary)
+                    Image(systemName: unlocking ? "hourglass" : "lock.fill")
+                        .font(.caption)
+                        .foregroundStyle(Color.orange)
+                }
+                .contentShape(Rectangle())
+            }
+            .disabled(unlocking)
+        }
+        HStack {
+            Text("末 4 碼")
+            Spacer()
+            TextField("5678", text: $f.cardLast4)
+                .keyboardType(.numberPad)
+                .multilineTextAlignment(.trailing)
+                .font(.body.monospaced())
+                .frame(maxWidth: 100)
+                .disabled(!f.cardUnlocked || !f.cardNumber.isEmpty)
+                .onChange(of: f.cardLast4) { _, v in
+                    let d = WealthFormText.digits(v, limit: 4)
+                    if d != v { f.cardLast4 = d }
+                }
+        }
+    }
+
+    /// 邊打邊每四碼補「-」；末 4 碼跟著帶
+    private func cardNumberChanged(_ v: String) {
+        let g = CardVault.grouped(v)
+        if g != v {
+            f.cardNumber = g
+            return
+        }
+        let tail = CardVault.lastFour(g)
+        if !tail.isEmpty { f.cardLast4 = tail }
+    }
+
+    /// 有效期限：跟卡號同一把鎖
+    @ViewBuilder
+    private var cardExpiryRows: some View {
+        if f.cardUnlocked {
+            Toggle("填有效期限", isOn: $f.hasExpiry)
+            if f.hasExpiry {
+                expiryPicker
+            } else if f.lostFields.contains(.expiry) {
+                // [v25.568] 解鎖了但這台解不開：開關先關著，存檔照留原本的（不會把今天封進去）
+                Text("這台還沒同步到金鑰，看不到原本存的有效期限；開關不動的話，存檔時原本存的照樣留著。")
+                    .font(.caption)
+                    .foregroundStyle(Color.orange)
+            }
+        } else {
+            HStack {
+                Text("有效期限")
+                Spacer()
+                Text(f.hasExpiry ? "••/••" : "未填")
+                    .font(.body.monospaced())
+                    .foregroundStyle(.secondary)
+                Image(systemName: "lock.fill")
+                    .font(.caption)
+                    .foregroundStyle(Color.orange)
+            }
+        }
+    }
+
+    /// 年＋月兩個選單（有效期限只記到月；西曆）
+    private var expiryPicker: some View {
+        let cal = WealthCal.calendar
+        let nowYear = cal.component(.year, from: Date())
+        let years: [Int] = Array((nowYear - 2)...(nowYear + 20))
+        let yearBinding = Binding<Int>(
+            get: { cal.component(.year, from: f.expiry) },
+            set: { y in setExpiry(year: y, month: nil) }
+        )
+        let monthBinding = Binding<Int>(
+            get: { cal.component(.month, from: f.expiry) },
+            set: { m in setExpiry(year: nil, month: m) }
+        )
+        return HStack {
+            Text("到期").foregroundStyle(.secondary)
+            Spacer()
+            Picker("年", selection: yearBinding) {
+                ForEach(years, id: \.self) { y in
+                    Text(String(y) + " 年").tag(y)
+                }
+            }
+            .pickerStyle(.menu)
+            Picker("月", selection: monthBinding) {
+                ForEach(1...12, id: \.self) { m in
+                    Text("\(m) 月").tag(m)
+                }
+            }
+            .pickerStyle(.menu)
+        }
+    }
+
+    private func setExpiry(year: Int?, month: Int?) {
+        let cal = WealthCal.calendar
+        var c = cal.dateComponents([.year, .month], from: f.expiry)
+        if let year { c.year = year }
+        if let month { c.month = month }
+        c.day = 1
+        if let d = cal.date(from: c) { f.expiry = d }
+    }
+
+    /// 檢核碼：完全由你決定要不要記（第 6 題「我要存」：開關照留，預設關）
+    @ViewBuilder
+    private var cardSecurityRows: some View {
+        if f.cardUnlocked {
+            Toggle("記錄檢核碼（CVV／CVC）", isOn: $f.wantsSecurity.animation())
+            if f.wantsSecurity {
+                HStack {
+                    Text("檢核碼")
+                    Spacer()
+                    SecureField("3 碼", text: $f.security)
+                        .keyboardType(.numberPad)
+                        .multilineTextAlignment(.trailing)
+                        .frame(width: 90)
+                        .onChange(of: f.security) { _, v in
+                            let d = WealthFormText.digits(v, limit: 4)
+                            if d != v { f.security = d }
+                        }
+                }
+            }
+        } else if f.securityCipher != nil {
+            HStack {
+                Text("檢核碼")
+                Spacer()
+                Text(CardVault.maskedCode())
+                    .font(.body.monospaced())
+                    .foregroundStyle(.secondary)
+                Image(systemName: "lock.fill")
+                    .font(.caption)
+                    .foregroundStyle(Color.orange)
+            }
+        }
+    }
+
+    private var cardFeeSection: some View {
+        Section {
+            HStack {
+                Text("年費")
+                Spacer()
+                TextField("0", text: $f.annualFeeText)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+            }
+            HStack {
+                Text("免年費：一年刷滿")
+                Spacer()
+                TextField("元", text: $f.waiveAmountText)
+                    .keyboardType(.numbersAndPunctuation)
+                    .multilineTextAlignment(.trailing)
+            }
+            HStack {
+                Text("或刷滿幾筆")
+                Spacer()
+                TextField("筆", text: $f.waiveCountText)
+                    .keyboardType(.numberPad)
+                    .multilineTextAlignment(.trailing)
+            }
+            Picker("卡片年度從", selection: $f.feeYearStart) {
+                Text("1 月（跟日曆一樣）").tag(0)
+                ForEach(2...12, id: \.self) { m in
+                    Text("\(m) 月").tag(m)
+                }
+            }
+            TextField("回饋小抄（例：玩數位 3%，每期上限 300 點）", text: $f.perks, axis: .vertical)
+                .lineLimit(2...6)
+        } header: {
+            WealthFormHeader(title: "年費與回饋", icon: "gift.fill", color: .pink)
+        } footer: {
+            Text("免年費只認「一年刷滿 N 元」「刷滿 N 筆」；卡片頁會算你今年刷到哪了。")
+        }
+    }
+
+    // MARK: 證券戶（§5.3）
+
+    @ViewBuilder
+    private var brokerSections: some View {
+        Section {
+            nameRow("券商", list: WealthNameLists.brokers)
+            TextField("暱稱（選填）", text: $f.nickname)
+        } header: {
+            WealthFormHeader(title: "這個證券戶", icon: "chart.line.uptrend.xyaxis", color: .purple)
+        }
+        accountNumberSection
+        Section {
+            Picker("交割銀行", selection: $f.settlementBankId) {
+                Text("沒選（照股票最常用的）").tag(nil as UUID?)
+                ForEach(banks) { c in
+                    Text(c.label).tag(c.id as UUID?)
+                }
+            }
+            .id(WealthEditorFocus.settlement.rawValue)
+            Picker("類型", selection: $f.secType) {
+                ForEach(SecuritiesAccountType.allCases) { t in
+                    Text(t.rawValue).tag(t)
+                }
+            }
+            DatePicker("開戶日", selection: $f.date, displayedComponents: .date)
+            noteRow
+        } header: {
+            WealthFormHeader(title: "交割與其他", icon: "building.columns.fill", color: .purple)
+        } footer: {
+            Text(Self.brokerFootnote)
+        }
+    }
+
+    /// [v25.567] 多一句：改交割銀行時問要不要把股票一起改（以前的交割不動，judge §4.3 ⑥）
+    static let brokerFootnote = "持股、買賣、股利在理財 › 股票記；選了這個證券戶的股票會自動出現在這裡。"
+        + "\n改交割銀行時可以把這個證券戶的股票一起改；以前的交割照舊留在原本的銀行。"
+
+    // MARK: 保單（§5.4；保障型）
+
+    @ViewBuilder
+    private var policySections: some View {
+        policyKindSection
+        Section {
+            nameRow("保險公司", list: WealthNameLists.insurers)
+            TextField("保單名稱（選填，例：住院醫療）", text: $f.nickname)
+            personRow("被保險人（選填）", text: $f.insured)
+            personRow("要保人（選填）", text: $f.policyholder)
+            personRow("受益人（選填）", text: $f.beneficiary)
+        } header: {
+            WealthFormHeader(title: "這張保單", icon: "person.text.rectangle.fill", color: .green)
+        }
+        policyPremiumSection
+        Section {
+            DatePicker("生效日", selection: $f.date, displayedComponents: .date)
+            TextField("保障到（例：終身、2045、75 歲）", text: $f.coverageUntil)
+            TextField("保障內容（一行一項，例：住院日額 2,000／天）", text: $f.coverageText, axis: .vertical)
+                .lineLimit(2...8)
+            policyNumberRow
+            noteRow
+        } header: {
+            WealthFormHeader(title: "保障", icon: "cross.case.fill", color: .green)
+        } footer: {
+            Text(Self.policyNumberFootnote)
+        }
+    }
+
+    /// [v25.568] 保單號碼 v7 起加密存（WealthVaultBook.policyCipher；里程碑只留後 4 碼）
+    static let policyNumberFootnote = "保單號碼加密後才存，列表、卡片頁只露後 4 碼；要看或修改先過 Face ID。"
+
+    private var policyKindSection: some View {
+        Section {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 84), spacing: 8)], alignment: .leading, spacing: 8) {
+                ForEach(WealthPolicyKind.allCases) { k in
+                    chip(k.shortTitle, on: redirect == nil && f.policyKind == k, action: { pickPolicyKind(k) })
+                }
+                ForEach(Self.redirects.indices, id: \.self) { i in
+                    chip(Self.redirects[i].title, on: redirect == i, action: { redirect = i })
+                }
+            }
+            .padding(.vertical, 4)
+            if let i = redirect {
+                Text(Self.redirects[i].message)
+                    .font(.subheadline)
+                    .foregroundStyle(Color.orange)
+            } else {
+                Text(f.policyKind.title)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        } header: {
+            WealthFormHeader(title: "險種", icon: "shield.fill", color: .green)
+        }
+    }
+
+    private func pickPolicyKind(_ k: WealthPolicyKind) {
+        redirect = nil
+        f.policyKind = k
+    }
+
+    /// [v25.567] 保單號碼（judge §7.1：編輯表單也只露後 4 碼，Face ID 才看全部；沒解鎖存檔照原本的留著）。
+    /// [v25.568] 存法改密文（sealPolicy：完整的進 WealthVaultBook.policyCipher，里程碑只留後 4 碼）
+    @ViewBuilder
+    private var policyNumberRow: some View {
+        if policyNumberLocked {
+            Button {
+                unlockPolicyNumber()
+            } label: {
+                HStack {
+                    Text("保單號碼").foregroundStyle(Color.primary)
+                    Spacer()
+                    Text(CardVault.maskedTail(f.policyNumber))
+                        .font(.body.monospaced())
+                        .foregroundStyle(.secondary)
+                    Image(systemName: unlocking ? "hourglass" : "lock.fill")
+                        .font(.caption)
+                        .foregroundStyle(Color.orange)
+                }
+                .contentShape(Rectangle())
+            }
+            .disabled(unlocking)
+        } else {
+            TextField("保單號碼（選填）", text: $f.policyNumber)
+            if f.lostFields.contains(.policy) {
+                // [v25.568] 解鎖了但這台解不開：欄位空著，沒重打存檔照留原本的（sealPolicy .keep）
+                Text("這台還沒同步到金鑰，看不到原本存的保單號碼；空著不動的話，存檔時原本存的照樣留著。")
+                    .font(.caption)
+                    .foregroundStyle(Color.orange)
+            }
+        }
+    }
+
+    /// [v25.567] 被保險人／要保人／受益人：自己打，或從右邊「家人」選（本人＋家庭成員的名字；judge §4.4 ⑤）
+    private func personRow(_ placeholder: String, text: Binding<String>) -> some View {
+        HStack {
+            TextField(placeholder, text: text)
+            Menu {
+                ForEach(familyNames, id: \.self) { n in
+                    Button(n) { text.wrappedValue = n }
+                }
+            } label: {
+                Text("家人")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Color.accentColor)
+            }
+            .accessibilityLabel("從家人選")
+        }
+    }
+
+    /// [v25.567] 保費（judge §5.4-3）：從哪扣＝WealthPayFromMenu；存檔時寫記帳那一筆（LifeStore.savePolicyPremium）
+    private var policyPremiumSection: some View {
+        Section {
+            premiumAmountRow
+                .id(WealthEditorFocus.premium.rawValue)
+            Picker("繳法", selection: $f.payCycle) {
+                ForEach(cycleOptions) { c in
+                    Text(c.title).tag(c)
+                }
+            }
+            if f.payCycle != .single {
+                payYearsRow
+            }
+            WealthPayFromMenu(choice: $f.payChoice)
+            nextDueRows
+        } header: {
+            WealthFormHeader(title: "保費", icon: "calendar.badge.clock", color: .green)
+        } footer: {
+            Text(premiumFootnote)
+        }
+    }
+
+    private var premiumAmountRow: some View {
+        HStack {
+            Text("保費")
+            Spacer()
+            TextField("每次繳多少", text: $f.premiumText)
+                .keyboardType(.decimalPad)
+                .multilineTextAlignment(.trailing)
+        }
+    }
+
+    private var payYearsRow: some View {
+        HStack {
+            Text("繳費年期")
+            Spacer()
+            TextField("年", text: $f.payYearsText)
+                .keyboardType(.numberPad)
+                .multilineTextAlignment(.trailing)
+        }
+    }
+
+    /// [v25.567] 連著記帳時只給記帳有的週期（年／季／月）：半年繳、躉繳記帳沒有對應的週期，選了也改不到記帳那一筆
+    private var cycleOptions: [WealthPolicyCycle] {
+        guard linkedExpenseId != nil else { return WealthPolicyCycle.allCases }
+        return WealthPolicyCycle.allCases.filter { WealthPolicyLink.recurrence(of: $0) != nil }
+    }
+
+    /// 下次扣款日：沒連照舊自己填；連著記帳＝記帳那一筆的下一期（唯讀，要改日子到記帳改）
+    @ViewBuilder
+    private var nextDueRows: some View {
+        if linkedExpenseId != nil {
+            LabeledContent("下次扣款日", value: linkedNextText)
+        } else {
+            Toggle("填下次扣款日", isOn: $f.hasNextDue)
+            if f.hasNextDue {
+                DatePicker("下次扣款日", selection: $f.nextDue, displayedComponents: .date)
+            }
+        }
+    }
+
+    private var linkedNextText: String {
+        f.hasNextDue ? WealthFormat.ymd(f.nextDue) : "沒有下一期"
+    }
+
+    static let premiumAutoNote = "存檔時保費＝記帳的一筆固定支出（保險）：沒連就自動建（從下一次扣款起，以前的不補記）、"
+        + "連著就改那一筆（金額從今天起）；稅務頁照算。半年繳、躉繳記帳沒有對應的週期，不自動建。"
+    static let premiumLinkedNote = "下次扣款日照記帳那一筆，要改日子請到記帳改。"
+
+    private var premiumFootnote: String {
+        guard linkedExpenseId != nil, !linkedLine.isEmpty else { return Self.premiumAutoNote }
+        return "連著記帳：" + linkedLine + "\n" + Self.premiumLinkedNote + "\n" + Self.premiumAutoNote
+    }
+
+    // MARK: 照片、刪除
+
+    private var photoTitle: String {
+        switch kind {
+        case .card: return "權益與說明照片"
+        case .policy: return "保單照片"
+        case .bank, .broker: return "照片"
+        }
+    }
+
+    private var photoFootnote: String {
+        switch kind {
+        case .card:
+            return "權益說明、優惠 DM、帳單說明都可以拍；請不要拍卡片正面或背面——卡號和檢核碼填在上面的「卡號與安全」，那裡會加密。"
+                + Self.photoScanNote
+        case .bank, .broker:
+            return "請不要拍存摺內頁的完整帳號；完整帳號填在上面，那裡會加密。" + Self.photoScanNote
+        case .policy:
+            return "保單首頁、保障內容都可以拍下來。" + Self.photoScanNote
+        }
+    }
+
+    /// [v25.568] 照片拍到完整卡號時提醒（WealthPhotoScan：手機內建的文字辨識，不上網；只提醒、不擋存檔）
+    static let photoScanNote = "照片不會加密；拍到像完整卡號的數字（16 位）會提醒你。"
+
+    private var photoSection: some View {
+        let id = editing?.id ?? draftId
+        return Section {
+            MultiPhotoGallery(
+                fileNames: $f.photos,
+                urlFor: { LifeMilestone.photoURL(for: $0) },
+                onSaveImage: { LifeMilestone.savePhoto($0, milestoneId: id) },
+                onDeleteFile: { LifeMilestone.deletePhoto($0) },
+                onSavePDF: { LifeMilestone.savePDF($0, milestoneId: id) },
+                title: photoTitle
+            )
+            .padding(.vertical, 4)
+            .onChange(of: f.photos) { old, new in photosChanged(old: old, new: new) }
+        } header: {
+            WealthFormHeader(title: photoTitle, icon: "doc.text.image", color: .orange)
+        } footer: {
+            Text(photoFootnote).font(.caption2)
+        }
+    }
+
+    /// [v25.568] 這次新加的照片（不在 old、也不是打開表單時就有的）在背景用手機內建的 Vision 讀字，
+    /// 像拍到完整卡號就提醒一次（judge §7.2、§8 v7）。不上網、不擋存檔；PDF 不看（WealthPhotoScan.firstHit 跳過）
+    private func photosChanged(old: [String], new: [String]) {
+        let before = Set(old)
+        let original = Set(editing?.photoFileNames ?? [])
+        let added: [String] = new.filter { (n: String) -> Bool in !before.contains(n) && !original.contains(n) }
+        guard !added.isEmpty else { return }
+        let items: [(name: String, url: URL)] = added.map { (n: String) -> (name: String, url: URL) in
+            (name: n, url: LifeMilestone.photoURL(for: n))
+        }
+        Task { @MainActor in
+            // 等拍照／相簿的畫面收好再跳（同一刻疊兩個彈窗，iOS 會把第二個吃掉）
+            try? await Task.sleep(nanoseconds: 600_000_000)
+            guard let hit = await WealthPhotoScan.firstHit(items) else { return }
+            await waitUntilFormOnTop()
+            if f.photos.contains(hit.name) {
+                photoHit = hit
+            }
+        }
+    }
+
+    /// [v25.568] 連拍相機是全螢幕、拍一張存一張（還開著就加進照片了）；看大圖、另一個提醒框也會蓋在表單上。
+    /// 蓋著的時候提醒框跳不上去（會被吃掉），先等它們收起來、上一個照片提醒按掉；每半秒看一次，最多等 3 分鐘
+    @MainActor
+    private func waitUntilFormOnTop() async {
+        let base: Int = photoBaseDepth
+        var tries = 0
+        while tries < 360 {
+            let covered: Bool = base > 0 && WealthCoverDepth.current() > base
+            if !covered && photoHit == nil { return }
+            try? await Task.sleep(nanoseconds: 500_000_000)
+            tries += 1
+        }
+    }
+
+    /// [v25.568] 提醒框〔刪掉這張〕：檔案刪掉、從這張表單拿掉（同 MultiPhotoGallery 的刪除）
+    private func deleteHitPhoto(_ h: WealthPhotoHit) {
+        LifeMilestone.deletePhoto(h.name)
+        f.photos.removeAll { (n: String) -> Bool in n == h.name }
+    }
+
+    private var deleteSection: some View {
+        Section {
+            Button(role: .destructive) {
+                deleteTapped()
+            } label: {
+                Text(kind == .card ? "刪除這張卡" : "刪除這個帳戶")
+                    .frame(maxWidth: .infinity)
+            }
+        } footer: {
+            Text(kind == .card ? "不用了可以先停用：記帳選單不出現，以前刷的帳照算。"
+                 : "不用了可以先收起來：不算進合計，以前的帳照算。")
+        }
+    }
+
+    // MARK: 帶入
+
+    private func load() {
+        guard !loaded else { return }
+        let facts = lifeStore.wealthFacts(expense: expenseStore, finance: financeStore)
+        let book = lifeStore.wealthBook
+        var form = WealthAccountForm()
+        if let m = editing {
+            // [v25.568] 密文那一包的這一筆一起帶（有效期限、保單號碼、票證號）
+            form = WealthAccountForm.load(m, kind: kind, book: book, vault: lifeStore.wealthVault.entry(m.id))
+            editName = WealthFacts.displayName(of: m, book: book)
+            // v2 的帳戶沒勾過幣別：已經有外幣紀錄的那幾個先勾好（一套數字本來就把它們算進這個帳戶）
+            if kind == .bank, let a = facts.account(m.id) {
+                for c in a.currencies where !FinanceRates.isNTD(c) && !form.currencies.contains(c) {
+                    form.currencies.append(c)
+                }
+            }
+        } else {
+            form.faceColor = WealthFacts.defaultFaceColor(draftId)
+        }
+        let extra: UUID? = kind == .broker ? form.settlementBankId : form.payFrom
+        banks = WealthFormAccountChoice.banks(facts, including: extra, excluding: editing?.id)
+        cards = kind == .policy ? WealthFormAccountChoice.cards(facts) : []
+        // 指到已經不在的帳戶：選單對不上，先當沒設（要確認 #7 會帶你來選）
+        if let p = form.payFrom, !banks.contains(where: { $0.id == p }), !cards.contains(where: { $0.id == p }) {
+            form.payFrom = nil
+        }
+        if let s = form.settlementBankId, !banks.contains(where: { $0.id == s }) {
+            form.settlementBankId = nil
+        }
+        originalPayFrom = kind == .card ? form.payFrom : nil
+        // [v25.567] 證券戶：存檔時比對交割銀行有沒有改（改了問「這 N 檔也一起改嗎？」）
+        originalSettlement = kind == .broker ? form.settlementBankId : nil
+        // [v25.567] 保單：從哪扣、連著的記帳保費、家人
+        if kind == .policy {
+            preparePolicy(&form, facts: facts)
+        }
+        var codes: [String] = []
+        for r in expenseStore.currencyRates where !FinanceRates.isNTD(r.code) && !codes.contains(r.code) {
+            codes.append(r.code)
+        }
+        for c in form.currencies where !codes.contains(c) { codes.append(c) }
+        foreignCodes = codes
+        f = form
+        // [v25.568] 這張表單本身蓋在第幾層（照片提醒框等相機收起來再跳：waitUntilFormOnTop）
+        photoBaseDepth = WealthCoverDepth.current()
+        loaded = true
+    }
+
+    /// [v25.567] 保單打開時：帳本的從哪扣換成 payChoice（卡／銀行＋台幣）；連著記帳（或〔補保單〕帶進來的那一筆）時
+    /// 保費、繳法、從哪扣、下次扣款日讀記帳那一筆（保費只有一份）；家人選單
+    private func preparePolicy(_ form: inout WealthAccountForm, facts: WealthFacts) {
+        if let p = form.payFrom {
+            if facts.card(p) != nil {
+                form.payChoice = WealthPayFromChoice(bankId: nil, bankCode: "NT$", cardId: p)
+            } else {
+                form.payChoice = WealthPayFromChoice(bankId: p, bankCode: "NT$", cardId: nil)
+            }
+        }
+        var link: UUID? = nil
+        if let m = editing {
+            link = facts.policies.policy(m.id)?.expenseId
+        } else {
+            link = fromExpense
+        }
+        if let eid = link, let e = expenseStore.expenses.first(where: { $0.id == eid }) {
+            form.loadPremium(from: e, today: WealthCal.day(Date()))
+            if editing == nil { Self.prefill(&form, from: e) }
+            linkedExpenseId = e.id
+            linkedLine = WealthLinkText.title(e) + "（" + WealthPolicyLink.scheduleText(e) + "）"
+        }
+        familyNames = Self.familyChoices(lifeStore.familyMembers)
+        policyNumberLocked = editing != nil && !form.policyNumber.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    /// [v25.567] 〔補保單〕：照記帳那一筆的標題猜保險公司（常用清單裡標題含它的，或含品牌名「國泰」）、險種；
+    /// 生效日先帶那一筆的第一期（可以改）
+    private static func prefill(_ form: inout WealthAccountForm, from e: Expense) {
+        let title = e.title
+        if form.name.trimmingCharacters(in: .whitespaces).isEmpty {
+            let direct: String? = WealthNameLists.insurers.first(where: { title.contains($0) })
+            let brand: String? = WealthNameLists.insurers.first(where: { n in
+                let b = WealthPolicyLink.brandName(n)
+                return b.count >= 2 && title.contains(b)
+            })
+            if let n = direct ?? brand { form.name = n }
+        }
+        if let k = guessKind(title, sub: e.insuranceSubCategory) { form.policyKind = k }
+        form.date = WealthCal.day(e.date)
+    }
+
+    /// 記帳標題猜險種（猜不到 nil，照表單預設）
+    private static func guessKind(_ title: String, sub: InsuranceSubCategory?) -> WealthPolicyKind? {
+        if sub == .accident || title.contains("意外") { return .accident }
+        if title.contains("癌") || title.contains("重大疾病") || title.contains("重疾") { return .cancer }
+        if title.contains("失能") || title.contains("長照") { return .disability }
+        if title.contains("旅平") || title.contains("旅遊") { return .travel }
+        if title.contains("醫療") || title.contains("住院") || title.contains("實支") { return .medical }
+        if title.contains("壽險") { return .life }
+        return nil
+    }
+
+    /// 「本人」＋家庭成員的中文名（空的不列、重複的只留一個）
+    private static func familyChoices(_ members: [FamilyMember]) -> [String] {
+        var out: [String] = ["本人"]
+        for m in members {
+            let n = m.chineseName.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !n.isEmpty && !out.contains(n) { out.append(n) }
+        }
+        return out
+    }
+
+    // MARK: 解鎖（Face ID）
+
+    private func unlockCard() {
+        guard !unlocking else { return }
+        unlocking = true
+        Task { @MainActor in
+            defer { unlocking = false }
+            switch await CardVault.unlock(reason: "檢視或修改卡號、有效期限與票證號碼") {
+            case .ok:
+                let number = Self.openIfKey(f.cardCipher) ?? ""
+                let code = Self.openIfKey(f.securityCipher) ?? ""
+                f.cardNumber = CardVault.grouped(number)
+                f.security = code
+                // 這台解不開（沒有金鑰）：欄位空著，存檔時原本的密文照留（sealVault）；重打才換掉
+                f.cardVaultLost = f.cardCipher != nil && number.isEmpty
+                f.securityVaultLost = f.securityCipher != nil && code.isEmpty
+                f.wantsSecurity = !code.isEmpty || f.securityVaultLost
+                // [v25.568] 有效期限、票證號（密文那一包）跟卡號同一顆 Face ID
+                var lost: [String] = []
+                if f.cardVaultLost { lost.append("完整卡號") }
+                if f.securityVaultLost { lost.append("檢核碼") }
+                lost += revealCardSecrets().map { (t: WealthSecretField) -> String in t.title }
+                if !lost.isEmpty {
+                    vaultMessage = Self.missingKeyMessage(lost.joined(separator: "、"))
+                }
+                f.cardUnlocked = true
+            case .denied:
+                break
+            case .unavailable(let message):
+                vaultMessage = message
+            }
+        }
+    }
+
+    /// [v25.568] Face ID 過了以後帶入有效期限、三種票證（WealthSecrets.expiry／reveal；open＝openIfKey）。
+    /// 用打開表單時那一筆（editing＋f.vaultBase：同一刻抓的，跟 originalPlain／originalExpiry 對得上）。
+    /// 這台解不開的：欄位空著（有效期限開關關著，不能讓預設的今天被封進去）、記進 lostFields，存檔原封帶回。回傳解不開的那幾種
+    private func revealCardSecrets() -> [WealthSecretField] {
+        guard let m = editing else { return [] }
+        let entry = f.vaultBase
+        // 票證三格本來就打得到字（沒有票證密文）＝不用解、也不能蓋掉你解鎖前剛打的字（unlockCard 之後才設 cardUnlocked）
+        let ticketsWereLocked: Bool = !f.ticketsEditable
+        var lost: [WealthSecretField] = []
+        let e = WealthSecrets.expiry(milestone: m, entry: entry, open: { (d: Data) -> String? in Self.openIfKey(d) })
+        if let d = e.date {
+            f.hasExpiry = true
+            f.expiry = d
+        } else if e.missingKey {
+            f.lostFields.insert(.expiry)
+            f.hasExpiry = false
+            lost.append(.expiry)
+        }
+        for t in WealthSecretField.tickets where ticketsWereLocked {
+            let r = WealthSecrets.reveal(t, milestone: m, entry: entry, open: { (d: Data) -> String? in Self.openIfKey(d) })
+            if let v = r.value {
+                f.setTicket(t, v)
+            } else if r.missingKey {
+                f.setTicket(t, "")
+                f.lostFields.insert(t)
+                lost.append(t)
+            }
+        }
+        return lost
+    }
+
+    /// [v25.567] 保單號碼：過 Face ID 才看得到、改得到（同完整帳號那一把鎖）
+    private func unlockPolicyNumber() {
+        guard !unlocking else { return }
+        unlocking = true
+        Task { @MainActor in
+            defer { unlocking = false }
+            switch await CardVault.unlock(reason: "檢視或修改保單號碼") {
+            case .ok:
+                // [v25.568] 完整的在密文那一包（WealthSecrets.reveal：里程碑那一欄是「有沒有」，密文是「完整的」）
+                if let m = editing {
+                    let r = WealthSecrets.reveal(.policy, milestone: m, entry: f.vaultBase,
+                                                 open: { (d: Data) -> String? in Self.openIfKey(d) })
+                    if let v = r.value {
+                        f.policyNumber = v
+                    } else if r.missingKey {
+                        // 這台解不開：欄位空著，沒重打就原封帶回（sealVault .keep）
+                        f.policyNumber = ""
+                        f.lostFields.insert(.policy)
+                        vaultMessage = Self.missingKeyMessage("保單號碼")
+                    }
+                }
+                policyNumberLocked = false
+            case .denied:
+                break
+            case .unavailable(let message):
+                vaultMessage = message
+            }
+        }
+    }
+
+    private func unlockAccount() {
+        guard !unlocking else { return }
+        unlocking = true
+        Task { @MainActor in
+            defer { unlocking = false }
+            switch await CardVault.unlock(reason: "檢視或修改完整帳號") {
+            case .ok:
+                // [v25.568] 里程碑上還有完整的舊明碼（比密文新：還沒更新的 iPad 寫回來的）就用它（同 WealthSecrets.revealAccount），
+                // 存檔照舊明碼的規則走（這台有金鑰就加密，還沒同步到金鑰就原封不動）
+                if !f.originalAccountRaw.isEmpty {
+                    f.fullNumber = f.originalAccountRaw
+                    f.legacyFullNumber = true
+                    f.accountVaultLost = false
+                    f.accountUnlocked = true
+                    return
+                }
+                let number = Self.openIfKey(f.accountCipher) ?? ""
+                f.accountVaultLost = f.accountCipher != nil && number.isEmpty
+                if number.isEmpty {
+                    vaultMessage = Self.missingKeyMessage("完整帳號")
+                }
+                f.fullNumber = number
+                f.accountUnlocked = true
+            case .denied:
+                break
+            case .unavailable(let message):
+                vaultMessage = message
+            }
+        }
+    }
+
+    /// 這台有金鑰才解：沒有金鑰時 CardVault.open 會先產生一把新的寫進 iCloud 鑰匙圈（可能蓋掉別台那把），
+    /// 新的那把也解不開原本的密文——直接當作解不開（欄位空著、存檔時原本的密文照留）
+    /// [v25.568] CardVault.open 本身也不再產生金鑰（CardVault 規矩 3）；這道照留
+    private static func openIfKey(_ cipher: Data?) -> String? {
+        guard CardVault.hasKey else { return nil }
+        return CardVault.open(cipher)
+    }
+
+    /// [v25.568] 第一句改「這台還沒同步到金鑰」；這台還沒同步到金鑰（CardVault.keyMissingHere）時重打的新號碼存不了（會擋下說明），
+    /// 不再說「只能重新輸入一次」（有金鑰但解不開＝金鑰不一樣，才照舊可以重打）
+    private static func missingKeyMessage(_ what: String) -> String {
+        let retype: String = CardVault.keyMissingHere
+            ? "金鑰同步過來以前，這台也存不了新打的號碼（免得蓋掉另一台的金鑰）。"
+            : "若金鑰已經遺失，只能重新輸入一次。"
+        return "這台還沒同步到金鑰，看不到原本存的" + what + "。"
+            + "金鑰是透過 iCloud 鑰匙圈同步的，請確認「設定 → Apple ID → iCloud → 密碼與鑰匙圈」已開啟；"
+            + retype + "沒有重新輸入就存的話，原本存的會照樣留著。"
+    }
+
+    private static func sealFailedMessage(_ what: String) -> String {
+        what + "加密失敗：系統鑰匙圈寫不進金鑰，這次沒有儲存。"
+            + "請把 App 完全關掉再打開試一次；若持續失敗，請確認裝置已設定密碼。"
+    }
+
+    // MARK: 存檔
+
+    /// 存：要訂閱（第 10 題）；卡改了扣款帳戶先問從哪一期起
+    private func requestSave() {
+        guard !isSaving, canSave else { return }
+        guard subscription.isPremium else {
+            showPremium = true
+            return
+        }
+        if debitChangeNeedsAsking {
+            askDebitChange = true
+        } else if let a = saveAsk() {
+            // [v25.567] 保單「用那一筆？」、證券戶「這 N 檔也一起改嗎？」
+            ask = a
+        } else {
+            save(payFromAll: nil)
+        }
+    }
+
+    /// [v25.567] 存檔前多問一句：保單沒連、記帳裡已經有一樣的保費；證券戶改了交割銀行、還有股票用別的銀行交割
+    private func saveAsk() -> WealthEditorAsk? {
+        switch kind {
+        case .policy: return dedupeAsk()
+        case .broker: return brokerStocksAsk()
+        case .bank, .card: return nil
+        }
+    }
+
+    /// [v25.567] 保單沒連、有保費：記帳裡已經有一筆一樣的（WealthPolicyLink.score ≥ 2：金額一樣）先問「用那一筆？」（去重）。
+    /// 候選＝要確認 #15 給這張保單的那一筆＋記帳裡還沒被任何保單、儲蓄險、車、房認領的保費；你按過〔不是〕的那一筆不再問
+    private func dedupeAsk() -> WealthEditorAsk? {
+        guard linkedExpenseId == nil, let amount = WealthFormText.number(f.premiumText), amount > 0 else { return nil }
+        let facts = lifeStore.wealthFacts(expense: expenseStore, finance: financeStore)
+        let book = lifeStore.wealthBook
+        var ids: [UUID] = []
+        if let m = editing, let match = facts.policies.match(for: m.id) { ids.append(match.expenseId) }
+        for u in facts.policies.unclaimed where !ids.contains(u.expenseId) { ids.append(u.expenseId) }
+        let rates = FinanceRates(expenseStore)
+        let company = f.name.trimmingCharacters(in: .whitespaces)
+        let nick: String? = WealthAccountForm.trimmed(f.nickname)
+        let names = WealthLinkText.names(facts)
+        for eid in ids {
+            if let m = editing, book.isDismissed(WealthPolicyLink.matchKey(policyId: m.id, expenseId: eid)) { continue }
+            guard let e = expenseStore.expenses.first(where: { $0.id == eid }) else { continue }
+            let score = WealthPolicyLink.score(e, amount: amount, company: company, nickname: nick, rates: rates)
+            if score >= 2 {
+                return .useExpense(expenseId: eid, line: WealthLinkText.premiumLine(e, names: names))
+            }
+        }
+        return nil
+    }
+
+    /// [v25.567] 證券戶改了交割銀行（judge §4.3 ⑥）：這個證券戶還沒賣掉、交割銀行不是新的那幾檔，問要不要一起改（以前的交割不動）
+    private func brokerStocksAsk() -> WealthEditorAsk? {
+        guard let id = editing?.id, let new = f.settlementBankId, new != originalSettlement else { return nil }
+        // [v25.567 驗] 外幣交割的（複委託從美金子帳戶扣）不算：LifeStore.moveBrokerStocks 不搬它們（同一條規則）
+        let n = financeStore.stocks.filter { s in
+            s.linkedSecuritiesMilestoneId == id && !s.isSold && s.linkedBankMilestoneId != new
+                && FinanceRates.isNTD(s.linkedBankCurrency ?? "NT$")
+        }.count
+        guard n > 0 else { return nil }
+        let name: String = banks.first(where: { $0.id == new })?.name ?? "新的交割銀行"
+        return .brokerStocks(count: n, bankId: new, bankName: name)
+    }
+
+    /// [v25.567] 保單存檔時的保費（沒連、保費 0 就不寫記帳：nil）。第一期＝你填的下次扣款日（今天或以後）；沒填照生效日往後推
+    /// （WealthPolicyLink.firstDue；以前的期數不補記）。
+    /// linked：連著記帳（含〔補保單〕帶進來的那一筆）——保費欄空著也照樣給（金額 0＝savePolicyPremium 不改那一筆的金額）：
+    /// 〔補保單〕存檔才連得上，里程碑的保費（醫療地圖、舊 iPad 讀）也照記帳那一筆寫回，不會留成空的
+    private static func premiumDraft(_ form: WealthAccountForm, linked: Bool) -> WealthPolicyPremiumDraft? {
+        let typed: Double = WealthFormText.number(form.premiumText) ?? 0
+        let amount: Double = typed > 0 ? typed : 0
+        guard amount > 0 || linked else { return nil }
+        let today = WealthCal.day(Date())
+        let next: Date? = form.hasNextDue ? form.nextDue : nil
+        let first = WealthPolicyLink.firstDue(start: form.date, nextDue: next, cycle: form.payCycle, today: today)
+        let c = form.payChoice
+        let code: String? = c.bankId != nil ? c.bankCode : nil
+        return WealthPolicyPremiumDraft(title: form.title(kind: .policy), amount: amount, cycle: form.payCycle,
+                                        kind: form.policyKind, firstDue: first, bankId: c.bankId,
+                                        bankCode: code, cardId: c.cardId)
+    }
+
+    /// 號碼封成密文（主執行緒）；鑰匙圈寫不進金鑰就不存並提示（nil）
+    /// [v25.568] 全部走 WealthSecrets.sealPlan（build/v7/brief.md §2 契約、§4 G1-7）。這台還沒同步到金鑰
+    /// （CardVault.keyMissingHere）時你新打的號碼擋下並說明（keyMissingMessage）、整張表單不存、什麼都不改；
+    /// 原本的密文、舊明碼原封不動（CardVault 規矩 2：絕不因為這台解不開就洗掉別台的密文）
+    private func sealVault() -> WealthSealed? {
+        var out = WealthSealed()
+        // 這一筆原本的密文先整包帶著（只換表單管、而且你動過的那幾種；saveWealthAccount 整筆換掉）
+        out.vault = f.vaultBase
+        let km = CardVault.keyMissingHere
+        let ok: Bool
+        switch kind {
+        case .bank, .broker:
+            ok = sealAccount(&out, keyMissing: km)
+        case .card:
+            ok = sealCard(&out, keyMissing: km)
+        case .policy:
+            ok = sealPolicy(&out, keyMissing: km)
+        }
+        return ok ? out : nil
+    }
+
+    /// sealPlan 的 seal：CardVault.seal（這台還沒同步到金鑰時回 nil、不產生新金鑰；呼叫前已經先看 keyMissingHere）
+    private static func sealText(_ t: String) -> Data? { CardVault.seal(t) }
+
+    /// [v25.568] 銀行、證券戶的完整帳號（密文在帳本 accountNumberCipher；里程碑只留後 4 碼）。擋下／失敗回 false（訊息已設好）
+    private func sealAccount(_ out: inout WealthSealed, keyMissing km: Bool) -> Bool {
+        if !f.storeFullNumber {
+            out.accountCipher = nil
+            return true
+        }
+        if !f.accountUnlocked {
+            // 沒解鎖：看不到內容，原封帶回既有密文（絕不能洗掉）；里程碑上還有比密文新的舊明碼（這台還沒搬）也原封不動
+            out.accountCipher = f.accountCipher
+            out.accountPlain = WealthAccountForm.trimmed(f.originalAccountRaw)
+            return true
+        }
+        let original: String? = f.legacyFullNumber ? f.originalAccountRaw : nil
+        let plan = WealthSecrets.sealPlan(typed: f.fullNumber, original: original, lost: f.accountVaultLost,
+                                          keyMissing: km, seal: { (t: String) -> Data? in Self.sealText(t) })
+        switch plan {
+        case .sealed(let c, _):
+            out.accountCipher = c
+        case .plain(let t):
+            if WealthSecrets.isFull(t) {
+                // 這台還沒同步到金鑰、原封不動的舊明碼：照留明碼（下次有金鑰自動搬），原本的密文也照留
+                out.accountPlain = t
+                out.accountCipher = f.accountCipher
+            } else {
+                // 4 個字以內（不是完整帳號）或清掉了
+                out.accountCipher = nil
+            }
+        case .keep:
+            // 這台解不開、你也沒重打：原本的密文照留（不然別台存的完整帳號會被洗掉）
+            out.accountCipher = f.accountCipher
+        case .blocked:
+            vaultMessage = CardVault.keyMissingMessage("完整帳號")
+            return false
+        case .failed:
+            vaultMessage = Self.sealFailedMessage("完整帳號")
+            return false
+        }
+        return true
+    }
+
+    /// [v25.568] 信用卡：卡號、檢核碼（里程碑上的密文，照 v3）＋有效期限、三種票證（密文那一包）
+    private func sealCard(_ out: inout WealthSealed, keyMissing km: Bool) -> Bool {
+        let typed = WealthFormText.digits(f.cardLast4, limit: 4)
+        if f.cardUnlocked {
+            guard sealCardNumber(&out, keyMissing: km) else { return false }
+            let derived = CardVault.lastFour(f.cardNumber)
+            let tail = derived.isEmpty ? typed : derived
+            out.cardLast4 = tail.isEmpty ? nil : tail
+            guard sealExpiry(&out, keyMissing: km) else { return false }
+        } else {
+            // 沒解鎖：看不到內容，原封帶回既有密文（絕不能洗掉）；有效期限照打開時的（密文、舊明碼都不動）
+            out.cardNumber = f.cardCipher
+            out.security = f.securityCipher
+            out.cardLast4 = typed.isEmpty ? nil : typed
+            out.vault.expiryCipher = f.vaultBase.expiryCipher
+            out.expiryDate = f.originalExpiry
+        }
+        if f.ticketsEditable {
+            // 三格打得到字（解鎖了，或沒有票證密文）：照你打的存
+            for t in WealthSecretField.tickets {
+                let plan = WealthSecrets.sealPlan(typed: f.ticket(t), original: f.originalPlain[t],
+                                                  lost: f.lostFields.contains(t), keyMissing: km,
+                                                  seal: { (s: String) -> Data? in Self.sealText(s) })
+                guard applyPlan(plan, field: t, to: &out) else { return false }
+            }
+        } else {
+            // 鎖著：密文（out.vault 已經是原本的）、里程碑那三欄照打開時的
+            for t in WealthSecretField.tickets {
+                out.plain[t] = f.originalPlain[t]
+            }
+        }
+        return true
+    }
+
+    /// 卡號、檢核碼（v3 那一段；[v25.568] 這台還沒同步到金鑰時打了新的 → 擋下說明，不要跳成「加密失敗」）
+    private func sealCardNumber(_ out: inout WealthSealed, keyMissing km: Bool) -> Bool {
+        let digits = CardVault.digits(f.cardNumber)
+        if !digits.isEmpty {
+            // 這台還沒同步到金鑰時解不開原本的卡號（欄位一定是空的）：有字＝你剛打的新卡號
+            if km {
+                vaultMessage = CardVault.keyMissingMessage("卡號")
+                return false
+            }
+            guard let c = CardVault.seal(digits) else {
+                vaultMessage = Self.sealFailedMessage("卡號")
+                return false
+            }
+            out.cardNumber = c
+        } else if f.cardVaultLost {
+            // 這台解不開、你也沒重打：原本的密文照留（不然別台存的卡號會被洗掉）
+            out.cardNumber = f.cardCipher
+        }
+        let code = f.security.trimmingCharacters(in: .whitespaces)
+        if f.wantsSecurity && !code.isEmpty {
+            if km {
+                vaultMessage = CardVault.keyMissingMessage("檢核碼")
+                return false
+            }
+            guard let c = CardVault.seal(code) else {
+                vaultMessage = Self.sealFailedMessage("檢核碼")
+                return false
+            }
+            out.security = c
+        } else if f.wantsSecurity && f.securityVaultLost {
+            // 同上：開關還開著、沒重打 → 原本的檢核碼密文照留（使用者第 6 題「我要存」）；你自己關掉開關才刪
+            out.security = f.securityCipher
+        }
+        return true
+    }
+
+    /// [v25.568] 有效期限（解鎖後）：密文進 out.vault.expiryCipher，里程碑 expiryDate 寫 nil（日期沒辦法只留一半）
+    private func sealExpiry(_ out: inout WealthSealed, keyMissing km: Bool) -> Bool {
+        let typed: String = f.hasExpiry ? WealthSecrets.expiryText(f.expiry) : ""
+        let original: String? = f.originalExpiry.map { (d: Date) -> String in WealthSecrets.expiryText(d) }
+        let plan = WealthSecrets.sealPlan(typed: typed, original: original, lost: f.lostFields.contains(.expiry),
+                                          keyMissing: km, seal: { (s: String) -> Data? in Self.sealText(s) })
+        switch plan {
+        case .sealed(let c, _):
+            out.vault.expiryCipher = c
+            out.expiryDate = nil
+        case .plain(let t):
+            if let t {
+                // 這台還沒同步到金鑰、原封不動的舊明碼：照留（下次有金鑰自動搬），原本的密文也照留
+                out.vault.expiryCipher = f.vaultBase.expiryCipher
+                out.expiryDate = f.originalExpiry ?? WealthSecrets.expiryDate(t)
+            } else {
+                // 開關關掉＝不填有效期限
+                out.vault.expiryCipher = nil
+                out.expiryDate = nil
+            }
+        case .keep:
+            out.vault.expiryCipher = f.vaultBase.expiryCipher
+            out.expiryDate = f.originalExpiry
+        case .blocked:
+            vaultMessage = CardVault.keyMissingMessage(WealthSecretField.expiry.title)
+            return false
+        case .failed:
+            vaultMessage = Self.sealFailedMessage(WealthSecretField.expiry.title)
+            return false
+        }
+        return true
+    }
+
+    /// [v25.568] 保單號碼：鎖著＝密文、里程碑那一欄照打開時的；解鎖了（或新增）照你打的存
+    private func sealPolicy(_ out: inout WealthSealed, keyMissing km: Bool) -> Bool {
+        if policyNumberLocked {
+            out.vault.policyCipher = f.vaultBase.policyCipher
+            out.plain[.policy] = f.originalPlain[.policy]
+            return true
+        }
+        let plan = WealthSecrets.sealPlan(typed: f.policyNumber, original: f.originalPlain[.policy],
+                                          lost: f.lostFields.contains(.policy), keyMissing: km,
+                                          seal: { (s: String) -> Data? in Self.sealText(s) })
+        return applyPlan(plan, field: .policy, to: &out)
+    }
+
+    /// [v25.568] 一個字串號碼（保單號碼、票證號）的 plan 寫進 out：密文進 out.vault、里程碑那一欄的字進 out.plain。
+    /// 擋下／失敗回 false（訊息已經設好，整張表單不存）
+    private func applyPlan(_ plan: WealthSecrets.SealPlan, field: WealthSecretField, to out: inout WealthSealed) -> Bool {
+        switch plan {
+        case .sealed(let c, let tail):
+            out.vault.setCipher(c, for: field)
+            out.plain[field] = tail
+        case .plain(let t):
+            // 完整的明碼＝這台還沒同步到金鑰、原封不動的舊明碼：原本的密文也照留（別台解得開）；
+            // 4 個字以內或清掉了＝沒有完整的，密文拿掉
+            let keepCipher: Data? = WealthSecrets.isFull(t) ? f.vaultBase.cipher(field) : nil
+            out.vault.setCipher(keepCipher, for: field)
+            out.plain[field] = t
+        case .keep:
+            out.vault.setCipher(f.vaultBase.cipher(field), for: field)
+            out.plain[field] = f.originalPlain[field]
+        case .blocked:
+            vaultMessage = CardVault.keyMissingMessage(field.title)
+            return false
+        case .failed:
+            vaultMessage = Self.sealFailedMessage(field.title)
+            return false
+        }
+        return true
+    }
+
+    /// payFromAll：卡改了扣款帳戶時確認框選的（true＝以前的帳單也改；false／nil＝從下一期起）。
+    /// 先關畫面、下一個 runloop 才寫：里程碑一次＋帳本一次（LifeStore.saveWealthAccount），改扣款帳戶再記一段歷史。
+    /// [v25.567] useExpense：保單〔用那一筆〕選的記帳保費（linkPolicy 連起來，記帳那一筆不動）；moveStocks：證券戶〔一起改〕。
+    /// 保單接著寫記帳那一筆保費（savePolicyPremium：沒連就建、連著（含〔補保單〕）就改；沒連而且保費 0 不叫）、證券戶接著搬股票（moveBrokerStocks）
+    private func save(payFromAll: Bool?, useExpense: UUID? = nil, moveStocks: Bool = false) {
+        guard !isSaving, canSave else { return }
+        guard let sealed = sealVault() else { return }
+        isSaving = true
+        let form = f
+        let k = kind
+        let id: UUID = editing?.id ?? draftId
+        let isNew = editing == nil
+        let base: LifeMilestone = editing
+            ?? LifeMilestone(id: id, title: "", category: .achievement, financeSubCategory: kind.sub)
+        let changePayFrom = debitChangeNeedsAsking
+        let oldPayFrom = originalPayFrom
+        let fromKey: String? = payFromAll == true ? nil : nextStatement.key
+        let life = lifeStore
+        let done = onSaved
+        // [v25.567] store 先抓進區域常數
+        let es = expenseStore
+        let fs = financeStore
+        // 〔用那一筆〕＝照記帳那一筆連起來（linkPolicy：記帳那一筆不動，保單的舊欄位照它寫一份）；不拿表單的繳法、
+        // 從哪扣去改它（表單沒填的「從哪扣」會把那一筆的刷卡清掉）。其他照表單寫記帳那一筆（savePolicyPremium）
+        let linkTo: UUID? = k == .policy ? useExpense : nil
+        let useId: UUID? = linkedExpenseId
+        let premium: WealthPolicyPremiumDraft? = (k == .policy && linkTo == nil)
+            ? Self.premiumDraft(form, linked: useId != nil) : nil
+        let moveTo: UUID? = (k == .broker && moveStocks) ? form.settlementBankId : nil
+        dismiss()
+        DispatchQueue.main.async {
+            var m: LifeMilestone = life.milestones.first(where: { $0.id == id }) ?? base
+            form.apply(to: &m, kind: k, sealed: sealed)
+            let book = life.wealthBook
+            let prefs = form.accountPrefs(book.account(id), kind: k, sealed: sealed)
+            let card: WealthCardPrefs? = k == .card ? form.cardPrefs(book.card(id), now: Date()) : nil
+            let policy: WealthPolicyPrefs? = k == .policy ? form.policyPrefs(book.policy(id)) : nil
+            let openings: [String: Double] = (isNew && k == .bank) ? form.openingBalances : [:]
+            // [v25.568] 卡、保單的號碼密文那一筆整筆換掉（先寫密文那一包、再寫里程碑）；銀行、證券戶不動那一包（nil）
+            let vaultEntry: WealthVaultEntry? = (k == .card || k == .policy) ? sealed.vault : nil
+            life.saveWealthAccount(m, prefs: prefs, card: card, policy: policy, openingBalances: openings,
+                                   vault: vaultEntry)
+            if let eid = linkTo {
+                life.linkPolicy(id, expenseId: eid, expense: es)
+            } else if let draft = premium {
+                life.savePolicyPremium(policyId: id, draft: draft, useExpenseId: useId, create: true, expense: es)
+            }
+            if let bank = moveTo {
+                life.moveBrokerStocks(id, to: bank, finance: fs)
+            }
+            if changePayFrom {
+                life.recordCardPayFromChange(cardId: id, oldAccount: oldPayFrom, newAccount: form.payFrom,
+                                             fromKey: fromKey)
+            }
+            done?()
+        }
+    }
+
+    /// 取消：這次新加的照片刪掉；這次刪掉的舊照片檔已經沒了，把原本那一筆的檔名清單改成還在的那些
+    private func cancel() {
+        let original: [String] = editing?.photoFileNames ?? []
+        let originalSet = Set(original)
+        for name in f.photos where !originalSet.contains(name) {
+            LifeMilestone.deletePhoto(name)
+        }
+        let kept = Set(f.photos)
+        let remaining: [String] = original.filter { kept.contains($0) }
+        let editId: UUID? = editing?.id
+        let changed = remaining.count != original.count
+        let life = lifeStore
+        dismiss()
+        guard changed, let editId else { return }
+        DispatchQueue.main.async {
+            guard var latest = life.milestones.first(where: { $0.id == editId }) else { return }
+            latest.photoFileNames = remaining.isEmpty ? nil : remaining
+            life.update(latest)
+        }
+    }
+
+    // MARK: 刪除（要訂閱；卡先建議停用、銀行先建議收起來）
+
+    private func deleteTapped() {
+        guard let m = editing else { return }
+        guard subscription.isPremium else {
+            showPremium = true
+            return
+        }
+        if kind == .bank {
+            // [v25.575] 碰到這個帳戶、還在跑的定期轉帳（收起來、刪除都會一起結束）
+            let facts = lifeStore.wealthFacts(expense: expenseStore, finance: financeStore)
+            bankDeleteTransferNote = facts.hideTransferSentence(m.id)
+            askBankDelete = true
+        } else if let a = policyDeleteAsk() {
+            // [v25.567] 連著記帳的保單：先問記帳的保費要不要一起刪（預設只解開連結；judge §5.6）
+            ask = a
+        } else {
+            pendingDelete = lifeStore.financeDeletionImpact(m, finance: financeStore, expense: expenseStore)
+        }
+    }
+
+    /// [v25.567] 刪保單：連著記帳那一筆才問；沒連照原本的確認框
+    private func policyDeleteAsk() -> WealthEditorAsk? {
+        guard kind == .policy, let eid = linkedExpenseId,
+              let e = expenseStore.expenses.first(where: { $0.id == eid }) else { return nil }
+        let facts = lifeStore.wealthFacts(expense: expenseStore, finance: financeStore)
+        let line = WealthLinkText.title(e) + "（" + WealthLinkText.premiumLine(e, names: WealthLinkText.names(facts)) + "）"
+        return .policyDelete(expenseId: eid, line: line)
+    }
+
+    /// [v25.567] 〔只解開連結〕＝照原本刪保單（帳本裡它的設定、連結跟著清，記帳那一筆照留）；
+    /// 〔連記帳的保費一起刪〕＝刪保單後、同一個 runloop 刪記帳那一筆
+    private func deleteLinkedPolicy(alsoExpense: Bool) {
+        guard let m = editing else { return }
+        deleteAccount(m, alsoExpense: alsoExpense ? linkedExpenseId : nil)
+    }
+
+    /// 〔仍要刪除〕：確認框收起來之後才跳「會動到什麼」（同一刻疊兩個彈窗，iOS 會把第二個吃掉）
+    private func confirmBankDelete() {
+        guard let m = editing else { return }
+        let impact = lifeStore.financeDeletionImpact(m, finance: financeStore, expense: expenseStore)
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            pendingDelete = impact
+        }
+    }
+
+    private func hideBank() {
+        guard let m = editing else { return }
+        let life = lifeStore
+        let id = m.id
+        dismiss()
+        DispatchQueue.main.async { life.setWealthHidden(id, hidden: true) }
+    }
+
+    private func disableCard(_ m: LifeMilestone) {
+        let life = lifeStore
+        let id = m.id
+        dismiss()
+        DispatchQueue.main.async { life.setCardDisabled(id, disabled: true) }
+    }
+
+    private func deleteAccount(_ m: LifeMilestone, alsoExpense: UUID? = nil) {
+        let life = lifeStore
+        let fs = financeStore
+        let es = expenseStore
+        dismiss()
+        DispatchQueue.main.async {
+            life.deleteFinanceMilestone(m, finance: fs, expense: es)
+            if let eid = alsoExpense, let e = es.expenses.first(where: { $0.id == eid }) {
+                es.delete(e)
+            }
+        }
+    }
+}
+
+/// 記一筆的種類（存款／提款／利息／手續費；轉帳、對存摺另外兩張小表單）
+enum WealthRecordKind: String, CaseIterable, Identifiable {
+    case deposit, withdrawal, interest, fee
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .deposit: return "存款"
+        case .withdrawal: return "提款"
+        case .interest: return "利息"
+        case .fee: return "手續費"
+        }
+    }
+}
+
+extension WealthRecordKind {
+    /// 錢是不是離開帳戶（提款、手續費）
+    var isOutflow: Bool { self == .withdrawal || self == .fee }
+
+    /// BankDeposit.kind 的值
+    var depositKind: String {
+        switch self {
+        case .deposit: return BankDeposit.kindDeposit
+        case .withdrawal: return BankDeposit.kindWithdrawal
+        case .interest: return BankDeposit.kindInterest
+        case .fee: return BankDeposit.kindFee
+        }
+    }
+
+    /// 以前記的那一筆是哪一種（舊資料沒有 kind：照 isWithdrawal）
+    static func of(_ dep: BankDeposit) -> WealthRecordKind {
+        let k: String = dep.kind ?? ""
+        if k == BankDeposit.kindInterest { return .interest }
+        if k == BankDeposit.kindFee { return .fee }
+        if k == BankDeposit.kindWithdrawal { return .withdrawal }
+        if k == BankDeposit.kindDeposit { return .deposit }
+        return dep.isWithdrawal ? .withdrawal : .deposit
+    }
+}
+
+// MARK: - 共用小零件
+
+/// 表單 Section 標題：4pt 漸層側條＋圖示＋粗體字（同履歷表單、以前存提款表單那一套）
+struct WealthFormHeader: View {
+    let title: String
+    let icon: String
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 7) {
+            Capsule()
+                .fill(LinearGradient(colors: [color, color.opacity(0.6)], startPoint: .top, endPoint: .bottom))
+                .frame(width: 4, height: 16)
+            Image(systemName: icon)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(color)
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(Color.primary)
+        }
+        .textCase(nil)
+    }
+}
+
+/// 表單的數字、字（只在主執行緒叫）
+enum WealthFormText {
+    /// 數字帶回輸入框：四捨五入到兩位小數、去尾 0（123.45 →「123.45」、1200 →「1200」）
+    static func editable(_ v: Double) -> String {
+        let rounded: Double = (v * 100).rounded() / 100
+        var s = String(format: "%.2f", rounded)
+        while s.hasSuffix("0") { s.removeLast() }
+        if s.hasSuffix(".") { s.removeLast() }
+        return s
+    }
+
+    /// 匯率帶回輸入框：4 位小數去尾 0（32.05 →「32.05」）
+    static func rateText(_ r: Double) -> String {
+        var s = String(format: "%.4f", r)
+        while s.hasSuffix("0") { s.removeLast() }
+        if s.hasSuffix(".") { s.removeLast() }
+        return s
+    }
+
+    /// 打的數字：去掉逗號、空白、「NT$」；尾巴「萬」×10,000（「6.8萬」→ 68,000）；讀不懂＝nil
+    static func number(_ raw: String) -> Double? {
+        var t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        t = t.replacingOccurrences(of: ",", with: "")
+        t = t.replacingOccurrences(of: "，", with: "")
+        t = t.replacingOccurrences(of: "NT$", with: "")
+        t = t.replacingOccurrences(of: " ", with: "")
+        var scale: Double = 1
+        if t.hasSuffix("萬") || t.hasSuffix("万") {
+            scale = 10_000
+            t.removeLast()
+        }
+        guard !t.isEmpty, let v = Double(t), v.isFinite else { return nil }
+        return v * scale
+    }
+
+    /// 額度：「68,000」「6.8萬」都可以；沒寫「萬」又小於 1,000 的當萬（以前的表單單位是萬元）。四捨五入到元
+    static func limit(_ raw: String) -> Double? {
+        guard let v = number(raw), v > 0 else { return nil }
+        let hasWan = raw.contains("萬") || raw.contains("万")
+        let yuan: Double = (!hasWan && v < 1000) ? v * 10_000 : v
+        return yuan.rounded()
+    }
+
+    /// 只留半形數字並截到 n 個
+    static func digits(_ raw: String, limit n: Int) -> String {
+        String(raw.filter { $0.isASCII && $0.isNumber }.prefix(n))
+    }
+
+    /// 「10/19（一）」
+    static func dayWithWeekday(_ d: Date) -> String {
+        let names = ["日", "一", "二", "三", "四", "五", "六"]
+        let wd = WealthCal.calendar.component(.weekday, from: d)
+        let i = Swift.min(Swift.max(wd - 1, 0), 6)
+        return WealthFormat.monthDay(d) + "（" + names[i] + "）"
+    }
+
+    /// 差額一行的數字：「+1.20」「-120」（台幣到元、外幣兩位）
+    static func signed(_ v: Double, code: String) -> String {
+        let body = WealthFormat.money(Swift.abs(v), code: code)
+        if Swift.abs(v) < 0.005 { return "0" }
+        return (v > 0 ? "+" : "-") + body
+    }
+}
+
+/// 表單左上「取消」、右上「存」（忙碌守衛＋轉圈）
+struct WealthSaveToolbar: ToolbarContent {
+    let title: String
+    let isSaving: Bool
+    let disabled: Bool
+    var showsSave: Bool = true
+    let onCancel: () -> Void
+    let onSave: () -> Void
+
+    var body: some ToolbarContent {
+        ToolbarItem(placement: .topBarLeading) {
+            Button("取消") { onCancel() }
+        }
+        ToolbarItem(placement: .topBarTrailing) {
+            HStack(spacing: 6) {
+                if isSaving {
+                    ProgressView().scaleEffect(0.7).tint(.green)
+                }
+                if showsSave {
+                    Button(title) { onSave() }
+                        .bold()
+                        .foregroundStyle(Color.green)
+                        .disabled(disabled || isSaving)
+                }
+            }
+        }
+    }
+}
+
+/// 刪一筆先問：轉帳〔兩邊一起刪〕〔只刪這一筆〕〔取消〕；其他〔刪除〕〔取消〕。onDelete 參數＝兩邊一起刪
+struct WealthDeleteAsk: ViewModifier {
+    @Binding var isPresented: Bool
+    let title: String
+    let message: String
+    var isPair: Bool = false
+    let onDelete: (Bool) -> Void
+
+    func body(content: Content) -> some View {
+        content.alert(title, isPresented: $isPresented) {
+            if isPair {
+                Button("兩邊一起刪", role: .destructive) { onDelete(true) }
+                Button("只刪這一筆") { onDelete(false) }
+            } else {
+                Button("刪除", role: .destructive) { onDelete(false) }
+            }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text(message)
+        }
+    }
+}
+
+/// 小表單的帳戶選單一列（打開時從 WealthFacts 抓一次，打字不重算）
+struct WealthFormAccountChoice: Identifiable, Equatable {
+    let id: UUID
+    /// 「薪轉」「台新銀行」「國泰世華 CUBE」
+    let name: String
+    /// 選單那一列「薪轉（台新銀行・存摺 NT$12.8萬）」
+    let label: String
+    /// 這個帳戶的幣別（台幣在前；卡＝["NT$"]）
+    let codes: [String]
+
+    /// 銀行帳戶（不列證券戶、收起來的、定存；extra：這張表單本來就是它，不在選單裡也放最前面）。
+    /// includeFixed：記一筆、轉帳也列定存帳戶（judge §4.5「證券戶以外的所有銀行」；v2 轉帳就能轉進定存）
+    static func banks(_ facts: WealthFacts, including extra: UUID? = nil,
+                      excluding skip: UUID? = nil, includeFixed: Bool = false) -> [WealthFormAccountChoice] {
+        var list: [WealthFacts.Account] = includeFixed
+            ? facts.banks.filter { !$0.hidden }
+            : facts.pickerBanks
+        if let e = extra, !list.contains(where: { $0.id == e }), let a = facts.account(e), !a.isSecurities {
+            list.insert(a, at: 0)
+        }
+        return list.filter { $0.id != skip }.map { (a: WealthFacts.Account) -> WealthFormAccountChoice in
+            let codes: [String] = a.currencies.isEmpty ? ["NT$"] : a.currencies
+            return WealthFormAccountChoice(id: a.id, name: a.name, label: a.pickerLabel, codes: codes)
+        }
+    }
+
+    /// 信用卡（沒停用的；「CUBE（還能刷 27.5萬）」）
+    static func cards(_ facts: WealthFacts, excluding skip: UUID? = nil) -> [WealthFormAccountChoice] {
+        facts.pickerCards.filter { $0.id != skip }.map { (c: WealthFacts.Card) -> WealthFormAccountChoice in
+            var label = c.fullName
+            if let left = c.available { label += "（還能刷 " + WealthFormChoiceText.wan(left) + "）" }
+            return WealthFormAccountChoice(id: c.id, name: c.fullName, label: label, codes: ["NT$"])
+        }
+    }
+}
+
+/// 選單字（萬）：「27.5萬」（不寫 NT$，跟記帳卡選單同一個寫法）
+enum WealthFormChoiceText {
+    static func wan(_ v: Double) -> String {
+        let s = v.ntdWanString
+        if s.hasPrefix("NT$") { return String(s.dropFirst(3)) }
+        return s
+    }
+}
+
+/// 從要確認、表單裡打開的另一張表單（一個畫面一個 .sheet(item:)；內容外面呼叫端再掛 .appStores()）
+enum WealthFormSheet: Identifiable {
+    case editor(kind: WealthAccountKind, item: LifeMilestone?, focus: WealthEditorFocus?)
+    /// showsCover：[v25.575] 要確認 #1〔轉帳過去〕（第一行「補到 30 天內都夠：…」）
+    case transfer(from: UUID?, to: UUID?, amount: Double?, showsCover: Bool)
+    case paid(cardId: UUID, key: String?)
+    case move(fromId: UUID, expenseIds: [UUID], toCards: Bool)
+    case anchor(accountId: UUID, code: String)
+    case rates
+    case expense(token: UUID, preset: AddExpensePreset)
+    /// [v25.565] 要確認 #12〔看綁了哪些〕：那張卡的卡片頁、捲到綁在這張卡的定期扣款
+    case card(UUID)
+    /// [v25.566] 定存表單（要確認〔補資料〕：舊的定存帳戶、editing nil）
+    case timeDeposit(accountId: UUID?, editing: UUID?)
+    /// [v25.567] #16〔搬到薪轉〕：證券戶舊交割搬家（先看會動到哪些）
+    case settlementMove(brokerId: UUID)
+    /// [v25.567] 保單〔連到記帳的保費〕
+    case policyLink(policyId: UUID)
+    /// [v25.575] 要確認〔看這條〕：定期轉帳的規則頁
+    case transferRule(ruleId: UUID)
+    /// [v25.575] 要確認〔看這一期〕：定期轉帳那一期的小表單（key＝那一期原本的日子「2026-11-13」）
+    case transferPeriod(ruleId: UUID, key: String)
+    /// [v25.579] 要確認〔已經續設〕：銀行那邊設到哪天
+    case transferRenew(ruleId: UUID)
+    /// [v25.581] 要確認〔改成定期轉帳〕〔合成一條定期轉帳〕〔設成每月都轉〕：新增定期轉帳帶好欄位
+    case transferNew(preset: WealthTransferPreset)
+
+    var id: String {
+        switch self {
+        case .editor(let k, let m, _):
+            return "editor-" + k.rawValue + "-" + (m?.id.uuidString ?? "new")
+        case .transfer(let f, let t, _, _):
+            return "transfer-" + (f?.uuidString ?? "-") + "-" + (t?.uuidString ?? "-")
+        case .paid(let c, let k):
+            return "paid-" + c.uuidString + "-" + (k ?? "")
+        case .move(let f, _, let toCards):
+            return "move-" + f.uuidString + (toCards ? "-card" : "-bank")
+        case .anchor(let a, let code):
+            return "anchor-" + a.uuidString + "-" + code
+        case .rates:
+            return "rates"
+        case .expense(let token, _):
+            return "expense-" + token.uuidString
+        case .card(let c):
+            return "card-" + c.uuidString
+        case .timeDeposit(let a, let e):
+            return "deposit-" + (a?.uuidString ?? "new") + "-" + (e?.uuidString ?? "new")
+        case .settlementMove(let b):
+            return "settlemove-" + b.uuidString
+        case .policyLink(let p):
+            return "policylink-" + p.uuidString
+        case .transferRule(let r):
+            return "transferrule-" + r.uuidString
+        case .transferPeriod(let r, let k):
+            return "transferperiod-" + r.uuidString + "-" + k
+        case .transferRenew(let r):
+            return "transferrenew-" + r.uuidString
+        case .transferNew(let p):
+            return "transfernew-" + p.id.uuidString
+        }
+    }
+
+    /// 內容（型別在這裡抹成 AnyView，坑 #6）
+    var view: AnyView {
+        switch self {
+        case .editor(let k, let m, let focus):
+            return AnyView(WealthAccountEditor(kind: k, editing: m, focus: focus))
+        case .transfer(let f, let t, let amount, let cover):
+            return AnyView(WealthTransferSheet(fromId: f, toId: t, amount: amount, showsCover: cover))
+        case .paid(let c, let k):
+            return AnyView(WealthPaidSheet(cardId: c, statementKey: k))
+        case .move(let f, let ids, let toCards):
+            return AnyView(WealthMoveLinksSheet(fromId: f, expenseIds: ids, incomeIds: [], toCards: toCards))
+        case .anchor(let a, let code):
+            return AnyView(WealthAnchorSheet(accountId: a, code: code))
+        case .rates:
+            return AnyView(WealthRatesSheet())
+        case .expense(_, let p):
+            // 記帳表單外面包布幕（切到背景蓋住；它疊在財富表單上）
+            return AnyView(AddExpenseView(expenseType: .variable, preset: p)
+                .modifier(WealthPrivacyCurtain(armed: true)))
+        case .card(let c):
+            // 卡片頁自己掛布幕（WealthCardPage.body）
+            return AnyView(WealthCardPage(accountId: c, scrollTo: .recurring))
+        case .timeDeposit(let a, let e):
+            // [v25.566] 定存表單自己掛布幕（WealthTimeDepositSheet.body）
+            return AnyView(WealthTimeDepositSheet(accountId: a, editing: e))
+        case .settlementMove(let b):
+            // [v25.567] 兩張連動小表單自己掛布幕（WealthLinkForms.swift）
+            return AnyView(WealthSettlementMoveSheet(brokerId: b))
+        case .policyLink(let p):
+            return AnyView(WealthPolicyLinkSheet(policyId: p))
+        // [v25.575] 定期轉帳（G4 的兩張表單自己掛布幕、presentationDetents）
+        case .transferRule(let r):
+            return AnyView(WealthTransferRulePage(ruleId: r))
+        case .transferPeriod(let r, let k):
+            return AnyView(WealthTransferPeriodSheet(ruleId: r, periodKey: k))
+        // [v25.579] 銀行續設（G1 的小表單自己掛布幕、presentationDetents）
+        case .transferRenew(let r):
+            return AnyView(WealthTransferRenewSheet(ruleId: r))
+        // [v25.581] 新增定期轉帳帶好欄位（G1 的表單自己掛布幕、presentationDetents）
+        case .transferNew(let p):
+            return AnyView(WealthTransferRuleForm(preset: p))
+        }
+    }
+}
+
+// MARK: - 記一筆（存款、提款、利息、手續費；judge §4.5）
+
+/// 記一筆（存款、提款、利息、手續費）；editing：點明細裡財富頁自己記的那一筆
+struct WealthRecordSheet: View {
+    let accountId: UUID
+    var kind: WealthRecordKind = .deposit
+    var code: String? = nil
+    var editing: BankDeposit? = nil
+
+    @EnvironmentObject var lifeStore: LifeStore
+    @EnvironmentObject var expenseStore: ExpenseStore
+    @EnvironmentObject var financeStore: FinanceStore
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var choices: [WealthFormAccountChoice] = []
+    @State private var pickedAccount: UUID?
+    @State private var pickedKind: WealthRecordKind = .deposit
+    @State private var pickedCode = "NT$"
+    @State private var amountText = ""
+    @State private var date = Date()
+    @State private var note = ""
+    /// 轉帳那一筆的唯讀一行（打開時組好）
+    @State private var transferLine = ""
+    @State private var loaded = false
+    @State private var isSaving = false
+    @State private var confirmDelete = false
+
+    private var isTransferEdit: Bool { editing?.isTransfer == true }
+
+    private var navTitle: String {
+        if isTransferEdit { return "轉帳" }
+        return editing != nil ? "編輯一筆" : "記一筆"
+    }
+
+    private var pickedChoice: WealthFormAccountChoice? {
+        choices.first { $0.id == pickedAccount }
+    }
+
+    private var codes: [String] { pickedChoice?.codes ?? ["NT$"] }
+
+    private var saveDisabled: Bool {
+        guard pickedAccount != nil, let v = WealthFormText.number(amountText) else { return true }
+        return v <= 0
+    }
+
+    private var deleteMessage: String {
+        if isTransferEdit { return transferLine + "。對方帳戶也記了一筆，要兩邊一起刪嗎？" }
+        return "刪掉後存摺上的數字會跟著變。"
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if isTransferEdit {
+                    transferSection
+                } else {
+                    mainSection
+                }
+                if editing != nil {
+                    deleteSection
+                }
+            }
+            .navigationTitle(navTitle)
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                WealthSaveToolbar(title: editing != nil ? "儲存" : "存", isSaving: isSaving,
+                                  disabled: saveDisabled, showsSave: !isTransferEdit,
+                                  onCancel: { dismiss() }, onSave: { save() })
+            }
+            .onAppear { load() }
+            .onChange(of: pickedAccount) { _, _ in fixCode() }
+            .modifier(WealthDeleteAsk(isPresented: $confirmDelete,
+                                      title: isTransferEdit ? "這是一筆轉帳" : "刪除這筆紀錄？",
+                                      message: deleteMessage, isPair: isTransferEdit,
+                                      onDelete: { both in performDelete(includingPair: both) }))
+        }
+        .presentationDetents([.medium, .large])
+        .modifier(WealthPrivacyCurtain(armed: true))
+    }
+
+    private var mainSection: some View {
+        Section {
+            accountRow
+            Picker("種類", selection: $pickedKind) {
+                ForEach(WealthRecordKind.allCases) { k in
+                    Text(k.title).tag(k)
+                }
+            }
+            .pickerStyle(.segmented)
+            codeRow
+            amountRow
+            DatePicker("日期", selection: $date, displayedComponents: .date)
+            TextField("備註（選填）", text: $note, axis: .vertical)
+                .lineLimit(1...3)
+        } header: {
+            WealthFormHeader(title: "記一筆", icon: "banknote.fill", color: .green)
+        }
+    }
+
+    @ViewBuilder
+    private var accountRow: some View {
+        if editing != nil || choices.count < 2 {
+            LabeledContent("帳戶", value: pickedChoice?.name ?? "")
+        } else {
+            Picker("帳戶", selection: $pickedAccount) {
+                ForEach(choices) { c in
+                    Text(c.label).tag(c.id as UUID?)
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var codeRow: some View {
+        if codes.count > 1 {
+            Picker("幣別", selection: $pickedCode) {
+                ForEach(codes, id: \.self) { c in
+                    Text(c).tag(c)
+                }
+            }
+        } else {
+            LabeledContent("幣別", value: pickedCode)
+        }
+    }
+
+    private var amountRow: some View {
+        HStack {
+            Text(pickedCode).foregroundStyle(.secondary)
+            TextField("金額", text: $amountText)
+                .keyboardType(.decimalPad)
+        }
+    }
+
+    /// 編輯一筆轉帳：只看不改（兩邊綁在一起），要改就刪掉重記
+    private var transferSection: some View {
+        Section {
+            Text(transferLine).font(.subheadline)
+            if let n = editing?.note, !n.isEmpty {
+                Text(n).font(.caption).foregroundStyle(.secondary)
+            }
+        } header: {
+            WealthFormHeader(title: "轉帳", icon: "arrow.left.arrow.right", color: .blue)
+        } footer: {
+            Text("要改金額請刪掉重記；刪的時候會問要不要兩邊一起刪。")
+        }
+    }
+
+    private var deleteSection: some View {
+        Section {
+            Button(role: .destructive) {
+                confirmDelete = true
+            } label: {
+                Label("刪除這一筆", systemImage: "trash")
+            }
+        }
+    }
+
+    // MARK: 帶入、存檔、刪除
+
+    private func load() {
+        guard !loaded else { return }
+        loaded = true
+        let facts = lifeStore.wealthFacts(expense: expenseStore, finance: financeStore)
+        choices = WealthFormAccountChoice.banks(facts, including: accountId, includeFixed: true)
+        pickedAccount = accountId
+        pickedKind = kind
+        let first: String = choices.first(where: { $0.id == accountId })?.codes.first ?? "NT$"
+        pickedCode = code.map { WealthFacts.norm($0) } ?? first
+        guard let e = editing else { return }
+        date = e.date
+        note = e.note ?? ""
+        amountText = WealthFormText.editable(e.amount)
+        pickedCode = WealthFacts.norm(e.currencyCode)
+        pickedKind = WealthRecordKind.of(e)
+        if e.isTransfer {
+            let other: String = facts.account(e.counterpartyId)?.name ?? "別的帳戶"
+            var s: String = (e.isWithdrawal ? "轉給 " : "來自 ") + other
+            s += "・" + WealthFormat.money(e.amount, code: e.currencyCode)
+            s += "・" + WealthFormat.monthDay(e.date)
+            if let r = e.fxRate, r > 0 { s += "・匯率 " + WealthFormat.rate(r) }
+            transferLine = s
+        }
+    }
+
+    /// 換帳戶：新帳戶沒有這個幣別就換成它的第一個
+    private func fixCode() {
+        guard editing == nil else { return }
+        let list = codes
+        if !list.contains(pickedCode) { pickedCode = list.first ?? "NT$" }
+    }
+
+    /// 編輯時從原本那筆改（連結、以前的沖正旗標都留著）；先關畫面、下一個 runloop 才寫
+    private func save() {
+        guard !isSaving, !isTransferEdit, let id = pickedAccount,
+              let amount = WealthFormText.number(amountText), amount > 0 else { return }
+        isSaving = true
+        var dep: BankDeposit = editing ?? BankDeposit()
+        dep.date = date
+        dep.amount = amount
+        dep.currencyCode = pickedCode
+        dep.isWithdrawal = pickedKind.isOutflow
+        dep.kind = pickedKind.depositKind
+        let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        dep.note = trimmed.isEmpty ? nil : trimmed
+        let life = lifeStore
+        let saved = dep
+        dismiss()
+        DispatchQueue.main.async {
+            life.upsertBankDeposit(saved, in: id)
+        }
+    }
+
+    private func performDelete(includingPair: Bool) {
+        guard let e = editing else { dismiss(); return }
+        let life = lifeStore
+        let id = accountId
+        let depId = e.id
+        dismiss()
+        DispatchQueue.main.async {
+            life.deleteBankDeposit(depId, in: id, includingPair: includingPair)
+        }
+    }
+}
+
+// MARK: - 轉帳（含換匯；judge §4.5）
+
+/// 轉帳（含換匯）；要確認〔轉帳過去〕帶 to、from、amount。
+/// [v25.566] exchange：帳戶頁〔換匯〕（fromId＝toId＝那個帳戶）——同一個帳戶兩個幣別互轉也是轉帳（兩筆同一個 transferPairId）；
+/// 只有一個外幣的帳戶＝從存摺上台幣最多的另一個活存換進來
+struct WealthTransferSheet: View {
+    var fromId: UUID? = nil
+    var toId: UUID? = nil
+    var amount: Double? = nil
+    /// [v25.566] 換匯模式（標題「換匯」、「到」也列自己、同一個帳戶時兩邊幣別不一樣）
+    var exchange: Bool = false
+    /// [v25.575] 要確認 #1〔轉帳過去〕：最上面一行「補到 30 天內都夠：4,600（11/13 起會不夠，最低 11/20 −4,600）」
+    /// （「到」那個帳戶的 coverLine；沒有不夠扣＝不出現）。放最後、有預設：別組的呼叫不用改
+    var showsCover: Bool = false
+
+    @EnvironmentObject var lifeStore: LifeStore
+    @EnvironmentObject var expenseStore: ExpenseStore
+    @EnvironmentObject var financeStore: FinanceStore
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var choices: [WealthFormAccountChoice] = []
+    @State private var from: UUID?
+    @State private var to: UUID?
+    @State private var fromCode = "NT$"
+    @State private var toCode = "NT$"
+    @State private var amountText = ""
+    @State private var rateText = ""
+    @State private var feeText = ""
+    @State private var date = Date()
+    @State private var note = ""
+    @State private var rates = FinanceRates(rates: [])
+    @State private var loaded = false
+    @State private var isSaving = false
+    /// [v25.575] 「補到 30 天內都夠：…」（打開時抓一次；showsCover 才有）
+    @State private var coverLine: String?
+    /// [v25.575] 備註裡像帳號的那串數字的後 4 碼（存檔前先問〔只留後 4 碼〕〔不是帳號，照存〕）
+    @State private var noteAccountTail: String?
+    /// [v25.577] 跟定期轉帳的某一期重複（存檔前先問〔不用記了〕〔還是要記〕；nil＝沒在問）
+    @State private var duplicateAsk: WealthTransferDuplicate?
+    /// [v25.577] 問重複時帶著的〔只留後 4 碼〕答案（〔還是要記〕照它存）
+    @State private var duplicateMaskNote = false
+    /// [v25.577] 那個框的標題（問的時候存好、收起來不清：收起來的那一下字不會變空白）
+    @State private var duplicateTitle = ""
+    /// [v25.577] 〔轉帳過去〕最下面〔改成每月定期轉帳〕帶好的欄位（「到」那個帳戶不夠扣的是每月固定支出才有）
+    @State private var monthlyPreset: WealthTransferPreset?
+    /// [v25.577] 巢狀新增表單（sheet(item:)）
+    @State private var ruleFormPreset: WealthTransferPreset?
+    /// [v25.581] 新增表單是最下面〔改成定期轉帳〕打開的（關掉後看要不要一起關這張）
+    @State private var repeatOpened = false
+    /// [v25.581] 按〔改成定期轉帳〕那時這筆已經跟哪一期重複（關掉後還是同一期＝不是剛存的規則算到的，不一起關）
+    @State private var repeatBefore: WealthTransferDuplicate?
+
+    private func codes(of id: UUID?) -> [String] {
+        choices.first { $0.id == id }?.codes ?? ["NT$"]
+    }
+
+    private var toChoices: [WealthFormAccountChoice] {
+        // [v25.566] 換匯：同一個帳戶兩個幣別互轉，「到」也列自己
+        if exchange { return choices }
+        return choices.filter { $0.id != from }
+    }
+
+    /// [v25.566] 同一個帳戶自己換（換匯）
+    private var sameAccount: Bool { from != nil && from == to }
+
+    /// [v25.566] 兩邊可以存：不同帳戶，或同一個帳戶不同幣別（LifeStore.addTransfer 同一條規則）
+    private var pairOK: Bool { from != to || fromCode != toCode }
+
+    /// 兩邊幣別不同、有一邊是台幣：可以改匯率（還沒選對方＝不出現）
+    private var showsRateField: Bool {
+        guard to != nil, fromCode != toCode else { return false }
+        return fromCode == "NT$" || toCode == "NT$"
+    }
+
+    private var bothForeign: Bool {
+        guard to != nil, fromCode != toCode else { return false }
+        return fromCode != "NT$" && toCode != "NT$"
+    }
+
+    private var rateLabel: String {
+        let foreign = fromCode == "NT$" ? toCode : fromCode
+        return "匯率（1 \(foreign)＝幾台幣）"
+    }
+
+    private var rateInvalid: Bool {
+        guard showsRateField else { return false }
+        let t = rateText.trimmingCharacters(in: .whitespaces)
+        if t.isEmpty { return false }
+        return (Double(t) ?? 0) <= 0
+    }
+
+    private var usedRate: Double? {
+        guard showsRateField else { return nil }
+        if let r = Double(rateText.trimmingCharacters(in: .whitespaces)), r > 0 { return r }
+        return WealthFacts.defaultTransferRate(from: fromCode, to: toCode, rates: rates)
+    }
+
+    private func received(_ v: Double) -> Double? {
+        WealthFacts.transferAmount(v, from: fromCode, to: toCode, rate: usedRate, rates: rates)
+    }
+
+    /// 「對方收到 美金 1,560.06」（[v25.566] 同一個帳戶「換到 US$1,000.00」）；查不到匯率＝紅字；還沒選對方或沒打金額＝nil
+    private var preview: (text: String, ok: Bool)? {
+        guard to != nil else { return nil }
+        if !pairOK { return ("同一個帳戶要選兩個不同的幣別", false) }
+        guard let v = WealthFormText.number(amountText), v > 0 else { return nil }
+        guard let r = received(v) else { return ("設定裡找不到匯率，先到設定加這個幣別的匯率", false) }
+        let lead: String = sameAccount ? "換到 " : "對方收到 "
+        return (lead + WealthFormat.money(r, code: toCode), true)
+    }
+
+    private var saveDisabled: Bool {
+        guard from != nil, to != nil, pairOK, !rateInvalid,
+              let v = WealthFormText.number(amountText), v > 0, let r = received(v) else { return true }
+        return r <= 0
+    }
+
+    // [v25.566] 換匯模式的字（標題、段落、footer）
+    private var navTitle: String { exchange ? "換匯" : "轉帳" }
+    private var fromHeader: String { exchange ? "換出" : "從哪個帳戶" }
+    private var toHeader: String { exchange ? "換入" : "轉到" }
+    private var fromCodeLabel: String { exchange ? "換出幣別" : "轉出幣別" }
+    private var toCodeLabel: String { exchange ? "換入幣別" : "對方幣別" }
+    private var amountHeader: String { exchange ? "換多少" : "轉多少" }
+    private var amountPlaceholder: String { exchange ? "換出金額" : "轉出金額" }
+    private var amountFooter: String {
+        if exchange {
+            return "台幣、外幣兩格各記一筆、綁在一起；刪一邊會問要不要兩邊一起刪。手續費記在換出的那一格。"
+        }
+        return "兩邊各記一筆、綁在一起；刪一邊時會問要不要兩邊一起刪。手續費記在轉出的帳戶。"
+    }
+
+    var body: some View {
+        NavigationStack {
+            formWithAsks
+                .navigationTitle(navTitle)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    WealthSaveToolbar(title: "存", isSaving: isSaving, disabled: saveDisabled,
+                                      onCancel: { dismiss() }, onSave: { requestSave() })
+                }
+                .onAppear { load() }
+                .onChange(of: from) { _, _ in fromChanged() }
+                .onChange(of: to) { _, _ in toChanged() }
+                .onChange(of: fromCode) { _, _ in fromCodeChanged() }
+                .onChange(of: toCode) { _, _ in resetRate() }
+        }
+        .presentationDetents([.medium, .large])
+        .modifier(WealthPrivacyCurtain(armed: true))
+    }
+
+    /// 表單＋存檔前的兩個問句（像帳號、[v25.577] 跟某一期重複）＋[v25.577]〔改成每月定期轉帳〕的新增表單
+    /// （[v25.581] 最下面〔改成定期轉帳〕也開同一張）
+    private var formWithAsks: some View {
+        Form {
+            coverSection
+            fromSection
+            toSection
+            amountSection
+            monthlySection
+            repeatSection
+        }
+        .modifier(WealthAccountLikeAlert(tail: $noteAccountTail,
+                                         onMask: { proceed(maskNote: true, afterAlert: true) },
+                                         onKeep: { proceed(maskNote: false, afterAlert: true) }))
+        .modifier(WealthTransferDuplicateDialog(asking: duplicateAsk != nil, title: duplicateTitle,
+                                                onSkip: { skipDuplicate() },
+                                                onKeep: { keepDuplicate() },
+                                                onCancel: { cancelDuplicate() }))
+        .sheet(item: $ruleFormPreset, onDismiss: { ruleFormClosed() }) { p in
+            WealthTransferRuleForm(preset: p).appStores()
+        }
+    }
+
+    /// [v25.581] 最下面「每個月都會轉？」〔改成定期轉帳〕帶好的欄位（judge §4.1）：不是換匯、不是〔轉帳過去〕那張、從到都選了、
+    /// 兩邊台幣、金額 ≥ 1；只算日子、不算 facts（WealthTransferFinds.monthlyPreset；同一個帳戶＝nil）
+    private var repeatPreset: WealthTransferPreset? {
+        guard !exchange, !showsCover, monthlyPreset == nil, let f = from, let t = to,
+              fromCode == "NT$", toCode == "NT$",
+              let v = WealthFormText.number(amountText), v >= 1 else { return nil }
+        return WealthTransferFinds.monthlyPreset(fromId: f, toId: t, amount: v, on: date)
+    }
+
+    /// [v25.581] 「每個月都會轉？」〔改成定期轉帳〕＋小字
+    @ViewBuilder
+    private var repeatSection: some View {
+        if let p = repeatPreset {
+            Section {
+                Text("每個月都會轉？")
+                    .font(.subheadline)
+                Button("改成定期轉帳") { openRepeat(p) }
+            } footer: {
+                Text("銀行設好的預約轉帳抄一份進來，以後每個月不用記。")
+            }
+        }
+    }
+
+    /// [v25.577] 〔轉帳過去〕最下面：「『房貸』每月 10 日都要從這裡扣：」〔改成每月定期轉帳〕（judge §4.8、樣稿③-B2）
+    @ViewBuilder
+    private var monthlySection: some View {
+        if let p = monthlyPreset {
+            Section {
+                if let offer = p.offer {
+                    Text(offer)
+                        .font(.subheadline)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Button("改成每月定期轉帳") { ruleFormPreset = p }
+            }
+        }
+    }
+
+    /// [v25.575] 〔轉帳過去〕第一行：補到 30 天內都夠多少（每週的轉帳會連著不夠，只補第一次的差額下週又跳一條）
+    @ViewBuilder
+    private var coverSection: some View {
+        if let line = coverLine {
+            Section {
+                Text(line)
+                    .font(.subheadline.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private var fromSection: some View {
+        Section {
+            Picker("從", selection: $from) {
+                ForEach(choices) { c in
+                    Text(c.label).tag(c.id as UUID?)
+                }
+            }
+            if codes(of: from).count > 1 {
+                Picker(fromCodeLabel, selection: $fromCode) {
+                    ForEach(codes(of: from), id: \.self) { c in
+                        Text(c).tag(c)
+                    }
+                }
+            }
+        } header: {
+            WealthFormHeader(title: fromHeader, icon: "arrow.up.right", color: .blue)
+        }
+    }
+
+    private var toSection: some View {
+        Section {
+            Picker("到", selection: $to) {
+                Text("請選擇").tag(nil as UUID?)
+                ForEach(toChoices) { c in
+                    Text(c.label).tag(c.id as UUID?)
+                }
+            }
+            if to != nil, codes(of: to).count > 1 {
+                Picker(toCodeLabel, selection: $toCode) {
+                    ForEach(codes(of: to), id: \.self) { c in
+                        Text(c).tag(c)
+                    }
+                }
+            }
+        } header: {
+            WealthFormHeader(title: toHeader, icon: "arrow.down.left", color: .blue)
+        }
+    }
+
+    private var amountSection: some View {
+        let p = preview
+        return Section {
+            HStack {
+                Text(fromCode).foregroundStyle(.secondary)
+                TextField(amountPlaceholder, text: $amountText)
+                    .keyboardType(.decimalPad)
+            }
+            if showsRateField {
+                HStack {
+                    Text(rateLabel).foregroundStyle(.secondary)
+                    Spacer()
+                    TextField("匯率", text: $rateText)
+                        .keyboardType(.decimalPad)
+                        .multilineTextAlignment(.trailing)
+                }
+            } else if bothForeign {
+                Text("兩邊都是外幣：用設定裡的匯率換算")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            if let p {
+                Text(p.text)
+                    .font(.subheadline)
+                    .foregroundStyle(p.ok ? Color.secondary : Color.red)
+            }
+            HStack {
+                Text("手續費（選填）").foregroundStyle(.secondary)
+                Spacer()
+                TextField("0", text: $feeText)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+            }
+            DatePicker("日期", selection: $date, displayedComponents: .date)
+            TextField("備註（選填）", text: $note)
+        } header: {
+            WealthFormHeader(title: amountHeader, icon: "arrow.left.arrow.right", color: .blue)
+        } footer: {
+            Text(amountFooter)
+        }
+    }
+
+    // MARK: 帶入、存檔
+
+    private func load() {
+        guard !loaded else { return }
+        loaded = true
+        rates = FinanceRates(expenseStore)
+        let facts = lifeStore.wealthFacts(expense: expenseStore, finance: financeStore)
+        // [v25.575] 要確認 #1〔轉帳過去〕：「到」那個帳戶 30 天內會不夠扣 → 第一行補到都夠多少（金額欄要確認已經帶好 cover）
+        if showsCover, !exchange, let t = toId {
+            coverLine = facts.account(t)?.coverLine
+            // [v25.577] 不夠扣的是每月的固定支出：最下面〔改成每月定期轉帳〕（帶好從、到、金額、每月、扣款日前 2 天）
+            monthlyPreset = facts.monthlyTransferPreset(forShortageOf: t, expenses: expenseStore.expenses)
+        }
+        choices = WealthFormAccountChoice.banks(facts, including: exchange ? (toId ?? fromId) : fromId, includeFixed: true)
+        // [v25.566] 換匯：照那個帳戶的幣別決定兩邊（同一個帳戶自己換，或從別的台幣活存換進來）
+        if exchange, let t = toId, loadExchange(t, facts: facts) {
+            if let a = amount, a > 0 { amountText = WealthFormText.editable(a) }
+            resetRate()
+            return
+        }
+        // 沒指定從哪轉：先挑活存（不是定存）的另一個帳戶
+        let liveFirst: UUID? = facts.pickerBanks.first(where: { $0.id != toId })?.id
+        let start: UUID? = fromId ?? liveFirst ?? choices.first(where: { $0.id != toId })?.id
+        from = start
+        fromCode = codes(of: start).first ?? "NT$"
+        if let t = toId, t != start, choices.contains(where: { $0.id == t }) {
+            to = t
+            let list = codes(of: t)
+            toCode = list.contains(fromCode) ? fromCode : (list.first ?? "NT$")
+        }
+        if let a = amount, a > 0 { amountText = WealthFormText.editable(a) }
+        resetRate()
+    }
+
+    /// [v25.566] 換匯打開時：帳戶有兩個以上幣別 → 同一個帳戶自己換（台幣 → 第一個外幣；沒有台幣就第一個 → 第二個）；
+    /// 只有一個外幣 → 從存摺上台幣最多的另一個活存（facts.pickerBanks）換進來。帳戶不在選單裡、只有台幣＝false（照一般轉帳帶）
+    private func loadExchange(_ t: UUID, facts: WealthFacts) -> Bool {
+        guard choices.contains(where: { $0.id == t }) else { return false }
+        let list = codes(of: t)
+        if list.count >= 2 {
+            let fc: String = list.contains("NT$") ? "NT$" : list[0]
+            from = t
+            to = t
+            fromCode = fc
+            toCode = list.first(where: { $0 != fc }) ?? fc
+            return true
+        }
+        guard let only = list.first, only != "NT$" else { return false }
+        let others: [WealthFacts.Account] = facts.pickerBanks.filter { a in
+            a.id != t && choices.contains(where: { $0.id == a.id })
+        }
+        let richest: WealthFacts.Account? = others.max(by: { $0.balance("NT$") < $1.balance("NT$") })
+        let source: UUID? = richest?.id ?? choices.first(where: { $0.id != t })?.id
+        from = source
+        let fromList = codes(of: source)
+        fromCode = fromList.contains("NT$") ? "NT$" : (fromList.first ?? "NT$")
+        to = t
+        toCode = only
+        return true
+    }
+
+    private func fromChanged() {
+        let list = codes(of: from)
+        if !list.contains(fromCode) { fromCode = list.first ?? "NT$" }
+        if exchange {
+            // [v25.566] 換匯不清掉「到」；換回同一個帳戶時兩邊幣別要不一樣
+            keepCodesApart()
+        } else if to == from {
+            to = nil
+        }
+        resetRate()
+    }
+
+    /// 換對方帳戶：對方有這邊的幣別就收同一個幣別，不然收對方第一個幣別。
+    /// [v25.566] 換匯：收跟這邊不一樣的幣別（對方只有這個幣別才收同一個）
+    private func toChanged() {
+        guard to != nil else { return }
+        let list = codes(of: to)
+        if exchange {
+            toCode = list.first(where: { $0 != fromCode }) ?? (list.first ?? "NT$")
+        } else {
+            toCode = list.contains(fromCode) ? fromCode : (list.first ?? "NT$")
+        }
+        resetRate()
+    }
+
+    /// [v25.566] 換匯、同一個帳戶：換出幣別改成跟換入一樣時，換入改成另一個
+    private func fromCodeChanged() {
+        if exchange { keepCodesApart() }
+        resetRate()
+    }
+
+    /// [v25.566] 同一個帳戶時兩邊幣別一律不一樣（帳戶只有一個幣別就不動，存檔鈕會擋）
+    private func keepCodesApart() {
+        guard sameAccount, fromCode == toCode else { return }
+        if let other = codes(of: to).first(where: { $0 != fromCode }) { toCode = other }
+    }
+
+    private func resetRate() {
+        if let r = WealthFacts.defaultTransferRate(from: fromCode, to: toCode, rates: rates) {
+            rateText = WealthFormText.rateText(r)
+        } else {
+            rateText = ""
+        }
+    }
+
+    /// [v25.575] 存檔前掃備註：有 10 位以上連續數字（像帳號）先問；沒有就直接存
+    private func requestSave() {
+        guard !isSaving, !saveDisabled else { return }
+        let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let tail = WealthTransferText.accountLikeTail(trimmed) {
+            noteAccountTail = tail
+            return
+        }
+        proceed(maskNote: false, afterAlert: false)
+    }
+
+    /// [v25.577] 像帳號那一問之後、真的寫之前：跟定期轉帳的某一期重複就先問（afterAlert：等像帳號那個框收好再跳）；沒有就存
+    private func proceed(maskNote: Bool, afterAlert: Bool) {
+        guard !isSaving else { return }
+        guard let dup = findDuplicate() else {
+            save(maskNote: maskNote)
+            return
+        }
+        isSaving = true
+        duplicateMaskNote = maskNote
+        duplicateTitle = dup.question
+        if afterAlert {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+                self.duplicateAsk = dup
+            }
+        } else {
+            duplicateAsk = dup
+        }
+    }
+
+    /// [v25.577] 單次轉帳跟某一期重複（judge §4.6；facts.transferDuplicate：同兩個帳戶、同金額、前後 3 天內有一期算進去）。
+    /// 只看台幣、不是換匯、不是〔轉帳過去〕（那是補錢，不是重複）、兩個不同帳戶
+    private func findDuplicate() -> WealthTransferDuplicate? {
+        guard !exchange, !showsCover, let f = from, let t = to, f != t,
+              fromCode == "NT$", toCode == "NT$",
+              let v = WealthFormText.number(amountText), v > 0 else { return nil }
+        let facts = lifeStore.wealthFacts(expense: expenseStore, finance: financeStore)
+        return facts.transferDuplicate(fromId: f, toId: t, amount: v, on: date)
+    }
+
+    /// [v25.577]〔不用記了〕：什麼都不存，關掉（不看 duplicateAsk：框收起來那一下可能先把它清掉了）
+    private func skipDuplicate() {
+        duplicateAsk = nil
+        dismiss()
+    }
+
+    /// [v25.577]〔還是要記（另外多轉一筆）〕：帶著剛才〔只留後 4 碼〕的答案存（直接存、不再問）
+    private func keepDuplicate() {
+        duplicateAsk = nil
+        isSaving = false
+        save(maskNote: duplicateMaskNote)
+    }
+
+    /// [v25.577]〔取消〕或框被關掉（沒按任何一顆）：回表單。晚一個 runloop 才看還在不在問：
+    /// 按了〔不用記了〕〔還是要記〕的話那邊已經清掉了＝什麼都不做；先清了也不擋那兩顆（它們不看 duplicateAsk）
+    private func cancelDuplicate() {
+        DispatchQueue.main.async {
+            guard self.duplicateAsk != nil else { return }
+            self.duplicateAsk = nil
+            self.isSaving = false
+        }
+    }
+
+    /// [v25.577] 新增表單關掉後：存好了（不再不夠扣）那一行就不見；沒存照舊
+    private func refreshMonthlyPreset() {
+        guard showsCover, !exchange, let t = toId else { return }
+        let facts = lifeStore.wealthFacts(expense: expenseStore, finance: financeStore)
+        monthlyPreset = facts.monthlyTransferPreset(forShortageOf: t, expenses: expenseStore.expenses)
+    }
+
+    /// [v25.581]〔改成定期轉帳〕：記下這筆現在是不是已經跟某一期重複（關掉後比），再開新增表單
+    private func openRepeat(_ p: WealthTransferPreset) {
+        guard !isSaving else { return }
+        repeatBefore = findDuplicate()
+        repeatOpened = true
+        ruleFormPreset = p
+    }
+
+    /// 新增表單關掉後（[v25.577] 那一行照舊重算）。[v25.581] 是〔改成定期轉帳〕打開的：剛存的規則已經算到這筆
+    ///（facts.transferDuplicate 找得到、而且不是打開前就重複的那一期）＝這張也關（不用再記）；
+    /// 沒有（沒存、以前的日子、今天這期不算）＝留著讓你存這筆。
+    /// 晚一個 runloop 才看：新增表單 finish() 是 dismiss() 之後才排 saveTransferRule（main.async），
+    /// 這裡也排在 main 佇列後面，一定看得到剛存的規則（不靠 onDismiss 剛好在動畫跑完才叫）
+    private func ruleFormClosed() {
+        refreshMonthlyPreset()
+        guard repeatOpened else { return }
+        repeatOpened = false
+        let before: WealthTransferDuplicate? = repeatBefore
+        repeatBefore = nil
+        DispatchQueue.main.async {
+            guard !self.isSaving, let dup = self.findDuplicate(), dup != before else { return }
+            self.dismiss()
+        }
+    }
+
+    /// maskNote：[v25.575]〔只留後 4 碼〕＝備註裡像帳號的每一串換成「••8901」再存
+    private func save(maskNote: Bool) {
+        // [v25.566] 不同帳戶，或同一個帳戶不同幣別（換匯）
+        guard !isSaving, let f = from, let t = to, f != t || fromCode != toCode,
+              let v = WealthFormText.number(amountText), v > 0,
+              let got = received(v), got > 0 else { return }
+        isSaving = true
+        let life = lifeStore
+        let fc = fromCode
+        let tc = toCode
+        let rate: Double? = (fc == tc) ? nil : usedRate
+        let trimmed = note.trimmingCharacters(in: .whitespacesAndNewlines)
+        let kept: String = maskNote ? WealthTransferText.maskAccountLike(trimmed) : trimmed
+        let noteValue: String? = kept.isEmpty ? nil : kept
+        let day = date
+        // let（不是 var）：下一個 runloop 的閉包不能抓會變的區域變數
+        let fee: Double? = WealthFormText.number(feeText).flatMap { $0 > 0 ? $0 : nil }
+        dismiss()
+        DispatchQueue.main.async {
+            life.addTransfer(from: f, fromCode: fc, amount: v, to: t, toCode: tc,
+                             toAmount: got, fxRate: rate, date: day, note: noteValue)
+            if let fee {
+                let dep = BankDeposit(date: day, amount: fee, currencyCode: fc, isWithdrawal: true,
+                                      note: "轉帳手續費", kind: BankDeposit.kindFee)
+                life.upsertBankDeposit(dep, in: f)
+            }
+        }
+    }
+}
+
+/// [v25.575] 名字、備註裡像帳號的數字（10 位以上；WealthTransferText.accountLikeTail）存檔前問一句（judge §4.2、§4.12；樣稿②-8 (b)）：
+/// 標題「這串數字看起來像帳號」、小字「結尾 8901。App 不存完整帳號。」〔只留後 4 碼〕〔不是帳號，照存〕（跟樣稿、G4 新增表單同一個字）。
+/// presenting：收起來的那一下字不會變空白。拆成 modifier（坑 #7）
+struct WealthAccountLikeAlert: ViewModifier {
+    @Binding var tail: String?
+    let onMask: () -> Void
+    let onKeep: () -> Void
+
+    private var isPresented: Binding<Bool> {
+        Binding(get: { tail != nil }, set: { if !$0 { tail = nil } })
+    }
+
+    private static func message(_ t: String) -> String {
+        "結尾 " + t + "。App 不存完整帳號。"
+    }
+
+    func body(content: Content) -> some View {
+        content.alert("這串數字看起來像帳號", isPresented: isPresented, presenting: tail) { _ in
+            Button("只留後 4 碼") { onMask() }
+            Button("不是帳號，照存") { onKeep() }
+        } message: { t in
+            Text(Self.message(t))
+        }
+    }
+}
+
+/// [v25.577] 單次轉帳跟定期轉帳的某一期重複（judge §4.6、樣稿③-C5）：標題「這筆跟定期轉帳『薪轉 → 存錢』11/6 那期一樣，
+/// App 已經算進去了」〔不用記了〕〔還是要記（另外多轉一筆）〕〔取消〕。框被關掉（沒按任何一顆）＝〔取消〕。拆成 modifier（坑 #7）
+struct WealthTransferDuplicateDialog: ViewModifier {
+    let asking: Bool
+    /// 問的時候存好、收起來不清（收起來的那一下字不會變空白）
+    let title: String
+    let onSkip: () -> Void
+    let onKeep: () -> Void
+    let onCancel: () -> Void
+
+    private var isPresented: Binding<Bool> {
+        Binding(get: { asking }, set: { if !$0 { onCancel() } })
+    }
+
+    func body(content: Content) -> some View {
+        content.confirmationDialog(title, isPresented: isPresented, titleVisibility: .visible) {
+            Button("不用記了") { onSkip() }
+            Button("還是要記（另外多轉一筆）") { onKeep() }
+            Button("取消", role: .cancel) { onCancel() }
+        }
+    }
+}
+
+/// [v25.581] 對存摺按〔存〕時差額剛好是前 1～7 天某一期（judge §3.6；樣稿③-C4）：標題「差的 20,000 剛好是 11/6『薪轉 → 存錢』那一期」、
+/// 小字「存錢 11/9：App 算的 206,000、存摺上 186,000、差 −20,000。選〔那期沒轉成〕：…」〔那期沒轉成〕〔不是，照存摺就好〕
+///（零用錢帳戶多〔不是，記成「零用錢」支出〕）〔取消〕。框被關掉（沒按任何一顆）＝〔取消〕：回表單、什麼都沒寫。
+/// presenting＋問的時候存好的 title（收起來的那一下字不會變空白）。按了只回呼，寫 store 由呼叫端先 dismiss、下一個 runloop。拆成 modifier（坑 #7）
+struct WealthAnchorMissDialog: ViewModifier {
+    @Binding var ask: WealthTransferMiss?
+    let title: String
+    /// 零用錢帳戶、差的是負的（WealthAnchorSheet.pocketSpend 有）
+    let showsPocket: Bool
+    let onFailed: (WealthTransferMiss) -> Void
+    let onKeep: () -> Void
+    let onPocket: () -> Void
+
+    private var isPresented: Binding<Bool> {
+        Binding(get: { self.ask != nil }, set: { if !$0 { self.ask = nil } })
+    }
+
+    private static var pocketTitle: String {
+        "不是，記成「" + WealthTransferFinds.pocketTitle + "」支出"
+    }
+
+    func body(content: Content) -> some View {
+        content.confirmationDialog(title, isPresented: isPresented, titleVisibility: .visible,
+                                   presenting: ask) { m in
+            Button("那期沒轉成") { onFailed(m) }
+            Button("不是，照存摺就好") { onKeep() }
+            if showsPocket {
+                Button(Self.pocketTitle) { onPocket() }
+            }
+            Button("取消", role: .cancel) {}
+        } message: { m in
+            Text(m.message)
+        }
+    }
+}
+
+// MARK: - 對存摺（取代沖正；judge §4.5、樣稿③-C3）
+
+/// 差額是什麼（選填）
+enum WealthAnchorReason: String, CaseIterable, Identifiable {
+    case interest, fee, missedExpense, missedIncome, unknown
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .interest: return "利息"
+        case .fee: return "手續費"
+        case .missedExpense: return "漏記的支出"
+        case .missedIncome: return "漏記的收入"
+        case .unknown: return "不知道"
+        }
+    }
+}
+
+/// 對存摺（取代沖正）；editing：點明細裡的對存摺那一列
+struct WealthAnchorSheet: View {
+    let accountId: UUID
+    var code: String = "NT$"
+    var editing: BankDeposit? = nil
+
+    @EnvironmentObject var lifeStore: LifeStore
+    @EnvironmentObject var expenseStore: ExpenseStore
+    @EnvironmentObject var financeStore: FinanceStore
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var codes: [String] = ["NT$"]
+    @State private var accountName = ""
+    @State private var pickedCode = "NT$"
+    @State private var date = Date()
+    @State private var amountText = ""
+    @State private var reason: WealthAnchorReason?
+    /// App 算的「這個幣別那天結束時」：只在打開、換日期、換幣別時算（打字不算）
+    @State private var appBalance: Double?
+    @State private var appBalanceKey = ""
+    @State private var loaded = false
+    @State private var isSaving = false
+    @State private var confirmDelete = false
+    /// 漏記的支出：存好對存摺後開記帳
+    @State private var sheet: WealthFormSheet?
+    /// [v25.575] 這個帳戶這天、這個幣別算進去的定期轉帳每一邊（「這天還有：來自 薪轉 +3,000」；跟 appBalance 一起算）
+    @State private var sides: [WealthFacts.TransferSide] = []
+    /// [v25.575] 每一邊你選的：true＝〔還沒有〕（對存摺之後才進／才扣）；預設照現在記的 late
+    @State private var notYet: [String: Bool] = [:]
+    /// [v25.581] 按〔存〕時差額剛好是前 1～7 天某一期（先問〔那期沒轉成〕〔不是，照存摺就好〕；nil＝沒在問）
+    @State private var missAsk: WealthTransferMiss?
+    /// [v25.581] 那個框的標題（問的時候存好、收起來不清：收起來的那一下字不會變空白）
+    @State private var missTitle = ""
+    /// [v25.581] 零用錢帳戶（打開時抓一次；facts.isPocketAccount）
+    @State private var pocketAccount = false
+
+    private var taskKey: String { WealthCal.dayKey(date) + "|" + pickedCode + "|" + (loaded ? "1" : "0") }
+    private var balanceReady: Bool { appBalance != nil && appBalanceKey == taskKey }
+
+    /// [v25.575] 選〔還沒有〕的那幾邊：「App 算的」要加多少（轉入那邊 −金額、轉出那邊 ＋金額；TransferSide.appDelta）
+    private var lateDelta: Double {
+        var total: Double = 0
+        for s in sides where isNotYet(s) { total += s.appDelta }
+        return total
+    }
+
+    /// [v25.575] 「App 算的」跟存摺比的那個數（appBalance＋還沒有的那幾邊）
+    private var comparedBalance: Double? {
+        guard balanceReady, let app = appBalance else { return nil }
+        return app + lateDelta
+    }
+
+    /// 存摺上 − App 算的，四捨五入到 0.01（[v25.575] App 算的＝扣掉〔還沒有〕的那幾邊）
+    private var diff: Double? {
+        guard let app = comparedBalance, let target = WealthFormText.number(amountText) else { return nil }
+        return ((target - app) * 100).rounded() / 100
+    }
+
+    /// [v25.575] 這一邊選了〔還沒有〕（沒選過＝現在記的 late）
+    private func isNotYet(_ s: WealthFacts.TransferSide) -> Bool {
+        notYet[s.id] ?? s.late
+    }
+
+    private func notYetBinding(_ s: WealthFacts.TransferSide) -> Binding<Bool> {
+        Binding(get: { notYet[s.id] ?? s.late }, set: { notYet[s.id] = $0 })
+    }
+
+    /// [v25.581] 零用錢帳戶、新的一筆、台幣、存摺比 App 算的少 1 元以上：〔把差的…記成「零用錢」支出〕記多少（judge §3.8、第 8 題）；不然 nil
+    private var pocketSpend: Double? {
+        guard editing == nil, pocketAccount, pickedCode == "NT$", let d = diff, d <= -1 else { return nil }
+        return -d
+    }
+
+    private var navTitle: String {
+        if pickedCode == "NT$" { return "對存摺" }
+        return "對存摺・" + pickedCode
+    }
+
+    var body: some View {
+        NavigationStack {
+            formWithAsk
+                .navigationTitle(navTitle)
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    WealthSaveToolbar(title: "存", isSaving: isSaving, disabled: diff == nil,
+                                      onCancel: { dismiss() }, onSave: { save() })
+                }
+                .onAppear { load() }
+                .task(id: taskKey) { refresh() }
+                .modifier(WealthDeleteAsk(isPresented: $confirmDelete, title: "刪除這次對存摺？",
+                                          message: "刪掉這次對存摺，之後的數字回到 App 算的。",
+                                          onDelete: { _ in performDelete() }))
+                .sheet(item: $sheet, onDismiss: { dismiss() }) { s in
+                    s.view.appStores()
+                }
+        }
+        .presentationDetents([.medium, .large])
+        .modifier(WealthPrivacyCurtain(armed: true))
+    }
+
+    /// 表單＋[v25.581] 存檔前「差額剛好是一期」的確認框（拆出 body，坑 #7）
+    private var formWithAsk: some View {
+        Form {
+            mainSection
+            diffSection
+            reasonSection
+            if editing != nil {
+                deleteSection
+            }
+        }
+        .modifier(missDialog)
+    }
+
+    /// [v25.581]〔那期沒轉成〕〔不是，照存摺就好〕（零用錢帳戶多〔不是，記成「零用錢」支出〕）〔取消〕：選了才寫；〔取消〕、框被關掉＝回表單
+    private var missDialog: WealthAnchorMissDialog {
+        WealthAnchorMissDialog(ask: $missAsk, title: missTitle, showsPocket: pocketSpend != nil,
+                               onFailed: { m in commit(diff: m.diffAfter, failing: m) },
+                               onKeep: { commitAsTyped() },
+                               onPocket: { savePocket() })
+    }
+
+    private var mainSection: some View {
+        Section {
+            if codes.count > 1 && editing == nil {
+                Picker("幣別", selection: $pickedCode) {
+                    ForEach(codes, id: \.self) { c in
+                        Text(c).tag(c)
+                    }
+                }
+            } else {
+                LabeledContent("幣別", value: pickedCode)
+            }
+            DatePicker("日期", selection: $date, displayedComponents: .date)
+            // [v25.575] 這天還有定期轉帳：存摺上已經有了嗎（judge §3.6；樣稿②-7）
+            ForEach(sides) { s in
+                WealthAnchorSideRow(side: s, notYet: notYetBinding(s))
+            }
+            appBalanceRow
+            HStack {
+                Text("存摺上寫")
+                Spacer()
+                TextField(pickedCode, text: $amountText)
+                    .keyboardType(.numbersAndPunctuation)
+                    .multilineTextAlignment(.trailing)
+            }
+        } header: {
+            WealthFormHeader(title: accountName.isEmpty ? "對存摺" : accountName, icon: "checkmark.seal.fill",
+                             color: .orange)
+        } footer: {
+            Text(mainFooter)
+        }
+    }
+
+    private var mainFooter: String {
+        let base = "打存摺（或網銀）上 " + WealthFormText.dayWithWeekday(date) + " 結束時的數字，以後就從這裡往後算。"
+        guard !sides.isEmpty else { return base }
+        // [v25.575] 早上對存摺、銀行晚一點才轉的那筆
+        return base + "早上打的、還沒進來的那筆選〔還沒有〕。"
+    }
+
+    /// [v25.575] 有選〔還沒有〕：「App 算的」劃掉原本的數、旁邊寫跟存摺比的那個數（5,100 → 2,100）
+    @ViewBuilder
+    private var appBalanceRow: some View {
+        if balanceReady, let app = appBalance, let shown = comparedBalance, Swift.abs(lateDelta) > 0.004 {
+            LabeledContent("App 算的") {
+                WealthAnchorAppValue(before: WealthFormat.money(app, code: pickedCode),
+                                     after: WealthFormat.money(shown, code: pickedCode))
+            }
+        } else {
+            LabeledContent("App 算的", value: appBalanceText)
+        }
+    }
+
+    private var appBalanceText: String {
+        guard balanceReady, let v = appBalance else { return "算一下…" }
+        return WealthFormat.money(v, code: pickedCode)
+    }
+
+    /// [v25.581] 零用錢帳戶存摺比 App 少：多一顆〔把差的 11,500 記成「零用錢」支出〕＋小字（樣稿③-C4）
+    @ViewBuilder
+    private var diffSection: some View {
+        if let d = diff, let target = WealthFormText.number(amountText) {
+            if let s = pocketSpend {
+                Section {
+                    diffText(d, target: target)
+                    pocketRow(s)
+                } footer: {
+                    Text(pocketFooter)
+                }
+            } else {
+                Section {
+                    diffText(d, target: target)
+                }
+            }
+        }
+    }
+
+    private func diffText(_ d: Double, target: Double) -> some View {
+        Text(diffLine(d, target: target))
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(Swift.abs(d) < 0.005 ? Color.secondary : Color.blue)
+    }
+
+    /// [v25.581]「把差的 11,500 記成「零用錢」支出」（按了直接存）
+    private func pocketRow(_ s: Double) -> some View {
+        Button(WealthTransferFinds.pocketButton(s)) { savePocket() }
+            .disabled(isSaving)
+    }
+
+    /// [v25.581]「記帳多一筆變動支出「零用錢」（類別其他、從 零用錢 扣），本月還能花跟著扣；存摺照這次的數字往後算，不會再扣一次。」
+    private var pocketFooter: String {
+        WealthTransferFinds.pocketFooter(accountName: accountName.isEmpty ? "這個帳戶" : accountName)
+    }
+
+    private func diffLine(_ d: Double, target: Double) -> String {
+        let base = "差 " + WealthFormText.signed(d, code: pickedCode) + "：之後從 "
+            + WealthFormat.money(target, code: pickedCode) + " 往後算"
+        guard let tail = lateTail(target: target) else { return base }
+        return base + "；" + tail
+    }
+
+    /// [v25.575] 〔還沒有〕的排在這筆對存摺後面：那天晚上＝存摺上 − 還沒有的（樣稿②-7「薪轉那 3,000 排在這筆後面，
+    /// 零用錢 10/30 晚上是 5,100」；好幾筆「還沒有的 2 筆排在這筆後面，…」）；沒選〔還沒有〕＝nil
+    private func lateTail(target: Double) -> String? {
+        let delta = lateDelta
+        let picked: [WealthFacts.TransferSide] = sides.filter { isNotYet($0) }
+        guard !picked.isEmpty, Swift.abs(delta) > 0.004 else { return nil }
+        let lead: String
+        if picked.count == 1, let s = picked.first {
+            lead = Self.otherName(s.title) + "那 " + WealthFormat.plain(s.amount, code: s.code)
+        } else {
+            lead = "還沒有的 \(picked.count) 筆"
+        }
+        let who: String = accountName.isEmpty ? "" : accountName + " "
+        let night: String = WealthFormat.money(target - delta, code: pickedCode)
+        return lead + " 排在這筆後面，" + who + WealthFormat.monthDay(date) + " 晚上是 " + night
+    }
+
+    /// 「來自 薪轉」「轉給 存錢」→「薪轉」「存錢」（WealthFacts.TransferSide.title；認不得的照原字）
+    private static func otherName(_ title: String) -> String {
+        for p in ["來自 ", "轉給 "] where title.hasPrefix(p) {
+            return String(title.dropFirst(p.count))
+        }
+        return title
+    }
+
+    private var reasonSection: some View {
+        Section {
+            LazyVGrid(columns: [GridItem(.adaptive(minimum: 92), spacing: 8)], alignment: .leading, spacing: 8) {
+                ForEach(WealthAnchorReason.allCases) { r in
+                    reasonChip(r)
+                }
+            }
+            .padding(.vertical, 4)
+        } header: {
+            WealthFormHeader(title: "差額是什麼（選填）", icon: "questionmark.circle", color: .orange)
+        } footer: {
+            Text(reasonFootnote)
+        }
+    }
+
+    private var reasonFootnote: String {
+        "選「利息」「手續費」就記成那一筆；選「漏記的支出」存好後打開記帳。只比 " + pickedCode + " 這一格，不跟別的幣別混著比。"
+    }
+
+    private func reasonChip(_ r: WealthAnchorReason) -> some View {
+        let on = reason == r
+        return Button {
+            reason = on ? nil : r
+        } label: {
+            Text(r.title)
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+                .padding(.horizontal, 12)
+                .frame(minHeight: 32)
+                .frame(maxWidth: .infinity)
+                .foregroundStyle(on ? Color.white : Color.primary)
+                .background(on ? Color.indigo : Color(.tertiarySystemFill), in: Capsule())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var deleteSection: some View {
+        Section {
+            Button(role: .destructive) {
+                confirmDelete = true
+            } label: {
+                Label("刪除這次對存摺", systemImage: "trash")
+            }
+        }
+    }
+
+    // MARK: 帶入、算、存
+
+    private func load() {
+        guard !loaded else { return }
+        let facts = lifeStore.wealthFacts(expense: expenseStore, finance: financeStore)
+        if let a = facts.account(accountId) {
+            accountName = a.name
+            codes = a.currencies.isEmpty ? ["NT$"] : a.currencies
+        }
+        // [v25.581] 零用錢帳戶（用途「零用」、名字有「零用」、或每週有定期轉帳轉進來）：差的是負的多一顆〔記成「零用錢」支出〕
+        pocketAccount = facts.isPocketAccount(accountId)
+        pickedCode = WealthFacts.norm(code)
+        if !codes.contains(pickedCode) { codes.append(pickedCode) }
+        if let e = editing {
+            date = e.date
+            pickedCode = WealthFacts.norm(e.currencyCode)
+            if let v = e.anchorAmount { amountText = WealthFormText.editable(v) }
+        }
+        loaded = true
+    }
+
+    /// App 算的：一套數字重算一次（不走快取）；編輯以前的對存摺不算它自己
+    private func refresh() {
+        guard loaded else { return }
+        let key = taskKey
+        let excluding: UUID? = editing?.id
+        appBalance = lifeStore.passbookBalance(accountId: accountId, code: pickedCode, endOf: date,
+                                               excluding: excluding, expense: expenseStore, finance: financeStore)
+        appBalanceKey = key
+        // [v25.575] 這天、這個幣別的定期轉帳每一邊（換日期、換幣別時跟著換；同一邊選過的照留）
+        let facts = lifeStore.wealthFacts(expense: expenseStore, finance: financeStore)
+        let code = pickedCode
+        let list: [WealthFacts.TransferSide] = facts.transferSides(accountId: accountId, on: date)
+            .filter { $0.code == code }
+        var picks: [String: Bool] = [:]
+        for s in list { picks[s.id] = notYet[s.id] ?? s.late }
+        sides = list
+        notYet = picks
+    }
+
+    /// [v25.575] 存檔後要改的那幾邊（選的跟現在記的 late 不一樣的）
+    private var lateChanges: [(ruleId: UUID, key: String, out: Bool, late: Bool)] {
+        var list: [(ruleId: UUID, key: String, out: Bool, late: Bool)] = []
+        for s in sides {
+            let picked: Bool = isNotYet(s)
+            if picked != s.late { list.append((ruleId: s.ruleId, key: s.key, out: s.out, late: picked)) }
+        }
+        return list
+    }
+
+    private func save() {
+        guard !isSaving, missAsk == nil, let d = diff, let target = WealthFormText.number(amountText) else { return }
+        let life = lifeStore
+        let id = accountId
+        let c = pickedCode
+        let day = date
+        let r = reason
+        let isNew = editing == nil
+        // 利息（存摺多了）、手續費（存摺少了）：記成那一種，不是對存摺
+        if isNew, r == .interest, d > 0.004 {
+            isSaving = true
+            let dep = BankDeposit(date: day, amount: d, currencyCode: c, isWithdrawal: false,
+                                  note: "對存摺時補記", kind: BankDeposit.kindInterest)
+            dismiss()
+            DispatchQueue.main.async { life.upsertBankDeposit(dep, in: id) }
+            return
+        }
+        if isNew, r == .fee, d < -0.004 {
+            isSaving = true
+            let dep = BankDeposit(date: day, amount: -d, currencyCode: c, isWithdrawal: true,
+                                  note: "對存摺時補記", kind: BankDeposit.kindFee)
+            dismiss()
+            DispatchQueue.main.async { life.upsertBankDeposit(dep, in: id) }
+            return
+        }
+        // [v25.581] 差額剛好是前 1～7 天某一期（judge §3.6）：先問，還沒寫任何東西（isSaving 不設，〔取消〕回表單改數字）
+        if let m = findMiss(target: target) {
+            missTitle = m.title
+            missAsk = m
+            return
+        }
+        commit(diff: d, failing: nil)
+    }
+
+    /// [v25.581] 新的一筆、台幣、沒選差額原因（或「不知道」）、App 算的有了：差額剛好是這個帳戶前 1～7 天某一期的這一邊
+    ///（facts.transferMiss：±1 元、在這一格上一次對存摺之後、取最近的）；不然 nil。改以前的對存摺、外幣那一格都不問
+    private func findMiss(target: Double) -> WealthTransferMiss? {
+        guard editing == nil, pickedCode == "NT$", reason == nil || reason == .unknown,
+              let app = comparedBalance else { return nil }
+        let facts = lifeStore.wealthFacts(expense: expenseStore, finance: financeStore)
+        return facts.transferMiss(accountId: accountId, code: pickedCode, on: date, app: app, target: target)
+    }
+
+    /// [v25.581]〔不是，照存摺就好〕：照你打的存（差額照原本的）
+    private func commitAsTyped() {
+        guard let d = diff else { return }
+        commit(diff: d, failing: nil)
+    }
+
+    /// 組好這次對存摺寫進去（[v25.581] 從 save 抽出來：漏記的支出、一般存兩條路照舊）。d：差額欄寫多少
+    ///（〔那期沒轉成〕＝那期不算之後的差額 diffAfter）；failing：〔那期沒轉成〕那一期——存好對存摺之後同一個 runloop 記 "failed"
+    ///（v1a 就認得：兩邊都不算，另一個帳戶多回來）
+    private func commit(diff d: Double, failing: WealthTransferMiss?) {
+        guard !isSaving, let target = WealthFormText.number(amountText) else { return }
+        isSaving = true
+        let life = lifeStore
+        let id = accountId
+        let c = pickedCode
+        let day = date
+        let r = reason
+        let isNew = editing == nil
+        let noteText: String? = r?.title ?? editing?.note
+        let anchor = BankDeposit(id: editing?.id ?? UUID(), date: day, amount: Swift.abs(d), currencyCode: c,
+                                 isWithdrawal: d < 0, isAdjust: true, note: noteText,
+                                 kind: BankDeposit.kindAnchor, anchorAmount: target)
+        // [v25.575] 這天的定期轉帳選了〔還沒有〕／〔存摺上已經有了〕（跟現在記的不一樣的）：存好對存摺之後同一個 runloop 記 late
+        let changes = lateChanges
+        // 漏記的支出（台幣、存摺少了）：先存對存摺（這張表單還開著），再打開記帳（金額先填好）；記帳關掉這張也關
+        if isNew, failing == nil, r == .missedExpense, d < -0.004, c == "NT$" {
+            life.upsertBankDeposit(anchor, in: id)
+            for x in changes {
+                life.setTransferLate(ruleId: x.ruleId, key: x.key, out: x.out, late: x.late)
+            }
+            let preset = AddExpensePreset(date: day, paymentBankId: id, amount: -d)
+            sheet = .expense(token: UUID(), preset: preset)
+            return
+        }
+        // [v25.581]〔那期沒轉成〕的那一期（參數本來就是 let；下一個 runloop 的閉包不抓 @State）
+        let failed: WealthTransferMiss? = failing
+        dismiss()
+        DispatchQueue.main.async {
+            life.upsertBankDeposit(anchor, in: id)
+            for x in changes {
+                life.setTransferLate(ruleId: x.ruleId, key: x.key, out: x.out, late: x.late)
+            }
+            if let f = failed {
+                life.setTransferStatus(ruleId: f.ruleId, key: f.key, status: WealthTransferStatus.failed.rawValue)
+            }
+        }
+    }
+
+    /// [v25.581]〔把差的 11,500 記成「零用錢」支出〕（judge §3.8、第 8 題：轉過去不算花掉，對存摺差的記成支出）：直接存，不再問差額剛好一期
+    ///（你說了是花掉的）。LifeStore.savePocketAnchor：記帳一筆變動支出「零用錢」（其他、台幣、扣這個帳戶、對存摺那天）＋這個帳戶一筆扣款
+    ///＋這次對存摺，同一天（對存摺排最後，存摺不會再扣一次）；對存摺的差額＝扣掉這筆之後（到元：≈ 0）
+    private func savePocket() {
+        guard !isSaving, let s = pocketSpend, let target = WealthFormText.number(amountText) else { return }
+        isSaving = true
+        let life = lifeStore
+        let es = expenseStore
+        let id = accountId
+        let after = ((s.rounded() - s) * 100).rounded() / 100
+        let anchor = BankDeposit(id: UUID(), date: date, amount: Swift.abs(after), currencyCode: "NT$",
+                                 isWithdrawal: after < 0, isAdjust: true, note: WealthTransferFinds.pocketNote,
+                                 kind: BankDeposit.kindAnchor, anchorAmount: target)
+        let changes = lateChanges
+        dismiss()
+        DispatchQueue.main.async {
+            life.savePocketAnchor(anchor, accountId: id, spend: s, expense: es)
+            for x in changes {
+                life.setTransferLate(ruleId: x.ruleId, key: x.key, out: x.out, late: x.late)
+            }
+        }
+    }
+
+    private func performDelete() {
+        guard let e = editing else { dismiss(); return }
+        let life = lifeStore
+        let id = accountId
+        let depId = e.id
+        dismiss()
+        DispatchQueue.main.async {
+            life.deleteBankDeposit(depId, in: id, includingPair: false)
+        }
+    }
+}
+
+/// [v25.575] 對存摺表單日期下面的一列：「這天還有：來自 薪轉 +3,000（定期・每週五）」〔存摺上已經有了〕〔還沒有〕
+/// （judge §3.6；樣稿②-7）。〔還沒有〕＝那一期這一邊排在對存摺後面（存檔後 LifeStore.setTransferLate）
+struct WealthAnchorSideRow: View {
+    let side: WealthFacts.TransferSide
+    @Binding var notYet: Bool
+
+    private var line: String {
+        let sign: String = side.out ? "−" : "+"
+        let amount: String = WealthFormat.plain(side.amount, code: side.code)
+        return "這天還有：\(side.title) \(sign)\(amount)（\(side.note)）"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(line)
+                .font(.subheadline)
+                .fixedSize(horizontal: false, vertical: true)
+            Picker(line, selection: $notYet) {
+                Text("存摺上已經有了").tag(false)
+                Text("還沒有").tag(true)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+/// [v25.575] 對存摺「App 算的」選了〔還沒有〕時：劃掉原本的數、旁邊寫跟存摺比的那個數（5,100 → 2,100）
+struct WealthAnchorAppValue: View {
+    let before: String
+    let after: String
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(before)
+                .strikethrough()
+                .foregroundStyle(.secondary)
+            Text(after)
+                .fontWeight(.semibold)
+        }
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(after + "（原本 " + before + "）")
+    }
+}
+
+// MARK: - 標成已繳（樣稿③-C2；不擋付費）
+
+/// 標成已繳（哪一期 nil＝最早沒繳的那一期）；也是〔不是，改一下〕〔繳了〕打開的
+struct WealthPaidSheet: View {
+    let cardId: UUID
+    var statementKey: String? = nil
+
+    @EnvironmentObject var lifeStore: LifeStore
+    @EnvironmentObject var expenseStore: ExpenseStore
+    @EnvironmentObject var financeStore: FinanceStore
+    @Environment(\.dismiss) private var dismiss
+
+    /// 可以選的那幾期（已經結帳的最近 6 期，新的在前）
+    @State private var options: [WealthStatement] = []
+    @State private var banks: [WealthFormAccountChoice] = []
+    @State private var cardName = ""
+    @State private var key = ""
+    @State private var amountText = ""
+    @State private var payFrom: UUID?
+    @State private var date = Date()
+    @State private var loaded = false
+    @State private var isSaving = false
+
+    private var current: WealthStatement? { options.first { $0.key == key } }
+
+    private var saveDisabled: Bool {
+        guard current != nil, let v = WealthFormText.number(amountText) else { return true }
+        return v <= 0
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if options.isEmpty {
+                    Section {
+                        Text("這張卡還沒有已經結帳的帳單。")
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    mainSection
+                    undoSection
+                }
+            }
+            .navigationTitle("標成已繳")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                WealthSaveToolbar(title: "存", isSaving: isSaving, disabled: saveDisabled,
+                                  onCancel: { dismiss() }, onSave: { save() })
+            }
+            .onAppear { load() }
+            .onChange(of: key) { _, _ in fill() }
+        }
+        .presentationDetents([.medium, .large])
+        .modifier(WealthPrivacyCurtain(armed: true))
+    }
+
+    private var mainSection: some View {
+        Section {
+            Picker("哪一期", selection: $key) {
+                ForEach(options) { s in
+                    Text(optionLabel(s)).tag(s.key)
+                }
+            }
+            HStack {
+                Text("繳多少")
+                Spacer()
+                TextField("全額", text: $amountText)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+            }
+            if let line = remainderLine {
+                Text(line)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Picker("從哪個帳戶", selection: $payFrom) {
+                ForEach(banks) { c in
+                    Text(c.label).tag(c.id as UUID?)
+                }
+                Text("別的方式（現金、超商）").tag(nil as UUID?)
+            }
+            DatePicker("日期", selection: $date, displayedComponents: .date)
+        } header: {
+            WealthFormHeader(title: cardName.isEmpty ? "帳單" : cardName, icon: "checkmark.circle.fill", color: .green)
+        } footer: {
+            Text("不會另記一筆支出（刷卡時已經記過）。只繳一部分時，剩下的會算進下一期「前期未繳」。")
+        }
+    }
+
+    /// 「10 月帳單 18,600」「9 月帳單 23,000・已繳」
+    private func optionLabel(_ s: WealthStatement) -> String {
+        var t = s.label + " " + WealthFormat.grouped(s.amount, decimals: 0)
+        switch s.status {
+        case .paid: t += "・已繳"
+        case .assumedPaid: t += "・當作已繳"
+        case .overdue: t += "・逾期"
+        default: break
+        }
+        return t
+    }
+
+    /// 小於全額：「剩下 12,600 會算進下期帳單（前期未繳），會有循環利息」
+    private var remainderLine: String? {
+        guard let s = current, let v = WealthFormText.number(amountText) else { return nil }
+        let left = s.amount - v
+        guard left > 0.5 else { return nil }
+        return "剩下 " + WealthFormat.grouped(left, decimals: 0) + " 會算進下期帳單（前期未繳），會有循環利息"
+    }
+
+    @ViewBuilder
+    private var undoSection: some View {
+        if let s = current {
+            if s.isExplicitPaid {
+                Section {
+                    Button("取消已繳") { clearPaid() }
+                        .foregroundStyle(Color.red)
+                }
+            } else if s.status == .assumedPaid {
+                Section {
+                    Button("其實還沒繳") { markNotPaid() }
+                        .foregroundStyle(Color.red)
+                } footer: {
+                    Text("過了截止日就算逾期：可能有循環利息與違約金。")
+                }
+            }
+        }
+    }
+
+    // MARK: 帶入、存
+
+    private func load() {
+        guard !loaded else { return }
+        loaded = true
+        let facts = lifeStore.wealthFacts(expense: expenseStore, finance: financeStore)
+        guard let card = facts.card(cardId) else { return }
+        cardName = card.fullName
+        // 這張卡現在的扣款帳戶收起來了也列著（不然預設的「從哪個帳戶」對不上，會被換成別的方式）
+        banks = WealthFormAccountChoice.banks(facts, including: card.payerId)
+        var list: [WealthStatement] = Array(card.statements.filter { $0.isClosed }.reversed().prefix(6))
+        if let k = statementKey, !list.contains(where: { $0.key == k }),
+           let s = card.statements.first(where: { $0.key == k }) {
+            list.insert(s, at: 0)
+        }
+        options = list
+        if let k = statementKey, list.contains(where: { $0.key == k }) {
+            key = k
+        } else if let k = card.dueStatement?.key, list.contains(where: { $0.key == k }) {
+            key = k
+        } else {
+            key = list.first?.key ?? ""
+        }
+        fill()
+    }
+
+    /// 換一期：金額＝全額（你標過的照你標的）、帳戶＝那一期通常從的（你標過的照你標的）、日期＝今天（標過的照那天）
+    private func fill() {
+        guard let s = current else { return }
+        // 你標過的、已經扣了的（自動扣全額／最低、改版前的）：照扣的那天、那個帳戶、那個數。不然自動扣的卡從〔＋〕→標成已繳
+        //（預設最近一期）直接按存，扣款會從截止日搬到今天（中間對過存摺的話今天又多扣一次）、自動扣最低變成扣全額
+        //（驗證 build/v3/verify/card_text.py H）
+        if s.isExplicitPaid || s.status == .paid {
+            amountText = WealthFormText.editable(s.paidAmount)
+            payFrom = s.paidFrom
+            date = s.paidOn ?? Date()
+        } else {
+            amountText = WealthFormText.editable(s.amount)
+            payFrom = s.payerId
+            date = Date()
+        }
+        // 帳戶不在選單裡（收起來了）就改成別的方式，不然 Picker 對不上
+        if let p = payFrom, !banks.contains(where: { $0.id == p }) { payFrom = nil }
+    }
+
+    private func save() {
+        guard !isSaving, let s = current, let v = WealthFormText.number(amountText), v > 0 else { return }
+        isSaving = true
+        let paid: Double? = v >= s.amount - 0.5 ? nil : v
+        let life = lifeStore
+        let id = cardId
+        let k = s.key
+        let day = date
+        let src = payFrom
+        dismiss()
+        DispatchQueue.main.async {
+            life.markStatementPaid(cardId: id, key: k, date: day, account: src, amount: paid)
+        }
+    }
+
+    private func clearPaid() {
+        guard !isSaving, let s = current else { return }
+        isSaving = true
+        let life = lifeStore
+        let id = cardId
+        let k = s.key
+        dismiss()
+        DispatchQueue.main.async { life.clearStatementPaid(cardId: id, key: k) }
+    }
+
+    private func markNotPaid() {
+        guard !isSaving, let s = current else { return }
+        isSaving = true
+        let life = lifeStore
+        let id = cardId
+        let k = s.key
+        dismiss()
+        DispatchQueue.main.async { life.markStatementNotPaid(cardId: id, key: k) }
+    }
+}
+
+// MARK: - 帳單金額不一樣（不擋付費）
+
+/// 帳單金額不一樣（哪一期 nil＝最近一期已結帳的）
+struct WealthStatedAmountSheet: View {
+    let cardId: UUID
+    var statementKey: String? = nil
+
+    @EnvironmentObject var lifeStore: LifeStore
+    @EnvironmentObject var expenseStore: ExpenseStore
+    @EnvironmentObject var financeStore: FinanceStore
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var options: [WealthStatement] = []
+    @State private var key = ""
+    @State private var statedText = ""
+    @State private var loaded = false
+    @State private var isSaving = false
+    @State private var askTopUp = false
+    /// 〔補記〕：開記帳（刷這張卡、金額＝差額）
+    @State private var sheet: WealthFormSheet?
+
+    private var current: WealthStatement? { options.first { $0.key == key } }
+
+    /// App 算的＝刷卡加總＋前期未繳（不含你輸入的）
+    private var appAmount: Double {
+        guard let s = current else { return 0 }
+        return s.computedAmount + s.carriedIn
+    }
+
+    private var stated: Double? {
+        guard let v = WealthFormText.number(statedText), v >= 0 else { return nil }
+        return v
+    }
+
+    private var diff: Double? { stated.map { $0 - appAmount } }
+
+    /// 打了字但讀不懂才擋（空白＝拿掉，回到 App 算的）
+    private var saveDisabled: Bool {
+        if current == nil { return true }
+        let t = statedText.trimmingCharacters(in: .whitespaces)
+        return !t.isEmpty && stated == nil
+    }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                if options.isEmpty {
+                    Section {
+                        Text("這張卡還沒有已經結帳的帳單。")
+                            .foregroundStyle(.secondary)
+                    }
+                } else {
+                    mainSection
+                }
+            }
+            .navigationTitle("帳單金額不一樣")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                WealthSaveToolbar(title: "存", isSaving: isSaving, disabled: saveDisabled,
+                                  onCancel: { dismiss() }, onSave: { saveTapped() })
+            }
+            .onAppear { load() }
+            .onChange(of: key) { _, _ in fill() }
+            .confirmationDialog("差額要補記成一筆刷這張卡的支出嗎？", isPresented: $askTopUp, titleVisibility: .visible) {
+                Button("補記（例：國外交易手續費）") { saveAndTopUp() }
+                Button("不用") { save() }
+                Button("取消", role: .cancel) {}
+            }
+            .sheet(item: $sheet, onDismiss: { dismiss() }) { s in
+                s.view.appStores()
+            }
+        }
+        .presentationDetents([.medium, .large])
+        .modifier(WealthPrivacyCurtain(armed: true))
+    }
+
+    private var mainSection: some View {
+        Section {
+            Picker("哪一期", selection: $key) {
+                ForEach(options) { s in
+                    Text(s.label).tag(s.key)
+                }
+            }
+            LabeledContent("App 算的", value: WealthFormat.grouped(appAmount, decimals: 0))
+            HStack {
+                Text("帳單上寫")
+                Spacer()
+                TextField("跟 App 一樣就空著", text: $statedText)
+                    .keyboardType(.decimalPad)
+                    .multilineTextAlignment(.trailing)
+            }
+            if let d = diff {
+                Text("差 " + WealthFormText.signed(d, code: "NT$"))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(Swift.abs(d) < 0.5 ? Color.secondary : Color.blue)
+            }
+        } header: {
+            WealthFormHeader(title: "以帳單為準", icon: "doc.text.magnifyingglass", color: .orange)
+        } footer: {
+            Text("存了以後這一期的「要繳」照帳單上寫的；空著存＝回到 App 算的。")
+        }
+    }
+
+    private func load() {
+        guard !loaded else { return }
+        loaded = true
+        let facts = lifeStore.wealthFacts(expense: expenseStore, finance: financeStore)
+        guard let card = facts.card(cardId) else { return }
+        var list: [WealthStatement] = Array(card.statements.filter { $0.isClosed }.reversed().prefix(6))
+        if let k = statementKey, !list.contains(where: { $0.key == k }),
+           let s = card.statements.first(where: { $0.key == k }) {
+            list.insert(s, at: 0)
+        }
+        options = list
+        if let k = statementKey, list.contains(where: { $0.key == k }) {
+            key = k
+        } else {
+            key = list.first?.key ?? ""
+        }
+        fill()
+    }
+
+    private func fill() {
+        if let v = current?.statedAmount {
+            statedText = WealthFormText.editable(v)
+        } else {
+            statedText = ""
+        }
+    }
+
+    /// 帳單比 App 算的多：先問要不要補記差額；不然直接存
+    private func saveTapped() {
+        guard !isSaving else { return }
+        if let d = diff, d > 0.5 {
+            askTopUp = true
+        } else {
+            save()
+        }
+    }
+
+    private func save() {
+        guard !isSaving, let s = current else { return }
+        isSaving = true
+        let life = lifeStore
+        let id = cardId
+        let k = s.key
+        let v = stated
+        dismiss()
+        DispatchQueue.main.async { life.setStatementStatedAmount(cardId: id, key: k, amount: v) }
+    }
+
+    /// 〔補記〕：先存帳單金額（這張表單還開著），再打開記帳（刷這張卡、金額＝差額、日期＝結帳日）；記帳關掉這張也關
+    private func saveAndTopUp() {
+        guard !isSaving, let s = current, let v = stated, let d = diff, d > 0.5 else { return }
+        isSaving = true
+        lifeStore.setStatementStatedAmount(cardId: cardId, key: s.key, amount: v)
+        let preset = AddExpensePreset(date: s.close, paymentCardId: cardId, amount: d, title: "帳單差額")
+        // 確認框收起來之後才開記帳（同一刻疊兩個彈窗，iOS 會把第二個吃掉）
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 350_000_000)
+            sheet = .expense(token: UUID(), preset: preset)
+        }
+    }
+}
+
+// MARK: - 一次改到別張卡／改到別的帳戶
+
+/// 一次改到別張卡（toCards true）／改到別的帳戶（false）：選新的、從哪天起（LifeStore.moveWealthLinks）
+struct WealthMoveLinksSheet: View {
+    let fromId: UUID
+    var expenseIds: [UUID] = []
+    var incomeIds: [UUID] = []
+    var toCards: Bool = true
+
+    @EnvironmentObject var lifeStore: LifeStore
+    @EnvironmentObject var expenseStore: ExpenseStore
+    @EnvironmentObject var financeStore: FinanceStore
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var targets: [WealthFormAccountChoice] = []
+    @State private var target: UUID?
+    @State private var rows: [String] = []
+    @State private var fromName = ""
+    @State private var fromDay = Date()
+    @State private var allPast = false
+    @State private var loaded = false
+    @State private var isSaving = false
+
+    private var saveDisabled: Bool { target == nil || (expenseIds.isEmpty && incomeIds.isEmpty) }
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                itemsSection
+                targetSection
+                whenSection
+            }
+            .navigationTitle(toCards ? "改到別張卡" : "改到別的帳戶")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                WealthSaveToolbar(title: "存", isSaving: isSaving, disabled: saveDisabled,
+                                  onCancel: { dismiss() }, onSave: { save() })
+            }
+            .onAppear { load() }
+        }
+        .presentationDetents([.medium, .large])
+        .modifier(WealthPrivacyCurtain(armed: true))
+    }
+
+    private var itemsSection: some View {
+        Section {
+            ForEach(Array(rows.enumerated()), id: \.offset) { _, r in
+                Text(r).font(.subheadline)
+            }
+        } header: {
+            WealthFormHeader(title: fromName.isEmpty ? "要搬的" : "現在在「" + fromName + "」",
+                             icon: "arrow.triangle.swap", color: .blue)
+        }
+    }
+
+    private var targetSection: some View {
+        Section {
+            if targets.isEmpty {
+                Text(toCards ? "沒有別張還在用的卡。" : "沒有別的銀行帳戶。")
+                    .foregroundStyle(.secondary)
+            } else {
+                Picker(toCards ? "改刷" : "改從", selection: $target) {
+                    Text("請選擇").tag(nil as UUID?)
+                    ForEach(targets) { c in
+                        Text(c.label).tag(c.id as UUID?)
+                    }
+                }
+            }
+        } header: {
+            WealthFormHeader(title: "搬到", icon: toCards ? "creditcard.fill" : "building.columns.fill", color: .blue)
+        }
+    }
+
+    private var whenSection: some View {
+        Section {
+            Toggle("以前的也改", isOn: $allPast)
+            if !allPast {
+                DatePicker("從哪天起", selection: $fromDay, displayedComponents: .date)
+            }
+        } header: {
+            WealthFormHeader(title: "從什麼時候", icon: "calendar", color: .blue)
+        } footer: {
+            Text(allPast ? "以前的帳也一起算到新的地方。" : "以前的帳照舊記在原本的地方。")
+        }
+    }
+
+    private func load() {
+        guard !loaded else { return }
+        loaded = true
+        let facts = lifeStore.wealthFacts(expense: expenseStore, finance: financeStore)
+        if toCards {
+            targets = WealthFormAccountChoice.cards(facts, excluding: fromId)
+            fromName = facts.card(fromId)?.fullName ?? facts.account(fromId)?.name ?? ""
+        } else {
+            targets = WealthFormAccountChoice.banks(facts, excluding: fromId)
+            fromName = facts.account(fromId)?.name ?? facts.card(fromId)?.fullName ?? ""
+        }
+        var list: [String] = []
+        for e in expenseStore.expenses where expenseIds.contains(e.id) {
+            list.append(expenseRow(e))
+        }
+        for i in expenseStore.incomes where incomeIds.contains(i.id) {
+            list.append(incomeRow(i))
+        }
+        rows = list
+    }
+
+    /// 「Netflix・NT$390／月」
+    private func expenseRow(_ e: Expense) -> String {
+        let v = expenseStore.ntdValue(of: e)
+        var s = e.title + "・" + WealthFormat.ntd(v)
+        if let r = e.recurrence {
+            switch r {
+            case .monthly: s += "／月"
+            case .quarterly: s += "／季"
+            case .yearly: s += "／年"
+            }
+        }
+        return s
+    }
+
+    /// 「月薪・NT$80,000／月」
+    private func incomeRow(_ i: Income) -> String {
+        var s = i.title + "・" + WealthFormat.ntd(i.amount)
+        switch i.period {
+        case .monthly: s += "／月"
+        case .yearly: s += "／年"
+        case .once: break
+        }
+        return s
+    }
+
+    private func save() {
+        guard !isSaving, let t = target else { return }
+        isSaving = true
+        let life = lifeStore
+        let es = expenseStore
+        let eIds = expenseIds
+        let iIds = incomeIds
+        let day: Date? = allPast ? nil : WealthCal.day(fromDay)
+        dismiss()
+        DispatchQueue.main.async {
+            life.moveWealthLinks(expenseIds: eIds, incomeIds: iIds, to: t, from: day, expense: es)
+        }
+    }
+}
+
+// MARK: - 排序與收起來（judge §3.12 最後一列；不擋付費）
+
+/// 排序與收起來的一列
+struct WealthOrderItem: Identifiable, Equatable {
+    let id: UUID
+    let name: String
+    let detail: String
+    /// 算進存款合計（銀行）
+    var counts: Bool
+    /// 收起來（銀行、證券戶）／停用（卡）
+    var hidden: Bool
+    let originalCounts: Bool
+    let originalHidden: Bool
+}
+
+/// 排序與收起來（⋯ → 一張表單；List edit mode，三段：銀行、信用卡、證券）
+struct WealthOrderSheet: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    @EnvironmentObject var expenseStore: ExpenseStore
+    @EnvironmentObject var financeStore: FinanceStore
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var banks: [WealthOrderItem] = []
+    @State private var cards: [WealthOrderItem] = []
+    @State private var brokers: [WealthOrderItem] = []
+    @State private var loaded = false
+    @State private var isSaving = false
+
+    var body: some View {
+        NavigationStack {
+            List {
+                bankSection
+                cardSection
+                brokerSection
+            }
+            .environment(\.editMode, .constant(.active))
+            .navigationTitle("排序與收起來")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                WealthSaveToolbar(title: "完成", isSaving: isSaving, disabled: false,
+                                  onCancel: { dismiss() }, onSave: { save() })
+            }
+            .onAppear { load() }
+        }
+        .presentationDetents([.medium, .large])
+        .modifier(WealthPrivacyCurtain(armed: true))
+    }
+
+    @ViewBuilder
+    private var bankSection: some View {
+        if !banks.isEmpty {
+            Section {
+                ForEach($banks) { $item in
+                    bankRow($item)
+                }
+                .onMove { from, to in banks.move(fromOffsets: from, toOffset: to) }
+            } header: {
+                Text("銀行帳戶")
+            } footer: {
+                Text("收起來：不算進合計、選單不出現，以前的帳照算；可以再打開。")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var cardSection: some View {
+        if !cards.isEmpty {
+            Section {
+                ForEach($cards) { $item in
+                    cardRow($item)
+                }
+                .onMove { from, to in cards.move(fromOffsets: from, toOffset: to) }
+            } header: {
+                Text("信用卡")
+            } footer: {
+                Text("停用：記帳選單不出現，以前刷的帳照算。")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var brokerSection: some View {
+        if !brokers.isEmpty {
+            Section {
+                ForEach($brokers) { $item in
+                    brokerRow($item)
+                }
+                .onMove { from, to in brokers.move(fromOffsets: from, toOffset: to) }
+            } header: {
+                Text("證券戶")
+            }
+        }
+    }
+
+    private func titleLine(_ item: WealthOrderItem) -> some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(item.name).font(.body.weight(.semibold))
+            if !item.detail.isEmpty {
+                Text(item.detail).font(.caption).foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    private func bankRow(_ item: Binding<WealthOrderItem>) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            titleLine(item.wrappedValue)
+            Toggle("算進存款合計", isOn: item.counts).font(.footnote)
+            Toggle("收起來", isOn: item.hidden).font(.footnote)
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func cardRow(_ item: Binding<WealthOrderItem>) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            titleLine(item.wrappedValue)
+            Toggle("停用", isOn: item.hidden).font(.footnote)
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func brokerRow(_ item: Binding<WealthOrderItem>) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            titleLine(item.wrappedValue)
+            Toggle("收起來", isOn: item.hidden).font(.footnote)
+        }
+        .padding(.vertical, 2)
+    }
+
+    private func load() {
+        guard !loaded else { return }
+        loaded = true
+        let facts = lifeStore.wealthFacts(expense: expenseStore, finance: financeStore)
+        // 照財富頁現在的順序列（同 WealthPageData：沒排過的銀行照最近 90 天進出筆數、卡照有要繳／截止日近的在前）；
+        // 不然打開什麼都沒動、按〔完成〕，財富頁的順序就被改成里程碑建立的先後（驗證 build/v3/verify/card_text.py G）
+        let bankList = WealthPageText.orderBanks(facts.banks)
+        banks = bankList.map { a in
+            WealthOrderItem(id: a.id, name: a.name, detail: a.nickname != nil ? a.bankName : "",
+                            counts: a.countsInCash, hidden: a.hidden,
+                            originalCounts: a.countsInCash, originalHidden: a.hidden)
+        }
+        let cardList = WealthPageText.orderCards(facts.cards)
+        cards = cardList.map { c in
+            WealthOrderItem(id: c.id, name: c.fullName, detail: c.issuer ?? "",
+                            counts: true, hidden: c.isDisabled,
+                            originalCounts: true, originalHidden: c.isDisabled)
+        }
+        let brokerList = Self.ordered(facts.securities.map { ($0.sortIndex, $0) })
+        brokers = brokerList.map { a in
+            WealthOrderItem(id: a.id, name: a.name, detail: "",
+                            counts: a.countsInCash, hidden: a.hidden,
+                            originalCounts: a.countsInCash, originalHidden: a.hidden)
+        }
+    }
+
+    /// 照你排的順序（沒排過的放後面、照原本的先後）
+    private static func ordered<T>(_ pairs: [(Int?, T)]) -> [T] {
+        var keyed: [(offset: Int, key: Int, value: T)] = []
+        for (i, p) in pairs.enumerated() {
+            keyed.append((offset: i, key: p.0 ?? Int.max, value: p.1))
+        }
+        keyed.sort { a, b in
+            if a.key != b.key { return a.key < b.key }
+            return a.offset < b.offset
+        }
+        return keyed.map { $0.value }
+    }
+
+    /// 完成：先關畫面；下一個 runloop 寫順序（三段串起來一次）、改過的開關
+    private func save() {
+        guard !isSaving else { return }
+        isSaving = true
+        let life = lifeStore
+        let ids: [UUID] = banks.map(\.id) + cards.map(\.id) + brokers.map(\.id)
+        let bankItems = banks
+        let cardItems = cards
+        let brokerItems = brokers
+        dismiss()
+        DispatchQueue.main.async {
+            life.setWealthOrder(ids)
+            for b in bankItems {
+                if b.counts != b.originalCounts { life.setWealthCountInCash(b.id, b.counts) }
+                if b.hidden != b.originalHidden { life.setWealthHidden(b.id, hidden: b.hidden) }
+            }
+            for c in cardItems where c.hidden != c.originalHidden {
+                life.setCardDisabled(c.id, disabled: c.hidden)
+            }
+            for s in brokerItems where s.hidden != s.originalHidden {
+                life.setWealthHidden(s.id, hidden: s.hidden)
+            }
+        }
+    }
+}
+
+// MARK: - 匯率（要確認〔去設定〕；設定頁那一段是 private，這裡另外一張小表單）
+
+/// 匯率一列
+struct WealthRateRow: Identifiable {
+    let id: UUID
+    let code: String
+    let original: Double
+    var text: String
+}
+
+/// 匯率（要確認〔去設定〕；設定頁那一段是 private，這裡另外一張小表單改 ExpenseStore.currencyRates）
+struct WealthRatesSheet: View {
+    @EnvironmentObject var expenseStore: ExpenseStore
+    @Environment(\.dismiss) private var dismiss
+
+    @State private var rows: [WealthRateRow] = []
+    @State private var newCode = ""
+    @State private var newRate = ""
+    @State private var loaded = false
+    @State private var isSaving = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                listSection
+                addSection
+            }
+            .navigationTitle("匯率")
+            .navigationBarTitleDisplayMode(.inline)
+            .toolbar {
+                WealthSaveToolbar(title: "存", isSaving: isSaving, disabled: false,
+                                  onCancel: { dismiss() }, onSave: { save() })
+            }
+            .onAppear { load() }
+        }
+        .presentationDetents([.medium, .large])
+        .modifier(WealthPrivacyCurtain(armed: true))
+    }
+
+    @ViewBuilder
+    private var listSection: some View {
+        if !rows.isEmpty {
+            Section {
+                ForEach($rows) { $row in
+                    rateRow($row)
+                }
+            } header: {
+                Text("1 單位＝幾台幣")
+            } footer: {
+                Text("跟設定 › 匯率是同一份；有開自動更新的，下次更新會換成最新的。")
+            }
+        }
+    }
+
+    private func rateRow(_ row: Binding<WealthRateRow>) -> some View {
+        HStack {
+            Text(row.wrappedValue.code)
+            Spacer()
+            TextField("匯率", text: row.text)
+                .keyboardType(.decimalPad)
+                .multilineTextAlignment(.trailing)
+                .frame(maxWidth: 120)
+        }
+    }
+
+    private var addSection: some View {
+        Section {
+            TextField("幣別（例：美金）", text: $newCode)
+            TextField("1 單位＝幾台幣（例：32.05）", text: $newRate)
+                .keyboardType(.decimalPad)
+        } header: {
+            Text("加一個幣別")
+        } footer: {
+            Text("幣別的名字要跟記帳、銀行帳戶裡用的一樣（例：美金）。")
+        }
+    }
+
+    private func load() {
+        guard !loaded else { return }
+        loaded = true
+        rows = expenseStore.currencyRates.map { r in
+            WealthRateRow(id: r.id, code: r.code, original: r.rate, text: WealthFormText.rateText(r.rate))
+        }
+    }
+
+    private func save() {
+        guard !isSaving else { return }
+        isSaving = true
+        var list: [CurrencyRate] = rows.map { (r: WealthRateRow) -> CurrencyRate in
+            var v = r.original
+            if let x = Double(r.text.trimmingCharacters(in: .whitespaces)), x > 0, x.isFinite { v = x }
+            return CurrencyRate(id: r.id, code: r.code, rate: v)
+        }
+        let code = newCode.trimmingCharacters(in: .whitespaces)
+        if !code.isEmpty, !list.contains(where: { $0.code == code }),
+           let x = Double(newRate.trimmingCharacters(in: .whitespaces)), x > 0, x.isFinite {
+            list.append(CurrencyRate(code: code, rate: x))
+        }
+        let es = expenseStore
+        let changed = list.count != rows.count || zip(list, rows).contains(where: { pair in pair.0.rate != pair.1.original })
+        dismiss()
+        guard changed else { return }
+        let result = list
+        DispatchQueue.main.async { es.currencyRates = result }
+    }
+}
+
+// MARK: - 要確認（judge §3.5、樣稿③-C5；財富頁 ②、卡片頁 ② 共用）
+
+/// 會改資料、要先問一句的那兩種
+enum WealthCheckAsk: Identifiable {
+    case endRecurring(ids: [UUID], on: Date, title: String, message: String)
+    case fixFX(accountId: UUID, depositId: UUID, amount: Double, title: String, message: String)
+    /// [v25.575] 〔結束這條〕：「『薪轉 → 零用錢』最後一次是 11/27？」（lastKey nil＝一期都不算；endedBy 照帳戶收起來／找不到）
+    case endTransfer(ruleId: UUID, lastKey: String?, endedBy: String?, title: String, message: String)
+
+    var id: String {
+        switch self {
+        case .endRecurring(let ids, _, _, _): return "end-" + ids.map(\.uuidString).joined(separator: ",")
+        case .fixFX(_, let dep, _, _, _): return "fx-" + dep.uuidString
+        case .endTransfer(let rid, let key, _, _, _): return "endtr-" + rid.uuidString + "-" + (key ?? "none")
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .endRecurring(_, _, let t, _): return t
+        case .fixFX(_, _, _, let t, _): return t
+        case .endTransfer(_, _, _, let t, _): return t
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .endRecurring(_, _, _, let m): return m
+        case .fixFX(_, _, _, _, let m): return m
+        case .endTransfer(_, _, _, _, let m): return m
+        }
+    }
+
+    var confirmTitle: String {
+        switch self {
+        case .endRecurring: return "已經退訂"
+        case .fixFX: return "改過來"
+        case .endTransfer: return "結束這條"
+        }
+    }
+}
+
+/// 確認框（拆成 ViewModifier：Section 的 body 已經掛了 sheet、付費說明，坑 #7）
+struct WealthCheckAskDialog: ViewModifier {
+    @Binding var ask: WealthCheckAsk?
+    let onConfirm: (WealthCheckAsk) -> Void
+
+    func body(content: Content) -> some View {
+        content.alert(
+            ask?.title ?? "",
+            isPresented: Binding(get: { ask != nil }, set: { if !$0 { ask = nil } }),
+            presenting: ask
+        ) { a in
+            Button(a.confirmTitle) { onConfirm(a) }
+            Button("取消", role: .cancel) {}
+        } message: { a in
+            Text(a.message)
+        }
+    }
+}
+
+/// [v25.579] 要確認〔還沒…〕〔轉好了〕〔今天轉好了〕之後多問的一句（要確認一列最多 2 顆，第三個選項放這裡）
+enum WealthChecksTransferAsk: Identifiable {
+    /// 〔還沒…〕：〔還沒，算在明天〕〔這期不轉〕
+    case notYet(ruleId: UUID, key: String)
+    /// 今天對過存摺：〔還沒，對完才轉的〕〔轉了，存摺上已經有了〕（from／to：哪一邊今天對過）
+    case late(ruleId: UUID, key: String, from: Bool, to: Bool)
+    /// [v25.581] 要確認〔是同一筆…〕（記帳那筆跟定期轉帳像同一筆）：固定支出〔是：記帳那筆從下一期起結束〕〔是，但記帳照記（還能花先扣掉）〕；
+    /// 收入〔是：那筆收入從下個月起結束〕（facts.transferItemAsk）
+    case sameItem(WealthTransferItemAsk)
+
+    var id: String {
+        switch self {
+        case .notYet(let r, let k): return "ny-" + r.uuidString + "-" + k
+        case .late(let r, let k, _, _): return "late-" + r.uuidString + "-" + k
+        case .sameItem(let a): return "item-" + a.id
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .notYet: return "這期還沒轉？"
+        case .late: return "今天對存摺的時候，這筆轉了嗎？"
+        case .sameItem(let a): return a.title
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .notYet:
+            return "選〔還沒，算在明天〕：這筆先算在明天、每天往後挪，\(WealthTransferNotices.hangDays) 天後再問你一次。"
+        case .late:
+            return "對存摺之後才轉的，App 會把這筆排在對存摺後面。"
+        case .sameItem(let a):
+            return a.message
+        }
+    }
+}
+
+/// [v25.579] 多問的那一句（拆成 ViewModifier：要確認的 body 已經掛了 sheet、確認框、付費說明，坑 #7）。
+/// 按了只回呼，寫 store 由呼叫端放下一個 runloop（確認框先收好）
+struct WealthChecksTransferDialog: ViewModifier {
+    @Binding var ask: WealthChecksTransferAsk?
+    /// 〔還沒，算在明天〕〔這期不轉〕：規則、那一期原本的日子、狀態字（LifeStore.setTransferStatus）
+    let onStatus: (UUID, String, String) -> Void
+    /// 〔還沒，對完才轉的〕〔轉了，存摺上已經有了〕：規則、那一期、lateOut、lateIn（nil＝那一邊照留；LifeStore.markTransferDone）
+    let onDone: (UUID, String, Bool?, Bool?) -> Void
+    /// [v25.581]〔是同一筆…〕的選項：那一筆、keep（true＝〔是，但記帳照記〕不扣帳戶；false＝從下一期起結束）
+    let onItem: (WealthTransferItemAsk, Bool) -> Void
+
+    private var isPresented: Binding<Bool> {
+        Binding(get: { self.ask != nil }, set: { if !$0 { self.ask = nil } })
+    }
+
+    private var title: String {
+        ask?.title ?? ""
+    }
+
+    /// 對過存摺的那一邊（anchored）寫 value（true＝對完才轉、排在對存摺後面；false＝存摺上已經有了、拿掉）；沒對過的那一邊 nil＝照留
+    private static func lateFlag(_ anchored: Bool, _ value: Bool) -> Bool? {
+        anchored ? value : nil
+    }
+
+    @ViewBuilder
+    private func buttons(_ a: WealthChecksTransferAsk) -> some View {
+        switch a {
+        case .notYet(let r, let k):
+            Button("還沒，算在明天") { onStatus(r, k, WealthTransferStatus.notYet.rawValue) }
+            Button("這期不轉") { onStatus(r, k, WealthTransferStatus.skip.rawValue) }
+        case .late(let r, let k, let f, let t):
+            Button("還沒，對完才轉的") { onDone(r, k, Self.lateFlag(f, true), Self.lateFlag(t, true)) }
+            Button("轉了，存摺上已經有了") { onDone(r, k, Self.lateFlag(f, false), Self.lateFlag(t, false)) }
+        case .sameItem(let item):
+            itemButtons(item)
+        }
+    }
+
+    /// [v25.581]〔是同一筆…〕：固定支出兩顆、收入一顆（〔取消〕在外面）
+    @ViewBuilder
+    private func itemButtons(_ a: WealthTransferItemAsk) -> some View {
+        if a.isIncome {
+            Button("是：那筆收入從下個月起結束") { onItem(a, false) }
+        } else {
+            Button("是：記帳那筆從下一期起結束") { onItem(a, false) }
+            Button("是，但記帳照記（還能花先扣掉）") { onItem(a, true) }
+        }
+    }
+
+    func body(content: Content) -> some View {
+        content.confirmationDialog(title, isPresented: isPresented, titleVisibility: .visible,
+                                   presenting: ask) { a in
+            buttons(a)
+            Button("取消", role: .cancel) {}
+        } message: { a in
+            Text(a.message)
+        }
+    }
+}
+
+/// 要確認（財富頁 ②、卡片頁 ② 共用；0 件整區不出現）。limit：先放幾件，「再看 N 件」
+struct WealthChecksSection: View {
+    let checks: [WealthCheck]
+    var limit: Int? = 3
+    /// [v25.565] #12〔看綁了哪些〕（WealthCheck.Fix.openCard）交給呼叫端：財富頁開那張卡的卡片頁、卡片頁自己捲到定期扣款。
+    /// nil＝這裡自己開一張卡片頁（WealthFormSheet.card，捲到定期扣款）
+    var onOpenCard: ((UUID) -> Void)? = nil
+
+    @EnvironmentObject var lifeStore: LifeStore
+    @EnvironmentObject var expenseStore: ExpenseStore
+    @EnvironmentObject var financeStore: FinanceStore
+    @EnvironmentObject var subscription: SubscriptionManager
+    @Environment(\.colorScheme) private var scheme
+
+    @State private var expanded = false
+    @State private var sheet: WealthFormSheet?
+    @State private var ask: WealthCheckAsk?
+    /// [v25.579] 定期轉帳〔還沒…〕、〔轉好了〕那天對過存摺多問的一句
+    @State private var transferAsk: WealthChecksTransferAsk?
+    @State private var showPremium = false
+
+    private var visible: [WealthCheck] {
+        guard let n = limit, !expanded, checks.count > n else { return checks }
+        return Array(checks.prefix(n))
+    }
+
+    var body: some View {
+        if !checks.isEmpty {
+            content
+                .sheet(item: $sheet) { s in
+                    s.view.appStores()
+                }
+                .modifier(WealthCheckAskDialog(ask: $ask, onConfirm: { a in perform(a) }))
+                .modifier(transferDialog)
+                .premiumLockAlert(isPresented: $showPremium)
+        }
+    }
+
+    /// [v25.579] 定期轉帳多問的那一句：選了之後確認框先收好，下一個 runloop 才寫（這一列會跟著不見；store 先抓進區域常數）
+    /// [v25.581]〔是同一筆…〕：收入〔是：那筆收入從下個月起結束〕＝endRecurringIncome；固定支出〔是，但記帳照記〕＝這筆不扣帳戶
+    ///（excludeExpenseFromWealth）、〔是：記帳那筆從下一期起結束〕＝endRecurring（結束在下一期前一天，以前的月份不動）
+    private var transferDialog: WealthChecksTransferDialog {
+        let life = lifeStore
+        let es = expenseStore
+        return WealthChecksTransferDialog(ask: $transferAsk, onStatus: { rid, key, status in
+            DispatchQueue.main.async {
+                life.setTransferStatus(ruleId: rid, key: key, status: status)
+            }
+        }, onDone: { rid, key, lateOut, lateIn in
+            let day = Date()
+            DispatchQueue.main.async {
+                life.markTransferDone(ruleId: rid, key: key, day: day, lateOut: lateOut, lateIn: lateIn)
+            }
+        }, onItem: { a, keep in
+            DispatchQueue.main.async {
+                if a.isIncome {
+                    life.endRecurringIncome(a.itemId, on: a.endDay, expense: es)
+                } else if keep {
+                    life.excludeExpenseFromWealth(a.itemId)
+                } else {
+                    life.endRecurring(expenseIds: [a.itemId], on: a.endDay, expense: es)
+                }
+            }
+        })
+    }
+
+    private var content: some View {
+        let pal = TripBoardPalette(scheme)
+        let rows = visible
+        let more = checks.count - rows.count
+        return VStack(alignment: .leading, spacing: 10) {
+            FinanceCardHeader(title: "要確認", trailing: "\(checks.count) 件")
+            VStack(alignment: .leading, spacing: 0) {
+                ForEach(Array(rows.enumerated()), id: \.element.id) { i, c in
+                    if i > 0 {
+                        Divider().padding(.leading, 44)
+                    }
+                    row(c, pal: pal)
+                }
+                if more > 0 {
+                    moreRow(more)
+                }
+            }
+            .modifier(FinanceCardChrome())
+        }
+    }
+
+    private func row(_ c: WealthCheck, pal: TripBoardPalette) -> some View {
+        FinanceCheckRow(icon: c.icon, message: c.text, buttons: buttons(c),
+                        accessibilityLabel: c.accessibilityLabel, pal: pal)
+    }
+
+    private func buttons(_ c: WealthCheck) -> [FinanceCheckButton] {
+        c.actions.map { a in
+            FinanceCheckButton(title: a.title, action: { tap(a.fix, check: c) })
+        }
+    }
+
+    private func moreRow(_ n: Int) -> some View {
+        VStack(spacing: 0) {
+            Divider().padding(.leading, 14)
+            Button {
+                withAnimation(.easeInOut(duration: 0.2)) { expanded = true }
+            } label: {
+                Text("再看 \(n) 件")
+                    .font(.footnote.weight(.semibold))
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .foregroundStyle(Color.accentColor)
+        }
+    }
+
+    // MARK: 按鈕（不在背景偷偷改，都是你按了才改；開表單的照那張表單擋付費）
+
+    private func tap(_ fix: WealthCheck.Fix, check: WealthCheck) {
+        let life = lifeStore
+        switch fix {
+        case .dismiss:
+            life.dismissWealthCheck(check.id)
+        case .transfer(let toId, let fromId, let amount):
+            guard subscription.isPremium else { showPremium = true; return }
+            sheet = .transfer(from: fromId, to: toId, amount: amount, showsCover: true)
+        case .confirmPaid(let cardId, let key, let day, let src):
+            life.markStatementPaid(cardId: cardId, key: key, date: day, account: src, amount: nil)
+        case .editPaid(let cardId, let key):
+            sheet = .paid(cardId: cardId, key: key)
+        case .markNotPaid(let cardId, let key):
+            life.markStatementNotPaid(cardId: cardId, key: key)
+        case .excludeExpense(let expenseId):
+            life.excludeExpenseFromWealth(expenseId, excluded: true)
+        case .moveRecurring(let cardId, let ids):
+            guard subscription.isPremium else { showPremium = true; return }
+            sheet = .move(fromId: cardId, expenseIds: ids, toCards: true)
+        case .endRecurring(let ids, let day):
+            ask = endRecurringAsk(ids, on: day)
+        case .editAccount(let id):
+            guard subscription.isPremium else { showPremium = true; return }
+            openEditor(id, check: check)
+        case .fixLegacyFX(let accountId, let depositId, let amount):
+            ask = fixFXAsk(accountId: accountId, depositId: depositId, amount: amount)
+        case .openRates:
+            sheet = .rates
+        case .anchor(let accountId, let code):
+            guard subscription.isPremium else { showPremium = true; return }
+            sheet = .anchor(accountId: accountId, code: code)
+        case .openCard(let cardId):
+            // [v25.565] #12〔看綁了哪些〕：看卡片頁不擋訂閱（改綁定要到記帳改，那邊自己擋）
+            openCard(cardId)
+        case .setMaturity(let depositId, let raw):
+            // [v25.566] #13 改到期處理（改成轉活存／本息續存）：不擋訂閱（跟標成已繳一樣是處理到期的事）；
+            // 下一個 runloop 才寫（自動續存還沒寫進帳本的那一期，LifeStore 先寫進去再改）
+            let mode = WealthMaturityMode.of(raw)
+            DispatchQueue.main.async {
+                life.setTimeDepositOnMaturity(depositId, mode: mode)
+            }
+        case .editTimeDeposit(let accountId, let depositId):
+            // [v25.566] 舊的定存帳戶〔補資料〕：開定存表單（要訂閱）
+            guard subscription.isPremium else { showPremium = true; return }
+            sheet = .timeDeposit(accountId: accountId, editing: depositId)
+        case .quietInsurance(let key):
+            // [v25.566] #14 存款保險〔知道了〕：這家銀行一年內不再提（不擋訂閱）
+            life.quietDepositInsurance(key)
+        case .linkPolicy(let pid, let eid):
+            // [v25.567] #15〔是同一張，連起來〕：不擋訂閱（確認，同〔對〕）；下一個 runloop 才寫（這一列會跟著不見）
+            let es = expenseStore
+            DispatchQueue.main.async {
+                life.linkPolicy(pid, expenseId: eid, expense: es)
+            }
+        case .setPolicyCycle(let pid, let raw):
+            // [v25.567] 保單頁〔年繳〕：舊資料沒寫繳法（不擋訂閱，修資料）
+            life.setPolicyCycle(pid, cycle: raw)
+        case .moveSettlements(let bid):
+            // [v25.567] #16〔搬到薪轉〕：先開「會動到哪些」，你按確定才搬（不擋訂閱：修資料，同〔改過來〕）
+            sheet = .settlementMove(brokerId: bid)
+        case .openTransferPeriod(let rid, let key):
+            // [v25.575] #1〔看這一期〕：那一期的小表單（不擋訂閱：看的；〔銀行這期取消了〕〔知道了〕在裡面）
+            sheet = .transferPeriod(ruleId: rid, key: key)
+        case .setTransferStatus(let rid, let key, let status):
+            // [v25.575] #10〔沒轉成〕：那一期記成沒轉成（不擋訂閱：記下銀行真的發生了什麼）；下一個 runloop 才寫（這一列會跟著換）
+            DispatchQueue.main.async {
+                life.setTransferStatus(ruleId: rid, key: key, status: status)
+            }
+        case .endTransferRule(let rid, let lastKey):
+            // [v25.575]〔結束這條〕：先問最後一次是哪一期（不擋訂閱：銀行那邊停了，App 也要停得了）
+            ask = endTransferAsk(rid, lastKey: lastKey)
+        case .openTransferRule(let rid):
+            // [v25.575]〔看這條〕：規則頁（不擋訂閱；刪除在裡面擋）
+            sheet = .transferRule(ruleId: rid)
+        case .resumeTransferRule(let rid):
+            // [v25.577]〔接著轉〕：帳戶收起來時結束的那條從下一期起接著轉（不擋訂閱：同〔結束這條〕）；
+            // 下一個 runloop 才寫（這一列會跟著不見）
+            DispatchQueue.main.async {
+                life.resumeTransferRule(rid)
+            }
+        case .transferDoneToday(let rid, let key):
+            // [v25.579]〔轉好了〕（今天那一期）〔今天轉好了〕（〔還沒〕掛滿 7 天）：不擋訂閱（記下你真的轉了）。
+            // 轉出或轉進的帳戶今天對過存摺 → 先問「今天對存摺的時候，這筆轉了嗎？」；都沒對過 → 下一個 runloop 直接記今天轉好了
+            let facts = lifeStore.wealthFacts(expense: expenseStore, finance: financeStore)
+            let rec = facts.transferReconciledToday(ruleId: rid, key: key)
+            if rec.any {
+                transferAsk = .late(ruleId: rid, key: key, from: rec.from, to: rec.to)
+            } else {
+                let day = Date()
+                DispatchQueue.main.async {
+                    life.markTransferDone(ruleId: rid, key: key, day: day)
+                }
+            }
+        case .askTransferNotYet(let rid, let key):
+            // [v25.579]〔還沒…〕：先問〔還沒，算在明天〕〔這期不轉〕（不擋訂閱；寫在確認框的回呼裡）
+            transferAsk = .notYet(ruleId: rid, key: key)
+        case .renewTransferEnd(let rid):
+            // [v25.579]〔已經續設〕：開「銀行那邊設到哪天」小表單（不擋訂閱：同〔結束這條〕）
+            sheet = .transferRenew(ruleId: rid)
+        case .newTransferRule(let p):
+            // [v25.581]〔改成定期轉帳〕〔合成一條定期轉帳〕〔設成每月都轉〕：新增定期轉帳帶好欄位（要訂閱：是新增）；
+            // 記帳那筆存檔時在表單裡問，你不按就不動
+            guard subscription.isPremium else { showPremium = true; return }
+            sheet = .transferNew(preset: p)
+        case .askTransferItem(let rid, let itemId, let isIncome):
+            // [v25.581]〔是同一筆…〕：先問記帳那筆怎麼結束（不擋訂閱：同〔已經退訂〕〔這筆不算〕；寫在確認框的回呼裡）。
+            // 找不到那筆、已經沒有下一期＝什麼都不做（這一列下次算就不見）
+            let facts = lifeStore.wealthFacts(expense: expenseStore, finance: financeStore)
+            guard let a = facts.transferItemAsk(ruleId: rid, itemId: itemId, isIncome: isIncome,
+                                                expenses: expenseStore.expenses, incomes: expenseStore.incomes) else { return }
+            transferAsk = .sameItem(a)
+        }
+    }
+
+    /// [v25.565] 打開那張卡、捲到綁在這張卡的定期扣款：呼叫端有給就交給它，不然這裡自己開一張
+    private func openCard(_ id: UUID) {
+        if let handler = onOpenCard {
+            handler(id)
+        } else {
+            sheet = .card(id)
+        }
+    }
+
+    /// 〔填日子〕捲到帳單那段、〔選帳戶〕捲到卡費怎麼繳、[v25.567]〔改繳法〕捲到保費、〔選交割銀行〕捲到交割銀行
+    private func openEditor(_ id: UUID, check: WealthCheck) {
+        guard let m = lifeStore.milestones.first(where: { $0.id == id }),
+              let kind = WealthAccountKind(sub: m.financeSubCategory) else { return }
+        let focus: WealthEditorFocus?
+        switch check.kind {
+        case .cardDaysMissing: focus = .cardDays
+        case .noPayer: focus = .payFrom
+        // [v25.567] 保單〔改繳法〕捲到保費、#16〔選交割銀行〕捲到交割銀行
+        case .policyCycle: focus = .premium
+        case .legacySettlement: focus = .settlement
+        default: focus = nil
+        }
+        sheet = .editor(kind: kind, item: m, focus: focus)
+    }
+
+    /// 「Disney+ 從 6/30 起不再扣？」
+    private func endRecurringAsk(_ ids: [UUID], on day: Date) -> WealthCheckAsk {
+        let names: [String] = expenseStore.expenses.filter { ids.contains($0.id) }.map(\.title)
+        let who: String = names.isEmpty ? "這幾筆定期扣款" : names.joined(separator: "、")
+        let title = who + " 從 " + WealthFormat.monthDay(day) + " 起不再扣？"
+        let message = "那天那一期照扣，之後不再算進卡費；記帳裡的這幾筆會設好結束日。"
+        return .endRecurring(ids: ids, on: day, title: title, message: message)
+    }
+
+    /// 「改成 美金 10.00？」原本記成多少 → 改成多少
+    private func fixFXAsk(accountId: UUID, depositId: UUID, amount: Double) -> WealthCheckAsk {
+        let dep: BankDeposit? = lifeStore.milestones.first(where: { $0.id == accountId })?
+            .bankDeposits?.first(where: { $0.id == depositId })
+        let code: String = dep?.currencyCode ?? "NT$"
+        let after = WealthFormat.money(amount, code: code)
+        let title = "改成 " + after + "？"
+        var message = "照現在的匯率改成 " + after + "。"
+        if let d = dep {
+            message = "原本記成 " + WealthFormat.money(d.amount, code: code) + "（那是台幣的數字），照現在的匯率改成 "
+                + after + "。"
+        }
+        return .fixFX(accountId: accountId, depositId: depositId, amount: amount, title: title, message: message)
+    }
+
+    /// [v25.575]「『薪轉 → 零用錢』最後一次是 11/27？」；lastKey nil＝「結束『薪轉 → 零用錢』？」＋一期都不算。
+    /// endedBy：要確認這條是因為帳戶收起來（"accountHidden"）或找不到（"accountDeleted"）才出現的（規則頁寫「（…收起來時結束）」）
+    private func endTransferAsk(_ rid: UUID, lastKey: String?) -> WealthCheckAsk {
+        let facts = lifeStore.wealthFacts(expense: expenseStore, finance: financeStore)
+        let t: WealthFacts.TransferRule? = facts.transferRule(rid)
+        let name: String = t?.title ?? "這條定期轉帳"
+        var endedBy: String? = nil
+        if let t {
+            if t.fromMissing || t.toMissing {
+                endedBy = "accountDeleted"
+            } else if t.fromHidden || t.toHidden {
+                endedBy = "accountHidden"
+            }
+        }
+        let lastDay: Date? = lastKey.flatMap { WealthTransferSchedule.date(fromKey: $0) }
+        let title: String
+        let message: String
+        if let d = lastDay {
+            let when = Self.transferDayText(d, today: facts.today)
+            title = "『\(name)』最後一次是 \(when)？"
+            message = "\(when)（含）以前的照算，之後不再算進兩個帳戶。App 不會幫你取消，銀行那邊也要停掉。"
+        } else {
+            title = "結束『\(name)』？"
+            message = "一期都不算：這條的每一期都不會算進帳戶。App 不會幫你取消，銀行那邊也要停掉。"
+        }
+        return .endTransfer(ruleId: rid, lastKey: lastKey, endedBy: endedBy, title: title, message: message)
+    }
+
+    /// [v25.575]「11/27」；不是今年「2025/12/26」
+    private static func transferDayText(_ d: Date, today: Date) -> String {
+        let y = WealthCal.calendar.component(.year, from: d)
+        if y == WealthCal.calendar.component(.year, from: today) { return WealthFormat.monthDay(d) }
+        return "\(y)/" + WealthFormat.monthDay(d)
+    }
+
+    private func perform(_ a: WealthCheckAsk) {
+        switch a {
+        case .endRecurring(let ids, let day, _, _):
+            lifeStore.endRecurring(expenseIds: ids, on: day, expense: expenseStore)
+        case .fixFX(let accountId, let depositId, let amount, _, _):
+            lifeStore.fixLegacyFX(accountId: accountId, depositId: depositId, amount: amount)
+        case .endTransfer(let rid, let lastKey, let endedBy, _, _):
+            // [v25.575] 下一個 runloop 才寫（這一列、可能整區會跟著不見，確認框先收好）
+            let life = lifeStore
+            DispatchQueue.main.async {
+                life.endTransferRule(rid, lastKey: lastKey, endedBy: endedBy)
+            }
+        }
+    }
+}

@@ -1,0 +1,1801 @@
+import SwiftUI
+
+// MARK: - 財富頁的項目卡（v25.564，財富 v3；wealth/judge.md §3.7–3.11）
+//
+// 照 MoneyItem.vehicle（FinanceItems.swift）：extension MoneyItem { static func wealthCard／wealthBank／wealthBroker }（保單 v3 是白卡一列，不是項目卡），
+// 一筆要寫什麼字全在工廠函式；信用卡的卡面走 MoneyItem.cardFace（WealthCardFacePanel，G4 畫），銀行、證券戶走 MoneyArtTheme 71–76。
+//
+// 分工：G1 實作。主控只開檔。
+//
+// [v25.564] G1：
+// • MoneyItem.wealthCard(_:masked:now:dark:)：名稱「國泰世華 CUBE」、金額 要繳／還沒出帳／NT$0、第二行「10/27 截止・8 天・自己繳」
+//   （色點＝卡面色；逾期、3 天內 warn）、膠囊「還沒出帳 6,200」或「9 月帳單已扣 ✓」＋「還能刷 27.5萬」、使用率條（四段色，不用紅綠）、
+//   卡面＝一張小卡片（只有末四碼；遮住也遮）。主題照 72 但 tint 換成卡面色、進度條換成使用率那一段的顏色（MoneyItemCard 不用改）。
+// • MoneyItem.wealthBank(_:facts:rates:masked:now:)：存摺上寫到元；「活存・台新 ••7890」；接下來兩件膠囊；外幣「匯率 32.0」；
+//   負的「可能漏記了」；主題 71／73／74；不放銀行商標、不放帳號（只有 ••末 4 碼）。
+// • MoneyItem.wealthBroker(_:facts:masked:)：市值讀股票頁；「證券戶・交割 薪轉（台新）」；膠囊交割、未實現（紅漲綠跌）。
+// • 分區（④ 信用卡、⑤ 銀行帳戶、⑥ 證券戶、⑦ 保單、⑧ 收起來的）：點＝卡片頁；長按 contextMenu、VoiceOver accessibilityActions 同一組；
+//   不做左滑。要開表單、要問的都交回財富頁（WealthPageActions），這裡不寫 store。
+//
+// [v25.565] 財富 v4（build/v4/brief.md §G4-9，v3 留下的已知限制）：信用卡項目卡第二行拆成 category（短：「10/27 截止」
+// 「11/10 扣款」「11/12 結帳」「已停用」）＋detail（「8 天・自己繳」「從薪轉扣最低・5 天」）。MoneyItemCard 的 category 是
+// fixedSize、detail 是 lineLimit(1)：SE 寬度＋自動扣最低＋長暱稱時 detail 變「…」，不再被卡片右緣切掉。VoiceOver 兩段都念。
+//
+// [v25.566] 財富 v5 定存與外幣（build/v5/brief.md §G1 6–7；judge §3.8）：
+// • 定存帳戶（WealthFacts.Account.showsAsDeposit：舊的「定存」種類，或有定存、存摺上都是 0）：主題 74 金；
+//   金額＝一筆寫本金「NT$500,000」、好幾筆「約 NT$100萬」、舊的定存種類照存摺上；第二行「定存・1.7%・本息續存」
+//  （好幾筆「定存 3 筆・最近 3/15 到期」；舊的定存種類沒補資料照 v3「定存・台灣銀行」）；膠囊「預估利息 8,500」；
+//   進度條「3/15 起存」……「3/15 到期・還有 147 天」（到期再決定已經到期「到期了・等你決定」、還沒開始 0）；
+//   卡面左上「3/15 到期」、左下沒填用途寫「TIME」。第二行一樣拆 category（短）＋detail（放不下變「…」）。
+// • 活存帳戶裡有定存：多一顆膠囊「定存 50萬・3/15 到期」（遮住「定存 ••••・3/15 到期」），放在接下來那兩顆前面（一列放不下少放後面的）。
+// • 外幣帳戶：第二行「外幣・玉山」＋「約 NT$102,400（10/19 匯率 32.0）」（WealthFormat.fxNote；遮住只留「外幣・玉山」）；
+//   原本的「匯率 32.0」膠囊拿掉（字已經在第二行），「沒有匯率」那顆留著。
+// • 收起來的帳戶（⑧）不出 v5 的新東西：沒有進度條、定存那幾顆膠囊，卡面左上照舊「定存」（金色卡照算）。
+//   [v25.566 裁定] 金額也照 v4 寫存摺上：跟帳戶頁看板、四格、換帳戶列（WealthCardData：收起來的照舊）同一個數。
+// • WealthSheet 加 .timeDeposit(帳戶, 那一期)（定存表單 WealthTimeDepositSheet，要訂閱）。
+// • 定存的數字（本金、利息、到期日、天數、進度、狀態）一律讀 WealthFacts.TimeDeposit，這裡不自己算。
+//
+// [v25.567] 財富 v6 證券名片與保單總表（build/v6/brief.md §6 G1 5–9；judge §3.9、§3.10、§6.8；樣稿①⑦）：
+// • WealthSheet 加 .savings(儲蓄險)／.vehicle(車)／.house(房子)／.newPolicy(記帳保費)：保單總表點了「彈出那張卡」不切分頁
+//  （judge §6.8：InsurancePolicyCard、VehicleDetailView、RealEstateDetailView，看完關掉還在財富頁）；看別頁的卡不擋訂閱，
+//   〔補保單〕（新增保單、預填那一筆記帳保費）要訂閱。
+// • ⑦ 保單總表：標頭同 ⑥（MoneyGroupHeader「保單 4」右「一年約 NT$16萬」）；白卡一列一列（右邊小字 tag「儲蓄險 ›」「車子卡 ›」「房屋卡 ›」）、
+//   最下灰字（保障型一年…）、灰字「記帳裡還有 1 筆保費沒有保單資料：…」＋綠字〔補保單〕。點一列照 source 開：保單頁／儲蓄險保單卡／
+//   車子卡／房屋卡；長按「編輯」只給財富的保單（別的在自己那一頁改）。
+// • 白卡下面「保障」六格（WealthPageCoverGrid：兩欄三列；有的亮保單綠、寫保險公司，沒有灰「還沒記」；整格不能點；不算應該保多少）。
+// • 證券戶項目卡的交割膠囊改讀 Broker.dues（接下來 30 天、每天買賣相抵、夠不夠看交割銀行那天扣之前）：「10/21 交割 52,340」；
+//   不夠扣「10/21 交割 差 23,940」（warn）；以前記在證券戶身上的交割多一顆「舊交割 18 筆」（一列放不下先少放這顆）。
+//   沒有 dues（舊資料、超過 30 天）照 v3 讀 nextSettlementDate。
+//
+// [v25.575] 定期轉帳 v1a（transfer/build/v1a/brief.md §6 G1；judge §4.3、§5、§6；樣稿①-2）：
+// • WealthSheet 加 .transferForm(從哪個帳戶；nil＝表單預設月薪入帳的帳戶)／.transferRule(規則)／.transferPeriod(規則, 那一期 key)：
+//   新增要訂閱（財富頁的 open 擋）；看規則頁、點一期不擋（裡面的刪除 G4 自己擋）。三張表單是 G4 的 WealthTransferViews.swift。
+// • ⑤ 銀行帳戶最後一張「定期轉帳・4 條」卡（WealthPageTransfersCard，放在 WealthPageBanksSection 裡、銀行項目卡下面；
+//   財富頁 VStack 的 10 個子項不加）：點一列＝規則頁、〔＋〕＝新增（沒收起來的銀行兩個以上才有）、「已結束 1 條 ›」點了在卡裡展開。
+// • 收起來確認框多一句：WealthPageConfirm.hideAccount 多帶第三個值（facts.hideTransferSentence；沒有＝nil）。
+// • 銀行項目卡「接下來兩件」膠囊：銀行自動轉的定期轉帳轉出不搶（樣稿①-2 註 2；自己轉的照放，同銀行頁膠囊 G2）；
+//   同一條只放最近一期。短名讀 WealthPageText.shortName（「轉給台灣銀行」「來自薪轉」）。
+//
+// [v25.577] 定期轉帳 v1b（transfer/build/v1b/brief.md §6 G1-3；judge §4.1、樣稿③-A5）：
+// • 沒有規則時 ⑤ 定期轉帳卡那個位置換一行邀請 WealthPageTransferInviteCard（WealthPageBanksSection.transferInvite）：
+//   「在銀行設了預約轉帳？抄一份進來，接下來 30 天就算得準。」〔＋ 定期轉帳〕（open(.transferForm(nil))，財富頁擋訂閱）
+//   〔不用了〕（WealthPageActions.dismissTransferInvite，不擋；財富頁下一個 runloop 叫 lifeStore.dismissTransferInvite）。
+// • 定期轉帳卡底字改在 WealthPageText.transferNote（「…在每個帳戶的「連到這個帳戶的」看得到。」）。
+
+// MARK: - 財富頁的彈出頁（一個 enum、一個 .sheet(item:)）
+
+/// 財富頁的彈出頁（LifeFinanceView 一個 .sheet(item:) { … .appStores() }）。id 帶帳戶的 UUID／字串
+enum WealthSheet: Identifiable {
+    /// 卡片頁（捲到哪一區）
+    case card(UUID, WealthCardAnchor?)
+    /// 新增（nil）／編輯財富帳戶
+    case editor(WealthAccountKind, LifeMilestone?)
+    /// 記一筆（存款／提款／利息／手續費）
+    case record(UUID, WealthRecordKind)
+    /// 轉帳（從這個帳戶轉出）
+    case transfer(UUID)
+    /// 對存摺（帳戶、幣別）
+    case anchor(UUID, String)
+    /// 標成已繳（最早沒繳的那一期）
+    case paid(UUID)
+    /// 刷這張卡記一筆（記帳表單，預先選好這張卡）
+    case addExpense(UUID)
+    /// 排序與收起來
+    case order
+    /// 「這頁的數字怎麼算」「iCloud 與家人共享說明」
+    case info(WealthPageInfoTopic)
+    /// 接下來 30 天全部
+    case upcomingAll
+    /// [v25.566] 定存表單（帳戶：nil＝第一欄選；那一期：nil＝新增）
+    case timeDeposit(UUID?, UUID?)
+    /// [v25.567] 保單總表的儲蓄險（SavingsInsurance.id）→ 彈出 InsurancePolicyCard
+    case savings(UUID)
+    /// [v25.567] 保單總表的車險（車子 id）→ 彈出 VehicleDetailView
+    case vehicle(UUID)
+    /// [v25.567] 保單總表的房屋險（房子 id）→ 彈出 RealEstateDetailView（捲到房屋資料）
+    case house(UUID)
+    /// [v25.567] 〔補保單〕：新增保單、預填這一筆記帳保費（記帳的 id），存檔連它
+    case newPolicy(UUID)
+    /// [v25.575] 新增定期轉帳（「從」帶這個帳戶；nil＝表單預設月薪入帳的帳戶）→ WealthTransferRuleForm
+    case transferForm(UUID?)
+    /// [v25.575] 一條定期轉帳的規則頁（規則的 id）→ WealthTransferRulePage
+    case transferRule(UUID)
+    /// [v25.575] 定期轉帳的一期（規則的 id、那一期原本的日子「2026-11-06」）→ WealthTransferPeriodSheet
+    case transferPeriod(UUID, String)
+
+    var id: String {
+        switch self {
+        case .card(let id, let anchor): return "card-\(id.uuidString)-\(anchor?.rawValue ?? "")"
+        case .editor(let kind, let m): return "editor-\(kind.rawValue)-\(m?.id.uuidString ?? "new")"
+        case .record(let id, let kind): return "record-\(id.uuidString)-\(kind.rawValue)"
+        case .transfer(let id): return "transfer-\(id.uuidString)"
+        case .anchor(let id, let code): return "anchor-\(id.uuidString)-\(code)"
+        case .paid(let id): return "paid-\(id.uuidString)"
+        case .addExpense(let id): return "expense-\(id.uuidString)"
+        case .order: return "order"
+        case .info(let topic): return "info-\(topic.rawValue)"
+        case .upcomingAll: return "upcoming"
+        case .timeDeposit(let account, let term):
+            return "deposit-\(account?.uuidString ?? "new")-\(term?.uuidString ?? "new")"
+        case .savings(let id): return "savings-\(id.uuidString)"
+        case .vehicle(let id): return "vehicle-\(id.uuidString)"
+        case .house(let id): return "house-\(id.uuidString)"
+        case .newPolicy(let id): return "newpolicy-\(id.uuidString)"
+        case .transferForm(let from): return "transferform-\(from?.uuidString ?? "new")"
+        case .transferRule(let id): return "transferrule-\(id.uuidString)"
+        case .transferPeriod(let id, let key): return "transferperiod-\(id.uuidString)-\(key)"
+        }
+    }
+
+    /// 要訂閱（待決定 10）：新增、編輯、記一筆、轉帳、對存摺、刷這張卡記一筆、[v25.566] 定存表單、[v25.567] 〔補保單〕、
+    /// [v25.575] 新增定期轉帳。
+    /// 不擋：看卡片頁、標成已繳、排序與收起來、說明、接下來全部、[v25.567] 看儲蓄險／車子卡／房屋卡（同看卡片頁）、
+    /// [v25.575] 定期轉帳的規則頁、一期（judge §6：看、改這一期、這期不轉、沒轉成、結束不用；刪除在規則頁裡擋）
+    var needsPremium: Bool {
+        switch self {
+        case .editor, .record, .transfer, .anchor, .addExpense, .timeDeposit, .newPolicy, .transferForm: return true
+        case .card, .paid, .order, .info, .upcomingAll, .savings, .vehicle, .house, .transferRule, .transferPeriod:
+            return false
+        }
+    }
+}
+
+/// ⋯ 的兩張說明
+enum WealthPageInfoTopic: String {
+    case howItWorks, iCloud
+
+    var title: String {
+        switch self {
+        case .howItWorks: return "這頁的數字怎麼算"
+        case .iCloud: return "iCloud 與家人共享說明"
+        }
+    }
+
+    var paragraphs: [String] {
+        switch self {
+        case .howItWorks: return WealthPageText.howItWorks
+        case .iCloud: return WealthPageText.iCloudNote
+        }
+    }
+}
+
+/// 長按「停用」「收起來」要先問（財富頁一個 confirmationDialog）
+enum WealthPageConfirm: Identifiable {
+    /// 停用一張卡：卡的 id、名字、還在刷它的定期扣款幾筆
+    case disableCard(UUID, String, Int)
+    /// 收起來一個帳戶（銀行：銷戶）：帳戶的 id、名字、[v25.575] 定期轉帳那一句
+    /// （facts.hideTransferSentence「有 1 條定期轉帳轉進這裡，會一起結束」；沒有＝nil。結束本身在 LifeStore.setWealthHidden 裡）
+    case hideAccount(UUID, String, String?)
+
+    var id: String {
+        switch self {
+        case .disableCard(let id, _, _): return "disable-\(id.uuidString)"
+        case .hideAccount(let id, _, _): return "hide-\(id.uuidString)"
+        }
+    }
+
+    var title: String {
+        switch self {
+        case .disableCard(_, let name, _): return "停用「\(name)」？"
+        case .hideAccount(_, let name, _): return "收起來「\(name)」？"
+        }
+    }
+
+    var message: String {
+        switch self {
+        case .disableCard(_, _, let n):
+            let base = "停用後不會出現在記帳的卡片選單，歷史帳單照算。"
+            return n > 0 ? base + "還有 \(n) 筆定期扣款刷它，要先改嗎？" : base
+        case .hideAccount(_, _, let transferNote):
+            let base = "收起來：不算進存款合計、不出現在記帳選單；歷史照算，隨時可以在「⋯ › 排序與收起來」打開。"
+            // 接在原句後面（同卡片頁 WealthCardConfirm、刪銀行〔收起來就好〕的寫法：三個入口一樣的字）
+            guard let t = transferNote, !t.isEmpty else { return base }
+            return base + t + "。"
+        }
+    }
+}
+
+/// 項目卡、分區要做的事（全部交回財富頁：開表單、付費擋、問確認、寫 store 都在那裡）
+struct WealthPageActions {
+    /// 打開一張彈出頁（要訂閱的那幾種財富頁自己擋）
+    var open: (WealthSheet) -> Void = { _ in }
+    /// 編輯：帳戶的 id、表單類型（財富頁拿 store 裡最新的那一筆里程碑）
+    var edit: (UUID, WealthAccountKind) -> Void = { _, _ in }
+    /// 停用、收起來先問
+    var confirm: (WealthPageConfirm) -> Void = { _ in }
+    /// 收起來的：重新啟用卡（true）／不收起來帳戶（false）
+    var restore: (UUID, Bool) -> Void = { _, _ in }
+    /// [v25.577] 定期轉帳邀請〔不用了〕（不擋訂閱；財富頁下一個 runloop 才叫 lifeStore.dismissTransferInvite）
+    var dismissTransferInvite: () -> Void = {}
+}
+
+// MARK: - 工廠：一張卡、一個帳戶、一個證券戶
+
+/// 卡面色的代表色（同 WealthCardPalette 的 bottoms；那張表是 private，項目卡的色點、底色要 UInt32 才能組主題）
+private let wealthFaceTints: [UInt32] = [0xE0453A, 0x1F7A9C, 0x1B8F63, 0x6B4BE0, 0x1C1C24, 0xD63F72]
+/// 使用率四段色：很寬鬆／正常／偏高／快刷滿了（judge §3.16；不用紅綠）
+private let wealthUsageLight: [UInt32] = [0x6B7FA3, 0xB98500, 0xD9731A, 0xB34A00]
+private let wealthUsageDark: [UInt32] = [0x9FB0D0, 0xFFD166, 0xFF9F4D, 0xFF7A33]
+
+extension MoneyItem {
+    /// 信用卡的主題：照 72（Trends／STATEMENTS），色點與卡底的淡色換成卡面色（warn 時換注意色）、進度條換成使用率那一段的顏色
+    static func wealthCardTheme(face: Int, tier: Int, warn: Bool, dark: Bool) -> MoneyArtTheme {
+        let base = MoneyArtTheme.wealthCardTrends
+        let t = Swift.min(Swift.max(tier, 0), 3)
+        let bar: UInt32 = dark ? wealthUsageDark[t] : wealthUsageLight[t]
+        let f = Swift.min(Swift.max(face, 0), 5)
+        let tint: UInt32 = warn ? 0xA65300 : wealthFaceTints[f]
+        return MoneyArtTheme(id: base.id, top: bar, bottom: bar, tint: tint, hero: base.hero, accent: base.accent,
+                             pattern: base.pattern, word: base.word, caps: base.caps)
+    }
+
+    /// ④ 一張信用卡（judge §3.7）
+    static func wealthCard(_ c: WealthFacts.Card, masked: Bool, now: Date, dark: Bool) -> MoneyItem {
+        let today = WealthCal.day(now)
+        let meta = wealthCardMeta(c, today: today)
+        let tier = c.usage.map { WealthPageText.tier($0) } ?? 0
+        var item = MoneyItem(id: c.id, theme: wealthCardTheme(face: c.faceColor, tier: tier, warn: meta.warn, dark: dark),
+                             seed: seed(c.id), title: c.fullName, amount: "", category: meta.category)
+        // [v25.565] 第二行：category 只放短的那段（MoneyItemCard 的 category 是 fixedSize），其他放 detail（會變「…」不被切）
+        item.detail = meta.detail
+        // 金額：有要繳寫要繳；沒有寫還沒出帳；都 0 寫 NT$0＋膠囊「這期還沒刷」
+        var chips: [MoneyItemChip] = []
+        if c.due > 0.5 {
+            item.amount = WealthFormat.ntd(c.due)
+            item.unit = "要繳"
+            if c.unbilled > 0.5 {
+                let unbilledText: String = masked ? WealthPageText.dots
+                                                  : WealthFormat.grouped(c.unbilled.rounded(), decimals: 0)
+                chips.append(MoneyItemChip(icon: "hourglass", text: "還沒出帳 \(unbilledText)"))
+            }
+        } else if c.unbilled > 0.5 {
+            item.amount = WealthFormat.ntd(c.unbilled)
+            item.unit = "還沒出帳"
+            if let paid = wealthPaidChip(c, today: today) { chips.append(paid) }
+        } else {
+            item.amount = "NT$0"
+            chips.append(MoneyItemChip(icon: "moon.zzz.fill", text: "這期還沒刷"))
+        }
+        if let a = c.available {
+            let availableText: String = masked ? WealthPageText.dots : WealthPageText.wan(a)
+            chips.append(MoneyItemChip(icon: "gauge.with.dots.needle.33percent", text: "還能刷 \(availableText)"))
+        }
+        item.chips = Array(chips.prefix(2))
+        if masked { item.amount = WealthFormat.masked }
+
+        // 使用率條（沒填額度不畫）
+        if let u = c.usage, let limit = c.limit {
+            let limitText = masked ? WealthPageText.dots : wealthLimitText(limit)
+            item.progress = MoneyItemProgress(fraction: Swift.min(1, Swift.max(0, u)),
+                                              leading: WealthFormat.percent(u) + "・" + WealthPageText.tierName(u),
+                                              trailing: "額度 " + limitText)
+        }
+        item.cardFace = WealthCardFace(color: c.faceColor, last4: masked ? "••••" : (c.last4 ?? "••••"),
+                                       disabled: c.isDisabled)
+        item.badge = meta.badge
+        item.scriptWord = "Credit"
+        item.scriptCaps = wealthCardCaps(c.name)
+        // VoiceOver 念第二行整句（category＋detail）
+        let spokenMeta: String = meta.detail.map { meta.category + "，" + $0 } ?? meta.category
+        item.accessibilityText = wealthSpoken(title: c.fullName, amount: item.amount, unit: item.unit,
+                                              category: spokenMeta, chips: item.chips, progress: item.progress,
+                                              masked: masked)
+        return item
+    }
+
+    /// 卡的第二行（category＝短的那段、detail＝其他）、左上小膠囊、要不要 warn。
+    /// [v25.565] 第二行拆兩段（v3 留下：SE 寬度「自動扣最低＋長暱稱」整句塞在 fixedSize 的 category 被卡片右緣切掉）：
+    /// 「10/27 截止」＋「8 天・自己繳」、「11/10 扣款」＋「從薪轉扣最低・5 天」、「11/12 結帳」＋「11/27 從薪轉扣」、「已停用」。
+    /// 畫出來照樣是「10/27 截止・8 天・自己繳」（MoneyItemCard 在 detail 前面補「・」）；放不下只有 detail 變「…」
+    private static func wealthCardMeta(_ c: WealthFacts.Card, today: Date)
+        -> (category: String, detail: String?, badge: String?, warn: Bool) {
+        let md = WealthPageText.md
+        if c.isDisabled {
+            let since = c.closedDate.map { md($0) + " 停用" } ?? "已停用"
+            return (category: since, detail: nil, badge: nil, warn: false)
+        }
+        let mode = c.payMode == .askEachTime ? "每次問我" : "自己繳"
+        let verb = c.payMode == .autoMin ? "扣最低" : "扣"
+        if let s = c.dueStatement {
+            let due = md(s.due)
+            if s.status == .overdue {
+                return (category: due + " 截止", detail: "還沒確認", badge: due + " 截止", warn: true)
+            }
+            let n = WealthCal.days(from: today, to: s.due)
+            if c.payMode.isAuto {
+                let from = c.payerName.map { "從\($0)\(verb)" } ?? "還沒選從哪扣"
+                if n <= 0 { return (category: "今天扣款", detail: from, badge: "今天扣款", warn: true) }
+                return (category: due + " 扣款", detail: "\(from)・\(n) 天", badge: due + " 扣款", warn: n <= 3)
+            }
+            if n <= 0 { return (category: "今天截止", detail: mode, badge: "今天截止", warn: true) }
+            return (category: due + " 截止", detail: "\(n) 天・\(mode)", badge: due + " 截止", warn: n <= 3)
+        }
+        let close = md(c.nextClose) + " 結帳"
+        if c.payMode.isAuto {
+            let from = c.payerName.map { md(c.nextDue) + " 從\($0)\(verb)" } ?? "還沒選從哪扣"
+            return (category: close, detail: from, badge: close, warn: false)
+        }
+        return (category: close, detail: mode, badge: close, warn: false)
+    }
+
+    /// 「9 月帳單已扣 ✓」（自動扣）／「已繳 ✓」（自己繳）／「當作已繳」：最近一期 35 天內
+    private static func wealthPaidChip(_ c: WealthFacts.Card, today: Date) -> MoneyItemChip? {
+        guard let p = c.lastPaid else { return nil }
+        let d = WealthCal.days(from: p.paidOn ?? p.due, to: today)
+        guard d >= 0 && d <= 35 else { return nil }
+        if p.status == .assumedPaid {
+            return MoneyItemChip(icon: "questionmark.circle", text: p.label + "當作已繳")
+        }
+        let word = c.payMode.isAuto && !p.isExplicitPaid ? "已扣 ✓" : "已繳 ✓"
+        return MoneyItemChip(icon: "checkmark.circle.fill", text: p.label + word, tone: .good)
+    }
+
+    /// 「額度 30 萬」「額度 6.8 萬」；一萬以下寫到元
+    private static func wealthLimitText(_ limit: Double) -> String {
+        if limit >= 10_000 {
+            let w = (limit / 10_000 * 10).rounded() / 10
+            let s = w == w.rounded() ? String(format: "%.0f", w) : String(format: "%.1f", w)
+            return s + " 萬"
+        }
+        return WealthFormat.grouped(limit.rounded(), decimals: 0)
+    }
+
+    /// 卡面左下的大寫字：卡名的英數字（「CUBE」「GOGO」）；沒有英數字寫「CARD」
+    private static func wealthCardCaps(_ name: String) -> String {
+        let letters = name.uppercased().filter { ch in
+            ch.isASCII && (ch.isLetter || ch.isNumber)
+        }
+        return letters.isEmpty ? "CARD" : String(letters.prefix(10))
+    }
+
+    /// ⑤ 一個銀行帳戶（judge §3.8）。[v25.566] rateDate：匯率更新那天（AppQuoteClock.ratesUpdatedAt；
+    /// 外幣第二行「約 NT$102,400（10/19 匯率 32.0）」，nil＝不寫日期）；定存帳戶換金色卡、本金、進度條
+    static func wealthBank(_ a: WealthFacts.Account, facts: WealthFacts, rates: FinanceRates, masked: Bool,
+                           now: Date, rateDate: Date? = nil) -> MoneyItem {
+        let today = WealthCal.day(now)
+        let foreign = WealthPageText.foreignCode(a)
+        let deposit = a.showsAsDeposit
+        let theme: MoneyArtTheme = deposit ? .wealthDeposit : (foreign != nil ? .wealthForeign : .wealthLive)
+        let bank = WealthPageText.bankShort(a.bankName)
+        var line = wealthBankLine(a, foreign: foreign, bank: bank, rates: rates, masked: masked, today: today,
+                                  rateDate: rateDate)
+        if a.hidden {
+            let since: String = a.closedDate.map { "・\(WealthPageText.md($0))" } ?? ""
+            let multi: String? = (a.singleCode == nil && !masked) ? wealthMultiText(a) : nil
+            line = WealthBankLine(category: "收起來\(since)・\(bank)", detail: multi)
+        }
+        var item = MoneyItem(id: a.id, theme: theme, seed: seed(a.id), title: a.name,
+                             amount: masked ? WealthFormat.masked : wealthBankAmount(a), category: line.category)
+        if a.ntdTotal < -0.5 { item.amountTone = .bad }
+        item.detail = line.detail
+        item.chips = wealthBankChips(a, foreign: foreign, facts: facts, rates: rates, masked: masked, today: today)
+        // 收起來的帳戶（⑧）不加進度條（v5 的新東西只給沒收起來的）
+        if deposit, !a.hidden, let t = wealthFocusDeposit(a) {
+            item.progress = wealthDepositProgress(t, today: today)
+        }
+        item.badge = wealthBankBadge(a, today: today)
+        item.monogram = String(a.name.prefix(2))
+        item.scriptCaps = wealthPurposeCaps(a.purpose) ?? (deposit ? "TIME" : nil)
+        item.dimmed = a.hidden
+        // VoiceOver 念第二行整句（category＋detail）、膠囊、定存的進度
+        item.accessibilityText = wealthSpoken(title: a.name, amount: item.amount, unit: nil, category: line.spoken,
+                                              chips: item.chips, progress: item.progress, masked: masked,
+                                              progressSpoken: item.progress.map { wealthDepositProgressSpoken($0) })
+        return item
+    }
+
+    /// [v25.566] 銀行項目卡的第二行：category（短的那段，fixedSize）＋detail（放不下變「…」，MoneyItemCard 在前面補「・」）
+    private struct WealthBankLine {
+        let category: String
+        let detail: String?
+
+        /// VoiceOver 念的整句
+        var spoken: String { detail.map { category + "，" + $0 } ?? category }
+    }
+
+    /// [v25.566] 第二行：定存「定存」＋「1.7%・本息續存」；外幣「外幣・玉山」＋「約 NT$102,400（10/19 匯率 32.0）」；
+    /// 活存「活存・台新 ••7890」（好幾個幣別＋「NT$13.2萬＋US$3,200.00」）
+    private static func wealthBankLine(_ a: WealthFacts.Account, foreign: String?, bank: String, rates: FinanceRates,
+                                       masked: Bool, today: Date, rateDate: Date?) -> WealthBankLine {
+        if a.showsAsDeposit {
+            return wealthDepositLine(a, bank: bank, today: today)
+        }
+        let multi: String? = (a.singleCode == nil && !masked) ? wealthMultiText(a) : nil
+        if foreign != nil {
+            // 只有一個外幣：「約 NT$102,400（10/19 匯率 32.0）」；查不到匯率「沒有匯率」；遮住只留「外幣・玉山」
+            if let code = a.singleCode, !FinanceRates.isNTD(code), !masked {
+                let note = WealthFormat.fxNote(a.balance(code), rate: rates.known(code), rateDate: rateDate)
+                return WealthBankLine(category: "外幣・" + bank, detail: note)
+            }
+            return WealthBankLine(category: "外幣・" + bank, detail: multi)
+        }
+        let live = "活存・" + bank + (a.last4.map { " ••" + $0 } ?? "")
+        return WealthBankLine(category: live, detail: multi)
+    }
+
+    /// [v25.566] 定存帳戶的第二行：一筆「定存」＋「1.7%・本息續存」；好幾筆「定存 3 筆」＋「最近 3/15 到期」；
+    /// 舊的定存種類沒補資料（沒有任何一期）照 v3「定存」＋「台灣銀行」
+    private static func wealthDepositLine(_ a: WealthFacts.Account, bank: String, today: Date) -> WealthBankLine {
+        let list = a.timeDeposits
+        if list.isEmpty {
+            return WealthBankLine(category: "定存", detail: bank)
+        }
+        if list.count == 1, let t = list.first {
+            return WealthBankLine(category: "定存", detail: t.termLine)
+        }
+        let next: String? = a.nextMaturing?.maturityText(today).map { "最近 " + $0 + " 到期" }
+        return WealthBankLine(category: "定存 \(list.count) 筆", detail: next)
+    }
+
+    /// [v25.566] 金額：定存帳戶（新的）一筆寫本金「NT$500,000」、好幾筆「約 NT$100萬」；舊的定存種類、其他照存摺上。
+    /// [v25.566 裁定] 收起來的（⑧）照存摺上：帳戶頁看板、換帳戶列收起來的也寫存摺上，同一個帳戶不要兩個數
+    private static func wealthBankAmount(_ a: WealthFacts.Account) -> String {
+        guard a.showsAsDeposit, !a.hidden, !a.isFixedDeposit, !a.timeDeposits.isEmpty else { return a.balanceText }
+        if a.timeDeposits.count == 1, let t = a.timeDeposits.first {
+            return WealthFormat.money(t.principal, code: t.code)
+        }
+        return "約 " + a.depositNTD.ntdWanString
+    }
+
+    /// [v25.566] 定存帳戶看哪一期：最近到期、還存著的那一期；沒有（還沒開始、到期待決定）第一期
+    private static func wealthFocusDeposit(_ a: WealthFacts.Account) -> WealthFacts.TimeDeposit? {
+        a.nextMaturing ?? a.timeDeposits.first
+    }
+
+    /// [v25.566] 進度條（judge §3.8）：左「3/15 起存」右「3/15 到期・還有 147 天」；
+    /// 到期再決定已經到期：右「到期了・等你決定」、滿的；還沒開始：右「3/15 到期」、0；沒有到期日 nil
+    private static func wealthDepositProgress(_ t: WealthFacts.TimeDeposit, today: Date) -> MoneyItemProgress? {
+        guard let due = t.maturityText(today) else { return nil }
+        let leading = WealthPageText.md(t.start) + " 起存"
+        switch t.status {
+        case .waiting:
+            return MoneyItemProgress(fraction: 1, leading: leading, trailing: "到期了・等你決定")
+        case .notStarted:
+            return MoneyItemProgress(fraction: 0, leading: leading, trailing: due + " 到期")
+        case .active, .ended:
+            let left = t.daysLeft(today) ?? 0
+            let tail: String = left > 0 ? "・還有 \(left) 天" : "・今天到期"
+            return MoneyItemProgress(fraction: t.progress(today) ?? 0, leading: leading, trailing: due + " 到期" + tail)
+        }
+    }
+
+    /// [v25.566] VoiceOver 念進度：「定存走了 59.7%，3/15 起存，3/15 到期，還有 147 天」
+    private static func wealthDepositProgressSpoken(_ p: MoneyItemProgress) -> String {
+        var s = "定存走了 " + WealthFormat.percent(p.fraction) + "，" + p.leading
+        if let t = p.trailing {
+            s += "，" + t.replacingOccurrences(of: "・", with: "，")
+        }
+        return s
+    }
+
+    /// 「NT$13.2萬＋美金 3,200.00」（有數字的幣別，台幣在前）
+    private static func wealthMultiText(_ a: WealthFacts.Account) -> String {
+        var parts: [String] = []
+        for code in a.currencies {
+            let v = a.balance(code)
+            guard Swift.abs(v) > 0.004 else { continue }
+            parts.append(FinanceRates.isNTD(code) ? v.ntdWanString : WealthFormat.money(v, code: code))
+        }
+        return parts.joined(separator: "＋")
+    }
+
+    /// 膠囊：負的「可能漏記了」、外幣查不到匯率「沒有匯率」、接下來兩件（出去的在前；一列放不下少放）。
+    /// [v25.566] 外幣「匯率 32.0」拿掉（第二行已經寫「10/19 匯率 32.0」）；定存帳戶「預估利息 8,500」；
+    /// 活存帳戶裡有定存多一顆「定存 50萬・3/15 到期」（放在接下來那兩顆前面）
+    private static func wealthBankChips(_ a: WealthFacts.Account, foreign: String?, facts: WealthFacts,
+                                        rates: FinanceRates, masked: Bool, today: Date) -> [MoneyItemChip] {
+        var chips: [MoneyItemChip] = []
+        if a.ntdTotal < -0.5 {
+            chips.append(MoneyItemChip(icon: "exclamationmark.triangle.fill", text: "可能漏記了", tone: .bad))
+        }
+        // 定存那幾顆只給沒收起來的帳戶（⑧ 收起來的照 v4）
+        if a.showsAsDeposit {
+            if !a.hidden {
+                chips += wealthDepositChips(a, masked: masked, today: today)
+            }
+        } else {
+            if let code = foreign, !FinanceRates.isNTD(code), rates.known(code) == nil {
+                chips.append(MoneyItemChip(icon: "exclamationmark.circle", text: "沒有匯率", tone: .warn))
+            }
+            if !a.hidden, let d = wealthLiveDepositChip(a, masked: masked, today: today) {
+                chips.append(d)
+            }
+        }
+        // 接下來兩件；定存帳戶的到期、利息已經在進度條和上面那顆，不再列一次
+        let rows: [WealthLedgerRow] = a.showsAsDeposit ? a.next30.filter { $0.timeDepositId == nil } : a.next30
+        // [v25.575] 銀行自動轉的定期轉帳轉出不搶膠囊（樣稿①-2 註 2：不然每週都被零用錢佔走；自己轉的照放，同銀行頁膠囊）；
+        // 同一條定期轉帳只放最近一期（每週的轉進來不會兩顆都是它）
+        let outs = wealthFirstPerRule(rows.filter { $0.isOutflow && !wealthIsAutoTransfer($0) })
+        let ins = wealthFirstPerRule(rows.filter { !$0.isOutflow })
+        for row in Array((outs + ins).prefix(2)) {
+            chips.append(MoneyItemChip(icon: "calendar", text: wealthUpcomingChip(row, facts: facts, masked: masked)))
+        }
+        return chips
+    }
+
+    /// [v25.575] 銀行自動轉的定期轉帳那一列（自己轉的不算）
+    private static func wealthIsAutoTransfer(_ row: WealthLedgerRow) -> Bool {
+        row.transferRuleId != nil && !row.transferManual
+    }
+
+    /// [v25.575] 同一條定期轉帳只留最早那一期（其他列照留、照原本先後）
+    private static func wealthFirstPerRule(_ rows: [WealthLedgerRow]) -> [WealthLedgerRow] {
+        var seen = Set<UUID>()
+        var out: [WealthLedgerRow] = []
+        for row in rows {
+            if let rid = row.transferRuleId {
+                if seen.contains(rid) { continue }
+                seen.insert(rid)
+            }
+            out.append(row)
+        }
+        return out
+    }
+
+    /// [v25.566] 定存帳戶的膠囊：一筆「預估利息 8,500」（沒填利率沒有；遮住「預估利息 ••••」）；
+    /// 好幾筆最近兩期「3/15 到期 50萬」「10/25 起存 30萬」「3/15 到期了 50萬」（到期待決定 warn）
+    private static func wealthDepositChips(_ a: WealthFacts.Account, masked: Bool, today: Date) -> [MoneyItemChip] {
+        let list = a.timeDeposits
+        if list.count == 1, let t = list.first {
+            guard let text = t.interestText(masked: masked) else { return [] }
+            return [MoneyItemChip(icon: "percent", text: text)]
+        }
+        return list.prefix(2).map { wealthDepositTermChip($0, masked: masked, today: today) }
+    }
+
+    /// [v25.566] 好幾期定存的一顆：「3/15 到期 50萬」（外幣「US$3,000.00」）
+    private static func wealthDepositTermChip(_ t: WealthFacts.TimeDeposit, masked: Bool,
+                                              today: Date) -> MoneyItemChip {
+        let when: String
+        switch t.status {
+        case .notStarted:
+            when = WealthPageText.md(t.start) + " 起存"
+        case .waiting:
+            when = (t.maturityText(today) ?? "") + " 到期了"
+        case .active, .ended:
+            when = t.maturityText(today).map { $0 + " 到期" } ?? "沒填到期日"
+        }
+        let amount: String = masked ? WealthPageText.dots : wealthDepositAmountText(t.principal, code: t.code)
+        let tone: MoneyTone = t.status == .waiting ? .warn : .neutral
+        return MoneyItemChip(icon: "lock.fill", text: when + " " + amount, tone: tone)
+    }
+
+    /// [v25.566] 膠囊裡的定存金額：台幣「50萬」「9,800」；外幣「US$3,000.00」
+    private static func wealthDepositAmountText(_ v: Double, code: String) -> String {
+        FinanceRates.isNTD(code) ? WealthPageText.wan(v) : WealthFormat.plain(v, code: code)
+    }
+
+    /// [v25.566] 活存帳戶裡有定存：「定存 50萬・3/15 到期」（遮住「定存 ••••・3/15 到期」）；
+    /// 沒有存著的：到期待決定「定存・3/15 到期了」（warn）、還沒開始「定存・10/25 起存」
+    private static func wealthLiveDepositChip(_ a: WealthFacts.Account, masked: Bool, today: Date) -> MoneyItemChip? {
+        guard !a.timeDeposits.isEmpty else { return nil }
+        var text = "定存"
+        if a.depositNTD > 0.5 {
+            text += " " + (masked ? WealthPageText.dots : WealthPageText.wan(a.depositNTD))
+        }
+        let waiting = a.timeDeposits.first(where: { $0.status == .waiting })
+        if let due = a.nextMaturing?.maturityText(today) {
+            text += "・" + due + " 到期"
+        } else if let w = waiting, let due = w.maturityText(today) {
+            text += "・" + due + " 到期了"
+        } else if let s = a.timeDeposits.first(where: { $0.status == .notStarted }) {
+            text += "・" + WealthPageText.md(s.start) + " 起存"
+        }
+        return MoneyItemChip(icon: "lock.fill", text: text, tone: waiting == nil ? .neutral : .warn)
+    }
+
+    /// 「10/21 交割 52,340」「11/10 扣 @GoGo 約 2.3萬」（自動扣的卡費）「10/27 CUBE 18,600」「11/5 月薪 +80,000」
+    private static func wealthUpcomingChip(_ row: WealthLedgerRow, facts: WealthFacts, masked: Bool) -> String {
+        let head = WealthPageText.md(row.date) + " " + wealthUpcomingChipName(row, facts: facts)
+        if masked { return head + " " + WealthPageText.dots }
+        let sign = row.isOutflow ? "" : "+"
+        if row.isEstimate, FinanceRates.isNTD(row.code) {
+            return "\(head) 約 \(WealthPageText.wan(row.amount))"
+        }
+        return "\(head) \(sign)\(WealthFormat.plain(row.amount, code: row.code))"
+    }
+
+    /// 膠囊裡的短名：自動扣的卡費寫「扣 @GoGo」（卡名照寫，judge §3.8 那張表）；其他照 shortName（交割、CUBE、月薪）
+    private static func wealthUpcomingChipName(_ row: WealthLedgerRow, facts: WealthFacts) -> String {
+        if row.kind == .cardBill, let c = facts.card(row.cardId), c.payMode.isAuto {
+            return "扣 \(c.name)"
+        }
+        return WealthPageText.shortName(row, facts: facts)
+    }
+
+    /// 卡面左上：「NT$」「US$」「美金」前 3 字；好幾個幣別「多幣別」；
+    /// [v25.566] 定存帳戶「3/15 到期」（最近到期那一期；沒有到期日「定存」）
+    private static func wealthBankBadge(_ a: WealthFacts.Account, today: Date) -> String {
+        if a.showsAsDeposit {
+            if a.hidden { return "定存" }
+            return wealthFocusDeposit(a)?.maturityText(today).map { $0 + " 到期" } ?? "定存"
+        }
+        guard let code = a.singleCode else { return "多幣別" }
+        if FinanceRates.isNTD(code) { return "NT$" }
+        if FinanceRates.isUSD(code) { return "US$" }
+        return String(code.prefix(3))
+    }
+
+    /// 卡面左下的小字照用途：薪轉 PAYROLL、扣款 AUTOPAY、存錢 SAVINGS、外幣 FOREIGN、零用 POCKET；沒填用主題的
+    private static func wealthPurposeCaps(_ purpose: String?) -> String? {
+        guard let p = purpose?.trimmingCharacters(in: .whitespaces), !p.isEmpty else { return nil }
+        if p.contains("薪") { return "PAYROLL" }
+        if p.contains("扣") { return "AUTOPAY" }
+        if p.contains("存") { return "SAVINGS" }
+        if p.contains("外") { return "FOREIGN" }
+        if p.contains("零") { return "POCKET" }
+        return nil
+    }
+
+    /// ⑥ 一個證券戶（券商名片；judge §3.9：市值、持股讀股票頁，不算進存款合計）
+    static func wealthBroker(_ b: WealthFacts.Broker, facts: WealthFacts, masked: Bool) -> MoneyItem {
+        let held = b.holdingIds.count
+        var item = MoneyItem(id: b.id, theme: .wealthBroker, seed: seed(b.id), title: b.name, amount: "—",
+                             category: "證券戶")
+        item.monogram = String(b.name.prefix(2))
+        let hidden = facts.account(b.id)?.hidden == true
+        item.dimmed = hidden
+        // [v25.567] 交割膠囊讀 Broker.dues（沒有照 v3 的 nextSettlementDate）；舊交割那顆放最後（一列放不下先少放它）
+        let settle: MoneyItemChip? = wealthBrokerSettleChip(b, masked: masked)
+        let legacy: MoneyItemChip? = b.legacyCount > 0
+            ? MoneyItemChip(icon: "tray.full", text: "舊交割 \(b.legacyCount) 筆")
+            : nil
+        if held == 0 {
+            item.category = "證券戶・還沒有持股"
+            // 全部賣掉、入帳還沒到／還有舊交割：那兩顆放前面（說明那顆一列放不下就少放）
+            var chips: [MoneyItemChip] = []
+            if let s = settle { chips.append(s) }
+            if let l = legacy { chips.append(l) }
+            chips.append(MoneyItemChip(icon: "info.circle", text: "股票表單選這個證券戶，持股就會出現在這裡"))
+            item.chips = chips
+        } else {
+            item.amount = masked ? WealthFormat.masked : b.marketValue.ntdWanString
+            item.unit = "市值"
+            item.badge = "\(held) 檔"
+            item.category = "證券戶・" + wealthSettlementText(b, facts: facts)
+            var chips: [MoneyItemChip] = []
+            if let s = settle { chips.append(s) }
+            if let r = b.unrealizedRatio {
+                let sign = r >= 0 ? "+" : "-"
+                chips.append(MoneyItemChip(icon: r >= 0 ? "arrow.up.right" : "arrow.down.right",
+                                           text: "未實現 " + sign + String(format: "%.1f%%", Swift.abs(r) * 100),
+                                           tone: MoneyTone.change(r)))
+            }
+            if let l = legacy { chips.append(l) }
+            item.chips = chips
+        }
+        item.accessibilityText = wealthSpoken(title: b.name, amount: item.amount, unit: item.unit,
+                                              category: item.category, chips: item.chips, progress: nil, masked: masked)
+        return item
+    }
+
+    /// [v25.567] 交割膠囊：讀 Broker.dues 第一筆（接下來 30 天、每天買賣相抵）——「10/21 交割 52,340」「10/22 入帳 30,000」；
+    /// 交割銀行那天扣之前不夠：「10/21 交割 差 23,940」（warn）。遮住：金額「••••」（日期照常）。
+    /// 沒有 dues（舊資料、超過 30 天）照 v3 讀 nextSettlementDate／nextSettlementAmount；都沒有 nil
+    private static func wealthBrokerSettleChip(_ b: WealthFacts.Broker, masked: Bool) -> MoneyItemChip? {
+        if let due = b.dues.first {
+            let day = WealthPageText.md(due.day)
+            if due.isShort {
+                let gap: String = masked ? WealthPageText.dots : WealthFormat.plain(due.short, code: due.code)
+                return MoneyItemChip(icon: "exclamationmark.circle", text: day + " 交割 差 " + gap, tone: .warn)
+            }
+            let word: String = due.isOutflow ? " 交割 " : " 入帳 "
+            let amount: String = masked ? WealthPageText.dots : WealthFormat.plain(due.amount, code: due.code)
+            return MoneyItemChip(icon: "calendar", text: day + word + amount)
+        }
+        guard let d = b.nextSettlementDate, Swift.abs(b.nextSettlementAmount) > 0.5 else { return nil }
+        let word: String = b.nextSettlementAmount > 0 ? " 交割 " : " 入帳 "
+        let amount: String = masked ? WealthPageText.dots
+                                    : WealthFormat.grouped(Swift.abs(b.nextSettlementAmount).rounded(), decimals: 0)
+        return MoneyItemChip(icon: "calendar", text: WealthPageText.md(d) + word + amount)
+    }
+
+    /// 「交割 薪轉（台新）」；沒有交割銀行「還沒選交割銀行」
+    private static func wealthSettlementText(_ b: WealthFacts.Broker, facts: WealthFacts) -> String {
+        guard b.settlementBankId != nil || b.settlementName != nil else { return "還沒選交割銀行" }
+        if let acc = facts.account(b.settlementBankId) {
+            if acc.nickname != nil { return "交割 \(acc.name)（\(WealthPageText.bankShort(acc.bankName))）" }
+            return "交割 " + acc.name
+        }
+        return "交割 " + (b.settlementName ?? "")
+    }
+
+    /// VoiceOver 一整句（遮住時金額念「金額已遮住」，不念一串點）。
+    /// [v25.566] progressSpoken：進度那段換一句（定存「定存走了 59.7%，…」）；nil＝信用卡的「額度用了 …」
+    private static func wealthSpoken(title: String, amount: String, unit: String?, category: String,
+                                     chips: [MoneyItemChip], progress: MoneyItemProgress?, masked: Bool,
+                                     progressSpoken: String? = nil) -> String {
+        var parts: [String] = [title]
+        if masked {
+            parts.append("金額已遮住")
+        } else if let u = unit {
+            parts.append("\(amount) \(u)")
+        } else {
+            parts.append(amount)
+        }
+        parts.append(category)
+        for c in chips {
+            parts.append(c.text.replacingOccurrences(of: WealthPageText.dots, with: "金額已遮住"))
+        }
+        if let p = progress {
+            parts.append(progressSpoken ?? ("額度用了 " + p.leading))
+        }
+        return parts.joined(separator: "，")
+    }
+}
+
+// MARK: - ④ 信用卡
+
+/// ④ 信用卡：「信用卡 2」右「還沒扣 NT$4.8萬」＋一張卡一張項目卡
+struct WealthPageCardsSection: View {
+    let header: WealthPageGroupHeader
+    let rows: [WealthPageCardRow]
+    let actions: WealthPageActions
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            MoneyGroupHeader(theme: .wealthCardTrends, title: "信用卡", count: header.count, total: header.total,
+                             unit: "張")
+            VStack(spacing: 10) {
+                ForEach(rows) { r in
+                    card(r)
+                }
+            }
+        }
+    }
+
+    /// 點：信用卡頁；長按：標成已繳（有要繳才有）、記一筆、編輯、停用
+    private func card(_ r: WealthPageCardRow) -> some View {
+        Button {
+            actions.open(.card(r.id, nil))
+        } label: {
+            MoneyItemCard(item: r.item)
+        }
+        .buttonStyle(MoneyPressStyle())
+        .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .accessibilityHint("點兩下打開這張卡；長按有更多動作")
+        .contextMenu {
+            menu(r)
+        }
+        .accessibilityActions {
+            menu(r)
+        }
+    }
+
+    @ViewBuilder
+    private func menu(_ r: WealthPageCardRow) -> some View {
+        if r.canMarkPaid {
+            Button {
+                actions.open(.paid(r.id))
+            } label: {
+                Label("標成已繳", systemImage: "checkmark.circle")
+            }
+        }
+        Button {
+            actions.open(.addExpense(r.id))
+        } label: {
+            Label("記一筆", systemImage: "square.and.pencil")
+        }
+        Button {
+            actions.edit(r.id, .card)
+        } label: {
+            Label("編輯", systemImage: "pencil")
+        }
+        Button {
+            actions.confirm(.disableCard(r.id, r.name, r.recurringCount))
+        } label: {
+            Label("停用", systemImage: "nosign")
+        }
+    }
+}
+
+// MARK: - ⑤ 銀行帳戶
+
+/// ⑤ 銀行帳戶：「銀行帳戶 4」右「存摺合計 NT$81.7萬」＋一個帳戶一張項目卡；沒有銀行帳戶換一張提示卡
+struct WealthPageBanksSection: View {
+    let header: WealthPageGroupHeader?
+    let rows: [WealthPageBankRow]
+    /// 沒有銀行帳戶（只有卡）：換一張提示卡
+    let showPrompt: Bool
+    let actions: WealthPageActions
+    /// [v25.575] 銀行項目卡最後一張「定期轉帳・4 條」卡（沒有規則＝nil；放在這區裡，財富頁 VStack 不多一個子項）
+    var transfers: WealthPageTransfers? = nil
+    /// [v25.577] 沒有規則時同一個位置換一行邀請（WealthPageData.transferInvite）
+    var transferInvite: Bool = false
+
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        if let h = header, !rows.isEmpty {
+            VStack(alignment: .leading, spacing: 10) {
+                MoneyGroupHeader(theme: .wealthLive, title: "銀行帳戶", count: h.count, total: h.total, unit: "個")
+                VStack(spacing: 10) {
+                    ForEach(rows) { r in
+                        card(r)
+                    }
+                    transfersCard
+                }
+            }
+        } else if showPrompt {
+            VStack(alignment: .leading, spacing: 10) {
+                FinanceCardHeader(title: "銀行帳戶")
+                prompt
+            }
+        }
+    }
+
+    /// [v25.575] 「定期轉帳」卡（有規則才有）；[v25.577] 沒有規則：同一個位置一行邀請（沒按過〔不用了〕、銀行兩個以上）
+    @ViewBuilder
+    private var transfersCard: some View {
+        if let t = transfers {
+            WealthPageTransfersCard(data: t, actions: actions)
+        } else if transferInvite {
+            WealthPageTransferInviteCard(actions: actions)
+        }
+    }
+
+    /// 「記下你的薪轉帳戶，記帳扣款、月薪入帳就接起來 ›」（要訂閱：財富頁擋）
+    private var prompt: some View {
+        let pal = TripBoardPalette(scheme)
+        return Button {
+            actions.open(.editor(.bank, nil))
+        } label: {
+            HStack(spacing: 12) {
+                TripBoardIconBadge(icon: "building.columns.fill", colors: pal.badge(.blue), diameter: 30, dark: pal.dark)
+                Text("記下你的薪轉帳戶，記帳扣款、月薪入帳就接起來 ›")
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(pal.hint)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .padding(14)
+            .modifier(FinanceCardChrome())
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(MoneyPressStyle())
+    }
+
+    /// 點：銀行頁；長按：記一筆（存款／提款／利息／手續費）、對存摺、轉帳、編輯、收起來
+    private func card(_ r: WealthPageBankRow) -> some View {
+        Button {
+            actions.open(.card(r.id, nil))
+        } label: {
+            MoneyItemCard(item: r.item)
+        }
+        .buttonStyle(MoneyPressStyle())
+        .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .accessibilityHint("點兩下打開這個帳戶；長按有更多動作")
+        .contextMenu {
+            menu(r)
+        }
+        .accessibilityActions {
+            spokenActions(r)
+        }
+    }
+
+    @ViewBuilder
+    private func menu(_ r: WealthPageBankRow) -> some View {
+        Menu {
+            ForEach(WealthRecordKind.allCases) { k in
+                Button(k.title) {
+                    actions.open(.record(r.id, k))
+                }
+            }
+        } label: {
+            Label("記一筆", systemImage: "square.and.pencil")
+        }
+        anchorMenu(r)
+        Button {
+            actions.open(.transfer(r.id))
+        } label: {
+            Label("轉帳", systemImage: "arrow.left.arrow.right")
+        }
+        Button {
+            actions.edit(r.id, .bank)
+        } label: {
+            Label("編輯", systemImage: "pencil")
+        }
+        Button {
+            actions.confirm(.hideAccount(r.id, r.name, r.hideNote))
+        } label: {
+            Label("收起來", systemImage: "archivebox")
+        }
+    }
+
+    /// 對存摺：一個幣別直接開；好幾個幣別選一個
+    @ViewBuilder
+    private func anchorMenu(_ r: WealthPageBankRow) -> some View {
+        if r.codes.count > 1 {
+            Menu {
+                ForEach(r.codes, id: \.self) { code in
+                    Button(code) {
+                        actions.open(.anchor(r.id, code))
+                    }
+                }
+            } label: {
+                Label("對存摺", systemImage: "checkmark.seal")
+            }
+        } else {
+            Button {
+                actions.open(.anchor(r.id, r.codes.first ?? "NT$"))
+            } label: {
+                Label("對存摺", systemImage: "checkmark.seal")
+            }
+        }
+    }
+
+    /// VoiceOver 的動作（子選單攤平）
+    @ViewBuilder
+    private func spokenActions(_ r: WealthPageBankRow) -> some View {
+        ForEach(WealthRecordKind.allCases) { k in
+            Button("記一筆" + k.title) {
+                actions.open(.record(r.id, k))
+            }
+        }
+        ForEach(r.codes, id: \.self) { code in
+            Button(r.codes.count > 1 ? "對存摺 " + code : "對存摺") {
+                actions.open(.anchor(r.id, code))
+            }
+        }
+        Button("轉帳") {
+            actions.open(.transfer(r.id))
+        }
+        Button("編輯") {
+            actions.edit(r.id, .bank)
+        }
+        Button("收起來") {
+            actions.confirm(.hideAccount(r.id, r.name, r.hideNote))
+        }
+    }
+}
+
+// MARK: - ⑤ 定期轉帳卡（[v25.575] 定期轉帳 v1a；judge §4.3、樣稿①-2）
+
+/// ⑤ 銀行帳戶最後一張「定期轉帳・4 條」白卡：標頭（圖示、標題、〔＋〕）、一條一列、「一個月大約轉出 …」＋灰字、
+/// 「已結束 1 條 ›」（點了在卡裡展開）。點一列＝規則頁（不擋訂閱）；〔＋〕＝新增（要訂閱：財富頁的 open 擋）。
+/// 字全部在 WealthPageTransfers 組好，這裡只畫
+struct WealthPageTransfersCard: View {
+    let data: WealthPageTransfers
+    let actions: WealthPageActions
+
+    @Environment(\.colorScheme) private var scheme
+    /// 已結束的那幾列展開了沒
+    @State private var showEnded = false
+
+    // @State 是 private：合成的 memberwise init 會變 private，WealthPageBanksSection 叫不到，自己寫一個
+    init(data: WealthPageTransfers, actions: WealthPageActions) {
+        self.data = data
+        self.actions = actions
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            Divider().padding(.leading, 14)
+            rowsBlock
+            footer
+            endedBlock
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .modifier(FinanceCardChrome())
+    }
+
+    private var pal: TripBoardPalette { TripBoardPalette(scheme) }
+
+    /// 「⟳ 定期轉帳・4 條　　〔＋〕」
+    private var header: some View {
+        HStack(alignment: .center, spacing: 10) {
+            TripBoardIconBadge(icon: "arrow.triangle.2.circlepath", colors: pal.badge(.blue), diameter: 30,
+                               dark: pal.dark)
+            Text(data.title)
+                .font(.headline)
+                .foregroundStyle(Color.primary)
+                .lineLimit(1)
+                .accessibilityAddTraits(.isHeader)
+            Spacer(minLength: 8)
+            addButton
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    /// 〔＋〕：沒收起來的銀行帳戶兩個以上才有（要訂閱：財富頁的 open 擋）
+    @ViewBuilder
+    private var addButton: some View {
+        if data.canAdd {
+            FinanceAddButton(label: "新增定期轉帳", action: { actions.open(.transferForm(nil)) })
+        }
+    }
+
+    /// 還在跑的一條一列；一條都沒有：一行灰字
+    @ViewBuilder
+    private var rowsBlock: some View {
+        if let e = data.emptyText {
+            Text(e)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 11)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+        ForEach(Array(data.rows.enumerated()), id: \.element.id) { i, r in
+            if i > 0 {
+                Divider().padding(.leading, 56)
+            }
+            rowButton(r)
+        }
+    }
+
+    /// 點一列＝那條的規則頁（不擋訂閱）
+    private func rowButton(_ r: WealthPageTransfers.Row) -> some View {
+        Button {
+            actions.open(.transferRule(r.id))
+        } label: {
+            WealthPageTransferLine(row: r, pal: pal)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(r.accessibilityText)
+        .accessibilityHint("點兩下打開這條定期轉帳")
+    }
+
+    /// 「一個月大約轉出 63,000（每週的照一年 52 次算）」＋灰字「轉給家人、房東的記在記帳的固定支出（算花掉）。」
+    private var footer: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Divider().padding(.leading, 14)
+            WealthPageTransfersFooter(monthly: data.monthly, monthlySpoken: data.monthlySpoken, note: data.note,
+                                      pal: pal)
+        }
+    }
+
+    /// 「已結束 1 條 ›」（有才出現）：點了在卡裡展開那幾列（淡一點）
+    @ViewBuilder
+    private var endedBlock: some View {
+        if let t = data.endedTitle {
+            Divider().padding(.leading, 14)
+            Button {
+                withAnimation(.easeInOut(duration: 0.25)) { showEnded.toggle() }
+            } label: {
+                endedHeader(t)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel(t)
+            .accessibilityValue(showEnded ? "已展開" : "已收起")
+            .accessibilityHint(showEnded ? "點兩下收起" : "點兩下展開")
+            if showEnded {
+                ForEach(data.ended) { r in
+                    Divider().padding(.leading, 56)
+                    rowButton(r)
+                }
+            }
+        }
+    }
+
+    private func endedHeader(_ title: String) -> some View {
+        HStack(spacing: 6) {
+            Text(title)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(pal.hint)
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            Image(systemName: showEnded ? "chevron.down" : "chevron.right")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .contentShape(Rectangle())
+    }
+}
+
+// MARK: - ⑤ 定期轉帳邀請（[v25.577] 定期轉帳 v1b；judge §4.1、樣稿③-A5）
+
+/// ⑤ 銀行帳戶最下面一行邀請（一條定期轉帳都沒有、沒按過〔不用了〕、沒收起來的銀行兩個以上；WealthPageData.transferInvite）：
+/// ⇄ 「在銀行設了預約轉帳？抄一份進來，接下來 30 天就算得準。」＋〔＋ 定期轉帳〕（要訂閱：財富頁的 open 擋）〔不用了〕
+///（不擋；財富頁下一個 runloop 寫 store，inviteDismissed 同步：另一台也不再出現）。這裡不寫 store
+struct WealthPageTransferInviteCard: View {
+    let actions: WealthPageActions
+
+    @Environment(\.colorScheme) private var scheme
+
+    init(actions: WealthPageActions) {
+        self.actions = actions
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            icon
+            VStack(alignment: .leading, spacing: 9) {
+                message
+                buttons
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .modifier(FinanceCardChrome())
+    }
+
+    private var pal: TripBoardPalette { TripBoardPalette(scheme) }
+
+    /// 藍圓 ⟳（同定期轉帳卡的標頭）
+    private var icon: some View {
+        TripBoardIconBadge(icon: "arrow.triangle.2.circlepath", colors: pal.badge(.blue), diameter: 28,
+                           dark: pal.dark)
+            .accessibilityHidden(true)
+    }
+
+    private var message: some View {
+        Text(WealthPageText.transferInvite)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(Color.primary)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    /// 兩顆並排；字放大放不下一列就上下疊
+    private var buttons: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                addButton
+                laterButton
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                addButton
+                laterButton
+            }
+        }
+    }
+
+    /// 〔＋ 定期轉帳〕綠底白字（要訂閱：財富頁的 open 擋）
+    private var addButton: some View {
+        Button {
+            actions.open(.transferForm(nil))
+        } label: {
+            WealthPageInvitePill(icon: "plus", text: "定期轉帳", fill: Color(tb: 0x1F9D57), ink: Color.white)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("新增定期轉帳")
+    }
+
+    /// 〔不用了〕灰底（不擋訂閱）
+    private var laterButton: some View {
+        Button {
+            actions.dismissTransferInvite()
+        } label: {
+            WealthPageInvitePill(icon: nil, text: "不用了", fill: Color(.tertiarySystemFill), ink: Color.secondary)
+        }
+        .buttonStyle(.plain)
+        .accessibilityHint("點兩下不再顯示這一行")
+    }
+}
+
+/// 邀請那兩顆膠囊的樣子（圖示可有可無）
+private struct WealthPageInvitePill: View {
+    let icon: String?
+    let text: String
+    let fill: Color
+    let ink: Color
+
+    var body: some View {
+        HStack(spacing: 4) {
+            if let i = icon {
+                Image(systemName: i)
+                    .font(.caption.weight(.heavy))
+            }
+            Text(text)
+                .font(.footnote.weight(.bold))
+                .lineLimit(1)
+        }
+        .foregroundStyle(ink)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(fill, in: Capsule())
+        .fixedSize()
+        .contentShape(Capsule())
+    }
+}
+
+/// 定期轉帳卡的卡底：「一個月大約轉出 63,000（…）」（金額粗體）＋灰字
+private struct WealthPageTransfersFooter: View {
+    let monthly: FinanceLine?
+    let monthlySpoken: String?
+    let note: String
+    let pal: TripBoardPalette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            monthlyLine
+            Text(note)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    @ViewBuilder
+    private var monthlyLine: some View {
+        if let m = monthly {
+            FinanceLineText.text(m, pal: pal)
+                .font(.footnote.weight(.semibold))
+                .foregroundStyle(Color.primary)
+                .fixedSize(horizontal: false, vertical: true)
+                .accessibilityLabel(monthlySpoken ?? m.plain)
+        }
+    }
+}
+
+/// 定期轉帳卡的一列（樣稿①-2）：⇄ 圖示；「薪轉 → 零用錢」右「3,000」；「每週五・銀行自動轉」右「下次 10/30（五）」；
+/// 第三行小標（有才出現：注意色或灰）。已結束的整列淡一點
+private struct WealthPageTransferLine: View {
+    let row: WealthPageTransfers.Row
+    let pal: TripBoardPalette
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 12) {
+            icon
+            VStack(alignment: .leading, spacing: 3) {
+                firstLine
+                secondLine
+                noteTag
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .opacity(row.ended ? 0.6 : 1)
+        .contentShape(Rectangle())
+    }
+
+    /// 淡藍圓底＋藍色 ⇄
+    private var icon: some View {
+        Image(systemName: "arrow.left.arrow.right")
+            .font(.system(size: 13, weight: .bold))
+            .foregroundStyle(iconColor)
+            .frame(width: 30, height: 30)
+            .background(iconColor.opacity(pal.dark ? 0.22 : 0.12), in: Circle())
+            .accessibilityHidden(true)
+    }
+
+    private var iconColor: Color { pal.dark ? Color(tb: 0x6FA8FF) : Color(tb: 0x2F7FE8) }
+
+    private var firstLine: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(row.title)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(Color.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+            Spacer(minLength: 6)
+            Text(row.amount)
+                .font(.system(.subheadline, design: .rounded).weight(.heavy))
+                .monospacedDigit()
+                .foregroundStyle(Color.primary)
+                .lineLimit(1)
+                .fixedSize()
+        }
+    }
+
+    private var secondLine: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            Text(row.detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+            Spacer(minLength: 6)
+            Text(row.next)
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .fixedSize()
+        }
+    }
+
+    @ViewBuilder
+    private var noteTag: some View {
+        if let n = row.note {
+            FinanceMiniTag(text: n, color: noteColor)
+                .padding(.top, 2)
+        }
+    }
+
+    private var noteColor: Color {
+        row.noteWarn ? MoneyTone.warn.color(pal) : MoneyTone.neutral.color(pal)
+    }
+}
+
+// MARK: - ⑥ 證券戶
+
+/// ⑥ 證券戶（券商名片）：「證券戶 1」右「持股市值 NT$86.4萬」＋灰字「股票的數字在理財」
+struct WealthPageBrokersSection: View {
+    let header: WealthPageGroupHeader
+    let rows: [WealthPageBrokerRow]
+    let actions: WealthPageActions
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                MoneyGroupHeader(theme: .wealthBroker, title: "證券戶", count: header.count, total: header.total,
+                                 unit: "個")
+                Text("股票的數字在理財")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .padding(.leading, 39)
+            }
+            VStack(spacing: 10) {
+                ForEach(rows) { r in
+                    card(r)
+                }
+            }
+        }
+    }
+
+    /// 點：證券戶頁；長按：編輯（沒有記一筆、轉帳、對存摺：v2 留下的④）
+    private func card(_ r: WealthPageBrokerRow) -> some View {
+        Button {
+            actions.open(.card(r.id, nil))
+        } label: {
+            MoneyItemCard(item: r.item)
+        }
+        .buttonStyle(MoneyPressStyle())
+        .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 18, style: .continuous))
+        .accessibilityHint("點兩下打開這個證券戶")
+        .contextMenu {
+            Button {
+                actions.edit(r.id, .broker)
+            } label: {
+                Label("編輯", systemImage: "pencil")
+            }
+        }
+        .accessibilityActions {
+            Button("編輯") {
+                actions.edit(r.id, .broker)
+            }
+        }
+    }
+}
+
+// MARK: - ⑦ 保單總表（[v25.567] 財富 v6；judge §3.10、樣稿①⑦）
+
+/// ⑦ 保單總表：標頭同 ⑥（「保單 4」右「一年約 NT$16萬」）＋白卡一列一列（財富的保單、儲蓄險、車險、房屋險，一張只出現一次；
+/// 別頁的右邊小字「儲蓄險 ›」「車子卡 ›」「房屋卡 ›」）、最下灰字「保障型一年 6.4萬（不含儲蓄險）・外幣照今天匯率」、
+/// 灰字「記帳裡還有 1 筆保費沒有保單資料：…」＋綠字〔補保單〕；白卡下面保障六格。
+/// 點一列照 source 開（保單頁／儲蓄險保單卡／車子卡／房屋卡，都是彈出、不切分頁）；長按「編輯」只給財富的保單
+struct WealthPagePoliciesSection: View {
+    let data: WealthPagePolicies
+    let actions: WealthPageActions
+
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            MoneyGroupHeader(theme: .wealthPolicy, title: "保單", count: data.count, total: data.trailing ?? "",
+                             unit: "張")
+            list
+                .modifier(FinanceCardChrome())
+            coverBlock
+        }
+    }
+
+    private var list: some View {
+        let pal = TripBoardPalette(scheme)
+        return VStack(alignment: .leading, spacing: 0) {
+            ForEach(Array(data.rows.enumerated()), id: \.element.id) { i, r in
+                if i > 0 {
+                    Divider().padding(.leading, 56)
+                }
+                row(r, pal: pal)
+            }
+            footerLine
+            unclaimedLine(pal)
+        }
+    }
+
+    /// 最下灰字「保障型一年 6.4萬（不含儲蓄險）・外幣照今天匯率」（沒有就不畫）
+    @ViewBuilder
+    private var footerLine: some View {
+        if let f = data.footer {
+            if !data.rows.isEmpty {
+                Divider().padding(.leading, 14)
+            }
+            Text(f)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 14)
+                .padding(.vertical, 11)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    /// 灰字「記帳裡還有 1 筆保費沒有保單資料：中國人壽意外險 1,200/年」＋綠字〔補保單〕（要訂閱：財富頁擋）
+    @ViewBuilder
+    private func unclaimedLine(_ pal: TripBoardPalette) -> some View {
+        if let text = data.unclaimedText {
+            if !data.rows.isEmpty || data.footer != nil {
+                Divider().padding(.leading, 14)
+            }
+            WealthPageUnclaimedLine(text: text, spoken: data.unclaimedSpoken ?? text, pal: pal,
+                                    onAdd: { addPolicy() })
+        }
+    }
+
+    /// 白卡下面的保障六格（沒有格子不畫）
+    @ViewBuilder
+    private var coverBlock: some View {
+        if !data.cells.isEmpty {
+            WealthPageCoverGrid(cells: data.cells)
+        }
+    }
+
+    /// 長按「編輯」只給財富的保單（儲蓄險、車險、房屋險在自己那一頁改，不掛選單）
+    @ViewBuilder
+    private func row(_ r: WealthPagePolicyRow, pal: TripBoardPalette) -> some View {
+        if let id = Self.policyId(r.source) {
+            rowButton(r, pal: pal)
+                .contextMenu {
+                    Button {
+                        actions.edit(id, .policy)
+                    } label: {
+                        Label("編輯", systemImage: "pencil")
+                    }
+                }
+                .accessibilityActions {
+                    Button("編輯") {
+                        actions.edit(id, .policy)
+                    }
+                }
+        } else {
+            rowButton(r, pal: pal)
+        }
+    }
+
+    private func rowButton(_ r: WealthPagePolicyRow, pal: TripBoardPalette) -> some View {
+        Button {
+            openSource(r.source)
+        } label: {
+            WealthPagePolicyLine(row: r, pal: pal)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(r.accessibilityText)
+        .accessibilityHint(Self.hint(r.source))
+    }
+
+    /// 點一列：財富的保單→保單頁；儲蓄險→儲蓄險的保單卡；車險→車子卡；房屋險→房屋卡（都不擋訂閱、不切分頁）
+    private func openSource(_ s: WealthPolicySource) {
+        switch s {
+        case .policy(let id): actions.open(.card(id, nil))
+        case .savings(let id): actions.open(.savings(id))
+        case .vehicle(let id): actions.open(.vehicle(id))
+        case .house(let id): actions.open(.house(id))
+        }
+    }
+
+    /// 〔補保單〕：新增保單、預填那一筆記帳保費（要訂閱：財富頁的 open 擋）
+    private func addPolicy() {
+        guard let eid = data.unclaimedExpenseId else { return }
+        actions.open(.newPolicy(eid))
+    }
+
+    /// 財富的保單（長按可以編輯）；別頁的 nil
+    private static func policyId(_ s: WealthPolicySource) -> UUID? {
+        switch s {
+        case .policy(let id): return id
+        case .savings, .vehicle, .house: return nil
+        }
+    }
+
+    private static func hint(_ s: WealthPolicySource) -> String {
+        switch s {
+        case .policy: return "點兩下打開這張保單；長按有更多動作"
+        case .savings: return "點兩下打開儲蓄險的保單卡"
+        case .vehicle: return "點兩下打開車子卡"
+        case .house: return "點兩下打開房屋卡"
+        }
+    }
+}
+
+/// 保單一列：險種圖示、「國泰人壽 醫療險」、右「24,000/年」（別頁的再一個小字「儲蓄險 ›」）、第二行「下次 2027/8/15・刷 CUBE」。
+/// 圖示的顏色照來源：保單綠（76）、儲蓄險藍（理財 › 儲蓄險）、車險青（車子卡）、房屋險紫（房屋卡）
+private struct WealthPagePolicyLine: View {
+    let row: WealthPagePolicyRow
+    let pal: TripBoardPalette
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 12) {
+            TripBoardIconBadge(icon: row.icon, colors: colors, diameter: 30, dark: pal.dark)
+            texts
+            Spacer(minLength: 6)
+            trailing
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 11)
+        .contentShape(Rectangle())
+    }
+
+    private var theme: MoneyArtTheme {
+        switch row.source {
+        case .policy: return .wealthPolicy
+        case .savings: return .finSavings
+        case .vehicle: return .finDrive
+        case .house: return .finHome
+        }
+    }
+
+    private var colors: [Color] {
+        [theme.topColor, theme.bottomColor]
+    }
+
+    private var texts: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(row.title)
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(Color.primary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+            if let d = row.detail {
+                Text(d)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.85)
+            }
+        }
+    }
+
+    /// 右邊：金額＋單位（＋別頁的小字 tag ›）
+    private var trailing: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            amount
+            tagView
+        }
+        .lineLimit(1)
+        .fixedSize()
+    }
+
+    private var amount: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 1) {
+            Text(row.amount)
+                .font(.system(.subheadline, design: .rounded).weight(.heavy))
+                .monospacedDigit()
+                .foregroundStyle(Color.primary)
+            if let u = row.unit {
+                Text(u)
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.secondary)
+            }
+        }
+    }
+
+    /// 「儲蓄險 ›」「車子卡 ›」「房屋卡 ›」（保障型保單沒有）
+    @ViewBuilder
+    private var tagView: some View {
+        if let t = row.tag {
+            HStack(alignment: .firstTextBaseline, spacing: 1) {
+                Text(t)
+                    .font(.caption2.weight(.bold))
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .bold))
+            }
+            .foregroundStyle(pal.hint)
+        }
+    }
+}
+
+/// 灰字一行＋綠字〔補保單〕
+private struct WealthPageUnclaimedLine: View {
+    let text: String
+    let spoken: String
+    let pal: TripBoardPalette
+    let onAdd: () -> Void
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 10) {
+            Text(text)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .accessibilityLabel(spoken)
+            Button(action: onAdd) {
+                Text("補保單")
+                    .font(.footnote.weight(.bold))
+                    .foregroundStyle(MoneyTone.good.color(pal))
+                    .padding(.vertical, 6)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .fixedSize()
+            .accessibilityHint("新增一張保單，保費帶入記帳那一筆")
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 8)
+    }
+}
+
+/// [v25.567] 保障六格（judge §3.10）：「保障」＋兩欄三列；有這一種保單的亮（保單綠、寫保險公司），沒有灰「還沒記」；
+/// 整格不能點；最下灰字「不算應該保多少，只看你記了哪幾種」
+struct WealthPageCoverGrid: View {
+    let cells: [WealthPageCoverCell]
+
+    static let note = "不算應該保多少，只看你記了哪幾種"
+
+    /// 兩欄（computed：不放 stored property，memberwise init 照樣是 internal）
+    private var columns: [GridItem] {
+        [GridItem(.flexible(), spacing: 8), GridItem(.flexible(), spacing: 8)]
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("保障")
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(Color.primary)
+                .accessibilityAddTraits(.isHeader)
+            LazyVGrid(columns: columns, alignment: .leading, spacing: 8) {
+                ForEach(cells) { c in
+                    WealthPageCoverCellView(cell: c)
+                }
+            }
+            Text(Self.note)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .modifier(FinanceCardChrome())
+    }
+}
+
+/// 六格的一格：圖示＋「醫療」＋「國泰人壽」／「還沒記」（VoiceOver「醫療，國泰人壽」）
+private struct WealthPageCoverCellView: View {
+    let cell: WealthPageCoverCell
+
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        HStack(spacing: 8) {
+            TripBoardIconBadge(icon: cell.icon, colors: badgeColors, diameter: 26, dark: dark)
+            texts
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 9)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(fill, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(cell.accessibilityText)
+    }
+
+    private var dark: Bool { scheme == .dark }
+
+    private var texts: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(cell.title)
+                .font(.footnote.weight(.bold))
+                .foregroundStyle(titleColor)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Text(cell.detail)
+                .font(.caption2)
+                .foregroundStyle(detailColor)
+                .lineLimit(1)
+                .minimumScaleFactor(0.85)
+        }
+    }
+
+    /// 有：保單綠；沒有：灰
+    private var badgeColors: [Color] {
+        if cell.on {
+            return [MoneyArtTheme.wealthPolicy.topColor, MoneyArtTheme.wealthPolicy.bottomColor]
+        }
+        if dark {
+            return [Color(tb: 0x4A5163), Color(tb: 0x363C4B)]
+        }
+        return [Color(tb: 0xC9CED8), Color(tb: 0x9AA1AE)]
+    }
+
+    private var titleColor: Color {
+        cell.on ? Color.primary : Color.secondary
+    }
+
+    private var detailColor: Color {
+        if !cell.on { return Color.secondary }
+        return dark ? Color(tb: 0x7FD8A6) : Color(tb: 0x1E7A4E)
+    }
+
+    private var fill: Color {
+        if cell.on {
+            return MoneyArtTheme.wealthPolicy.topColor.opacity(dark ? 0.16 : 0.22)
+        }
+        return Color.primary.opacity(dark ? 0.06 : 0.04)
+    }
+}
+
+// MARK: - ⑧ 收起來的
+
+/// ⑧ 收起來的：一列「收起來的 2 ›」右灰字「玉山 Pi 卡・中華郵政」；點了就地展開（緊湊、淡一點）
+struct WealthPageHiddenSection: View {
+    let data: WealthPageHidden
+    let actions: WealthPageActions
+
+    @State private var expanded = false
+
+    init(data: WealthPageHidden, actions: WealthPageActions) {
+        self.data = data
+        self.actions = actions
+    }
+
+    var body: some View {
+        VStack(spacing: 8) {
+            Button {
+                withAnimation(.easeInOut(duration: 0.25)) { expanded.toggle() }
+            } label: {
+                header
+            }
+            .buttonStyle(MoneyPressStyle())
+            .accessibilityLabel(spokenTitle)
+            .accessibilityValue(stateText)
+            .accessibilityHint(hintText)
+            if expanded {
+                ForEach(data.rows) { r in
+                    card(r)
+                }
+            }
+        }
+    }
+
+    private var spokenTitle: String { "收起來的 \(data.rows.count) 個：" + data.names }
+    private var stateText: String { expanded ? "已展開" : "已收起" }
+    private var hintText: String { expanded ? "點兩下收起" : "點兩下展開" }
+
+    private func restoreTitle(_ r: WealthPageHiddenRow) -> String { r.isCard ? "重新啟用" : "不收起來" }
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            Text("收起來的 \(data.rows.count)")
+                .font(.subheadline.weight(.bold))
+                .foregroundStyle(Color.primary)
+                .lineLimit(1)
+                .fixedSize()
+            Spacer(minLength: 8)
+            Text(data.names)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+            Image(systemName: expanded ? "chevron.down" : "chevron.right")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 13)
+        .modifier(FinanceCardChrome())
+        .contentShape(Rectangle())
+    }
+
+    /// 點：卡片頁；長按：重新啟用（卡）／不收起來（帳戶）——都不擋訂閱
+    private func card(_ r: WealthPageHiddenRow) -> some View {
+        Button {
+            actions.open(.card(r.id, nil))
+        } label: {
+            MoneyItemCard(item: r.item, compact: true)
+        }
+        .buttonStyle(MoneyPressStyle())
+        .contentShape(.contextMenuPreview, RoundedRectangle(cornerRadius: 14, style: .continuous))
+        .contextMenu {
+            Button {
+                actions.restore(r.id, r.isCard)
+            } label: {
+                Label(restoreTitle(r), systemImage: "arrow.uturn.backward")
+            }
+        }
+        .accessibilityActions {
+            Button(restoreTitle(r)) {
+                actions.restore(r.id, r.isCard)
+            }
+        }
+    }
+}

@@ -1,6 +1,63 @@
 import SwiftUI
 import MapKit
 
+// MARK: - 美化紀錄（AddExpenseView）
+// [2026-06] 本次美化方向：
+//   1. basicInfoSection header：補左側 Capsule 漸層色條 + .subheadline.weight(.semibold) 標題，
+//      進階 Toggle 前加彩色 Label 圖示，對齊 VariableExpenseView / IncomeView 的 section 標題規格。
+//   2. 驗證錯誤提示：從裸紅字升級為帶圖示的彩色錯誤卡片，
+//      加入 opacity + move(edge:.top) 組合 transition，視覺回饋更清晰不突兀。
+//   3. loanCalcRow：數值列改用彩色膠囊搭配圓角背景，
+//      對齊 SavingsInsuranceView savingsCalcSection 卡片規格。
+//   4. savingsCalcSection header：補 Capsule 色條，對齊 section 標題規格。
+// [2026-06 v2] 本次美化方向：
+//   5. amountPreviewCard：Form 頂端新增即時金額預覽卡（漸層背景 + 48pt 類別圖示圓 + 萬/億大字），
+//      金額 > 0 時以 spring 動畫滑入，對齊 AddIncomeView.amountPreviewCard 設計語言；
+//      變動支出用橘色、固定支出用藍色，主題色與全頁 section header 保持一致。
+//   6. 全部剩餘 section 標題升級為 sectionHeader()（Capsule 漸層色條 + .subheadline.semibold），
+//      對齊 basicInfoSection / savingsCalcSection 已有的設計規格，達到全頁 section 標題均值性：
+//      分類(橘/藍)、關聯資產(teal/blue)、股票(橘)、汽車(teal)、儲蓄險(綠)、房地產(紫)、
+//      保險類別(綠)、貸款類別(藍)、稅務(綠)、房地產資訊(紫)、繳費設定(綠)。
+// [2026-06 v3] 本次美化方向：
+//   7. categorySection（變動支出）：系統 Picker 升級為 FilterChip 橫向膠囊列，
+//      每個分類依 VariableCategory.accentColor 各自著色（選中：純色底+白字；未選：secondarySystemFill），
+//      spring 動畫切換，對齊 AddIncomeView.categoryChipPicker 設計語言；
+//      人員多選按鈕移至獨立行（僅進階模式顯示），與分類行分離提升可讀性。
+//   8. amountPreviewCard 分類膠囊：分類標籤從純 .caption .secondary 文字升級為彩色 Capsule
+//      （accent.opacity(0.12) 底 + accent 文字 + .caption.semibold），
+//      對齊 AddIncomeView.amountPreviewCard 膠囊標籤規格。
+//   9. amountPreviewCard 動態主題色（variable）：accentColor 從靜態 .orange 改為
+//      selectedVariableCategory.accentColor，讓預覽卡顏色隨分類選擇即時更新，
+//      視覺層次更豐富，對齊 AddIncomeView 動態分類色設計語言。
+//  10. amountPreviewCard glass shine：背景 ZStack 末層加入 LinearGradient
+//      [.white.opacity(0.16), .clear] top→center 玻璃高光覆層，
+//      對齊全 App 英雄卡 glass shine 統一規格（AddIncomeView / OverviewView.monthlyBalanceCard）。
+// [2026-07 v4] 本次美化方向（同行人員／收受人多選彈窗，聚焦這一個元件）：
+//  11. socialRecipientSelectorList「完成」關閉鈕：從 .topBarTrailing 修正為 .topBarLeading，
+//      對齊全 App NavigationStack Sheet 關閉鈕一律置左的既有規則（EInvoiceSetupView／
+//      TalentMatrixView／SubordinateRosterView 等單一「完成」鈕皆為 topBarLeading，
+//      此處是本檔案唯一的例外）。
+//  12. diningMemberSelectorList 自訂標題列：改用 ZStack 讓「完成」鈕與 NavigationStack
+//      toolbar 同款「置左按鈕 + 置中標題」版面對齊，不再是唯一的「標題置左、按鈕置右」
+//      版面，與 v4-11 修正後的 socialRecipientSelectorList 視覺語言一致。
+//  13. 兩個多選彈窗標題旁補上「已選 N」提示膠囊（僅在有選取時顯示）：
+//      同行人員用綠色（對齊列內已選 checkmark 綠），收受人用粉色（對齊開啟入口
+//      gift.fill 粉色圖示），操作中不必展開清單也能得知已選人數，純顯示層新增。
+//  以上純視覺／版面調整，未變動人員多選、收受人分組、勾選切換等既有商業邏輯。
+// [2026-08 v5] 本次美化方向（儲存按鈕載入狀態，延續 v25.81 AddSavingsInsuranceView 待辦清單）：
+//  14. 工具列「儲存／新增」按鈕：saveExpense() 自帶 isSaving 忙碌守衛（disabled(isSaving)）
+//      避免快速連點造成重複紀錄，但按鈕本身在存檔期間沒有任何視覺變化。補上
+//      ProgressView().scaleEffect(0.7).tint(.green)，isSaving 為 true 時顯示於按鈕左側，
+//      對齊 AddSavingsInsuranceView 儲存按鈕載入狀態規格（ProgressView + scaleEffect(0.7) +
+//      主題色 tint 全 App 慣例）。純視覺層補強，saveExpense() 內部守衛判斷與支出寫入邏輯
+//      完全未變動。同型 isSaving 守衛仍存在於 AddIncomeView / AddStockView / AddVehicleView /
+//      AddRealEstateView，可作為下次美化比照本檔案補齊的清單。
+// [v25.567] 財富 v6（build/v6/brief.md G4 11～13；judge §6.7）：
+//   - 改一筆保費（固定支出・保險）存檔後，連著它的財富保單照寫一份舊欄位（LifeStore.policyExpenseChanged，下一個 runloop；
+//     保單頁、保單總表本來就讀記帳這一筆，稅務頁照算、不重複）。
+//   - 保險類別那段 footer：這筆被財富的保單連著時多一行「這筆保費連著財富的保單「國泰人壽 醫療險」：改金額、扣款，保單跟著。」
+//   - 舊版單筆股票改股數、買價、日期：交割紀錄改叫 LifeStore.rewriteStockSettlements（股票表單、股票卡同一支）。
+
 struct AddExpenseView: View {
     @EnvironmentObject var store: ExpenseStore
     @EnvironmentObject var financeStore: FinanceStore
@@ -10,6 +67,9 @@ struct AddExpenseView: View {
     let expenseType: ExpenseType
     var editingExpense: Expense?
     var preset: AddExpensePreset?
+    /// [v2 小工具] 從小工具／控制項點進來（網址帶 src=widget）：表單出現後金額欄自動聚焦、數字鍵盤直接跳出。
+    /// 放在 preset 後面、有預設值：既有呼叫端都不用改
+    var focusAmountOnAppear: Bool = false
 
     // MARK: - 基本欄位
 
@@ -23,6 +83,8 @@ struct AddExpenseView: View {
     /// 社交禮金收受人（家人 + 人際關係多選）
     @State private var selectedSocialRecipients: Set<String> = []
     @State private var showSocialRecipientPopover: Bool = false
+    /// [v25.537] 收受人名單的搜尋字
+    @State private var socialRecipientQuery = ""
     /// 固定支出：列入節稅追蹤；nil 採自動推斷
     @State private var taxDeductibleOverride: Bool? = nil
     @State private var selectedDiningMembers: Set<String> = []
@@ -35,8 +97,26 @@ struct AddExpenseView: View {
     ]
     @State private var selectedFixedCategory: FixedCategory = .rent
     @State private var selectedRecurrence: Recurrence = .monthly
+    /// [v25.347] 固定支出的停止（結束日＝最後一次扣款日）
+    @State private var hasEndDate = false
+    @State private var endDate = Date()
+    @State private var endReason: FixedEndReason = .cancelled
     @State private var note = ""
     @State private var showValidationError = false
+    @State private var validationErrorMessage = "請輸入有效的名稱與金額（大於 0）。"
+    /// 存檔中鎖住儲存按鈕，避免 sheet 收合動畫播完前快速連點建立兩筆重複紀錄
+    /// （同型修復見 AddIncomeView／AddVehicleView／AddStockView 等 isSaving 既有寫法）
+    @State private var isSaving = false
+    // [v25.563] 扣款帳戶選單的餘額改讀 lifeStore.wealthFacts（全 App 一份、LifeStore 快取，打字不重算），
+    // 以前那份自己算的銀行餘額快取（另一套簡化餘額，D18）拿掉了。
+    /// [v25.563] 改了週期性固定支出的金額：以前扣過的那幾期要不要跟著改（D9）。nil＝還沒問；false＝從今天起；true＝全部都改
+    @State private var amountChangeAll: Bool?
+    /// [v25.563] 正在問「從今天起／全部都改」（AmountFromDialog）
+    @State private var amountAsk: AmountFromAsk?
+    /// [v25.563] 打開編輯時的金額欄、幣別（沒動過金額就不問：舊資料帶回時 %.0f、外幣除匯率會跟原本差一點）
+    @State private var loadedAmountKey = ""
+    // 即時金額預覽卡進場動畫旗標
+    @State private var amountCardAppeared = false
 
     // MARK: - 保險子分類
 
@@ -50,6 +130,17 @@ struct AddExpenseView: View {
     @State private var selectedBankMilestoneId: UUID?
     @State private var selectedBankCurrency: String = "NT$"
     @State private var selectedCreditCardMilestoneId: UUID?
+    /// [v25.564] 上次存檔時選的付款方式（「card:<id>」「bank:<id>:<幣別>」；空白＝不指定）。
+    /// 只記在這台裝置、只給新增的變動支出當預設（簡易模式的付款膠囊；judge §6.2 v3 列）
+    @AppStorage("addExpense_last_payment") private var lastPaymentRaw: String = ""
+    /// 「上次用的」只在表單第一次出現時帶一次（onAppear 會再跑；你改成「不指定」之後不要又被帶回來）
+    @State private var lastPaymentApplied = false
+    /// [v25.564] 卡費提醒〔改成標已繳〕、對存摺提示〔再對一次〕打開的財富小表單
+    @State private var wealthSheet: AddExpenseWealthSheet?
+    /// 打開〔改成標已繳〕時的財富 revision：關掉時變了＝標成已繳存了，這張記帳也關、不存
+    @State private var wealthRevisionAtOpen = 0
+    @State private var closeAfterWealthSheet = false
+    @State private var showWealthPremium = false
 
     // MARK: - 儲蓄險欄位
 
@@ -100,6 +191,17 @@ struct AddExpenseView: View {
     // 汽車
     @State private var selectedVehicleId: UUID?
     @State private var selectedVehicleExpenseCategory: VehicleVariableCategory = .fuel
+    // [v25.312] 電動車充電資訊（電費類別才顯示；皆選填）
+    @State private var evKwhText = ""
+    @State private var evFromText = ""
+    @State private var evToText = ""
+    /// [v25.539] 里程錶：電費、油錢、保養、維修都用這一欄（存在 Expense.evOdometer）
+    @State private var evOdoText = ""
+    /// [v25.539] 加油的公升數（油錢才顯示；選填）
+    @State private var fuelLitersText = ""
+    /// [v25.538] 上一次自動填進名稱欄的「車名-分類名」。名稱還是它（或空白）才跟著連結換；
+    /// 你自己打過的就不動（決定 19：名稱可以自己打，不再鎖住）
+    @State private var autoVehicleTitle: String?
 
     // 股票（新增投資）
     @State private var stockName = ""
@@ -113,6 +215,8 @@ struct AddExpenseView: View {
     @State private var selectedRealEstateLinkId: UUID?
     @State private var selectedRealEstateExpenseCategory: RealEstateExpenseCategory = .renovation
     @State private var realEstateLinkExisting: Bool = true
+    /// [v25.530] 水電瓦斯是哪一種；nil＝自動（從名稱、備註判斷）
+    @State private var selectedUtilityType: UtilityType?
 
     // MARK: - 固定支出關聯資產
 
@@ -133,17 +237,45 @@ struct AddExpenseView: View {
     // MARK: - 多張照片
     @State private var photoFileNames: [String] = []
 
+    // MARK: - 旅遊關聯（[v25.424] 變動支出）
+    @State private var linkedTripPlanId: UUID?
+    @State private var linkedTripStopId: UUID?
+    /// [v25.475] 這一次的站別變更是「只憑時間猜的」，不要跟著把地點帶進來。
+    ///
+    /// 依距離挑的、或使用者自己挑的站，帶入地點是合理的推論（v25.467）；
+    /// 但只憑時間接近就把店家與座標填成那一站，等於幫使用者捏造一個
+    /// 他可能根本沒在那裡消費的地點——路上買的、車站買的都會被安到景點頭上。
+    @State private var skipPlaceFillOnce = false
+
     // MARK: - 飲食店家自動完成
 
     @StateObject private var restaurantCompleter = RestaurantSearchCompleter()
-    @ObservedObject private var locationProvider = LocationProvider.shared
+    @StateObject private var locationProvider = LocationProvider.shared
     @State private var placeAddress: String?
     @State private var placeLatitude: Double?
     @State private var placeLongitude: Double?
+    /// [v25.365] 汽車變動支出專用的地點名稱（名稱欄被自動命名佔用，見 usesSeparatePlaceField）
+    @State private var placeName: String = ""
+    /// [v25.432] 「欄位裡的字是誰打的」——跟旅遊規劃共用的模板，見 MapPlacePicker.swift
+    @State private var placeFill = PlaceFieldFill()
+    /// [v25.365] 目前這組座標是「在哪個分類底下選的」（placeScopeKey 的快照）。
+    /// 使用者選完飲食的餐廳又把分類改成汽車時，座標已經不適用於新分類，
+    /// 存檔與顯示都要靠這個比對把它擋掉，不然停車紀錄會掛到餐廳的經緯度上。
+    @State private var placeScopeStamp: String = ""
+    /// 每次選擇候選地點就遞增；resolve 完成回填時比對是否仍是最新一次選擇，避免快速連點造成舊請求覆寫新選擇的座標
+    @State private var placeSelectionToken: Int = 0
     @FocusState private var titleFieldFocused: Bool
+    /// [v2 小工具] 金額欄（focusAmountOnAppear 時自動聚焦）
+    @FocusState private var amountFieldFocused: Bool
+    /// [v2 小工具] 自動聚焦只做一次：onAppear 再跑一次（從別的畫面回來）時不要又把鍵盤叫出來
+    @State private var didAutoFocusAmount = false
     @State private var suppressNextCompleterUpdate = false
     /// 是否展開所有候選地點（預設僅顯示 20 個）
     @State private var expandedSuggestions: Bool = false
+    @State private var completerDebounceTask: Task<Void, Never>?
+    /// 「之前去過」候選：與 Apple Maps 查詢共用同一個 300ms 防抖節流，
+    /// 避免每次按鍵都對 store.expenses 做全量線性掃描
+    @State private var cachedPastSuggestions: [PlaceSuggestion] = []
 
     // MARK: - 條件判斷
 
@@ -154,17 +286,151 @@ struct AddExpenseView: View {
     private var isMortgage: Bool { isLoan && selectedLoanSubCategory == .mortgage }
     private var isCarLoan: Bool { isLoan && selectedLoanSubCategory == .car }
     private var showLoanCalcFields: Bool { isCarLoan || isMortgage }
-    private var showFixedAssetLink: Bool { expenseType == .fixed && !isInsurance && !isLoan }
+    /// [v25.538] 強制險、綜合險可以連到車（決定 8）：以前保險整個看不到關聯資產，車險永遠進不了車子的帳
+    private var isVehicleInsurance: Bool {
+        isInsurance && (selectedInsuranceSubCategory == .compulsory || selectedInsuranceSubCategory == .comprehensive)
+    }
+    private var showFixedAssetLink: Bool { expenseType == .fixed && !isLoan && (!isInsurance || isVehicleInsurance) }
+    /// [v25.538] 車險只能選「無」或「汽車」；其他固定支出照舊四種都能選
+    private var fixedAssetLinkOptions: [FixedAssetLinkType] {
+        isInsurance ? [.none, .vehicle] : FixedAssetLinkType.allCases
+    }
+    /// 實際算數的關聯資產：從別的分類切到車險時，原本選的房地產／儲蓄險不適用，當成「無」
+    private var effectiveFixedAssetLink: FixedAssetLinkType {
+        fixedAssetLinkOptions.contains(selectedFixedAssetLink) ? selectedFixedAssetLink : .none
+    }
+    private var fixedAssetLinkSelection: Binding<FixedAssetLinkType> {
+        Binding(get: { effectiveFixedAssetLink }, set: { selectedFixedAssetLink = $0 })
+    }
+
+    /// [v25.541] 表單上「關聯資產」選了汽車、而且那台車還在（不管現在這個分類看不看得到關聯資產區）。
+    /// 切到保險時要不要直接帶車險、保險類別選了不能連車的子分類時要不要提醒，都看這台
+    private var fixedFormLinkedVehicle: Vehicle? {
+        guard selectedFixedAssetLink == .vehicle, let vid = fixedLinkVehicleId else { return nil }
+        return financeStore.vehicles.first(where: { $0.id == vid })
+    }
+
+    /// [v25.541] 固定支出的類別選單。連著車的「其他」改成保險時，保險類別還停在預設的儲蓄險，
+    /// 選車的區塊整個消失、跳出儲蓄險表單，看起來像整張被重置，存下去還會變成一張儲蓄險保單。
+    /// 所以這種情況先把保險類別換成車險（名稱或備註有「強制」選強制險，其他選綜合險），再換類別，
+    /// 同一次改兩個值，畫面不會先閃一下儲蓄險。
+    /// 不用 onChange：打開舊資料（loadEditing）、從別處帶進來（applyPreset）也會改類別，那些照原本的子分類
+    private var fixedCategorySelection: Binding<FixedCategory> {
+        Binding(
+            get: { selectedFixedCategory },
+            set: { newValue in
+                if newValue == .insurance, selectedFixedCategory != .insurance,
+                   fixedFormLinkedVehicle != nil,
+                   selectedInsuranceSubCategory != .compulsory,
+                   selectedInsuranceSubCategory != .comprehensive {
+                    let saysCompulsory = title.contains("強制") || note.contains("強制")
+                    selectedInsuranceSubCategory = saysCompulsory ? .compulsory : .comprehensive
+                }
+                selectedFixedCategory = newValue
+            }
+        )
+    }
+
+    /// [v25.538] 變動支出算不算連到車：關聯資產是汽車，而且分類還是「汽車」。
+    /// 基本模式看不到關聯資產，選了車又把分類改成別的，就當不連（分類鈕會順手放掉車子，改回汽車再接上）。
+    private var variableVehicleLinked: Bool {
+        expenseType == .variable && selectedAssetLink == .vehicle && selectedVariableCategory == .vehicle
+    }
+
+    /// [v25.538] 照表單「現在」的狀態，這筆存完要連到哪台車（nil＝不連）。
+    /// 以前只有「選了車」才會改連結：關聯資產改成「無」或別的資產、車貸改成信貸／房貸時
+    /// 照樣連著舊車。存檔、預設名稱、名稱欄要不要出現都看這一個。
+    private var targetVehicleId: UUID? {
+        let id: UUID?
+        if expenseType == .variable {
+            id = variableVehicleLinked ? selectedVehicleId : nil
+        } else if isCarLoan {
+            id = selectedVehicleId
+        } else if showFixedAssetLink && effectiveFixedAssetLink == .vehicle {
+            id = fixedLinkVehicleId
+        } else {
+            id = nil
+        }
+        // 車子已經不在了就當沒連，不留一個指向不存在車子的連結
+        guard let vid = id, financeStore.vehicles.contains(where: { $0.id == vid }) else { return nil }
+        return vid
+    }
+
+    /// [v25.538] 從車子帶進來、要直接顯示車輛區（度數、電量、里程錶）的（AddExpensePreset.showVehicleSection）
+    /// [v25.540] 編輯時也看：卡片點帳本的油錢、電費、保養、維修，或「沒填度數 →」「多記公升數 →」打開那一筆，
+    /// 會帶 AddExpensePreset(showVehicleSection: true)，度數、公升、里程欄要直接看得到（定案 19）。
+    /// preset 其他欄位編輯時本來就不套用（applyPreset 開頭擋掉）；新增時跟以前一樣
+    private var presetShowsVehicleSection: Bool {
+        preset?.showVehicleSection == true
+    }
     /// 是否為飲食類變動支出（決定要不要顯示餐廳自動完成）
     private var isFoodVariable: Bool {
         expenseType == .variable && selectedVariableCategory == .food
     }
 
-    /// 是否為「需要選地點」的變動支出分類：飲食 / 娛樂 / 購物 / 日用品 / 醫療
+    /// 是否為「需要選地點」的變動支出分類：飲食 / 娛樂 / 購物 / 日用品 / 醫療 / 汽車
+    /// [v25.365] 加入汽車：停車場、充電站、加油站、保養廠都是實體地點，
+    /// 記下座標之後才做得出汽車里程路線圖。
+    /// [v25.479] 哪些分類有「地點」。
+    ///
+    /// 原本是六個分類的白名單（飲食／娛樂／購物／日用品／醫療／汽車），
+    /// 使用者回報：選好地點之後把分類改成交通、停車之類的，地點欄整個不見。
+    /// 那條白名單沒有道理——交通要記車站、停車場要記停車場、教育要記補習班、
+    /// 連稅費都有監理站。地點是「這筆花費發生在哪」，跟分類無關。
+    ///
+    /// 只排除股票與房地產：那兩類的名稱欄被連結資產的自動名稱佔用
+    /// （「項目 N：型號-類別」那種），地點沒有地方放，硬塞只會互相覆蓋。
     private var supportsPlacePicker: Bool {
         guard expenseType == .variable else { return false }
-        return [.food, .entertainment, .shopping, .dailyNecessities, .medical]
-            .contains(selectedVariableCategory)
+        return ![.stock, .realEstate].contains(selectedVariableCategory)
+    }
+
+    /// [v25.365] 汽車變動支出的「名稱」欄會被 linkedAssetTitle（項目 N：型號-類別）
+    /// 佔用並轉為唯讀，店名沒地方放，因此改成獨立的一列「地點」，
+    /// 文字存進 Expense.placeName 而不是 title。
+    /// [v25.538] 名稱改成可以自己打了，地點仍放這一列（舊資料的店名都在 placeName）。
+    private var usesSeparatePlaceField: Bool {
+        expenseType == .variable && selectedVariableCategory == .vehicle
+    }
+
+    /// 地點選擇器直接當成名稱欄使用（飲食等分類：店名就是 title）
+    private var showsInlinePlacePicker: Bool {
+        supportsPlacePicker && !usesSeparatePlaceField
+    }
+
+    /// 地點選擇器實際綁定的文字欄位：汽車用 placeName，其餘分類沿用 title
+    private var placeQuery: Binding<String> {
+        usesSeparatePlaceField ? $placeName : $title
+    }
+
+    /// placeQuery 的唯讀值（給 onChange 觀測與候選比對用）
+    private var placeQueryText: String {
+        usesSeparatePlaceField ? placeName : title
+    }
+
+    /// 「之前去過」候選的比對範圍。汽車再依支出類別細分，
+    /// 免得停車場、加油站、保養廠全部混在同一份清單裡。
+    private var placeScopeKey: String {
+        guard usesSeparatePlaceField else { return selectedVariableCategory.rawValue }
+        guard selectedAssetLink == .vehicle else { return "vehicle|all" }
+        return "vehicle|\(selectedVehicleExpenseCategory.rawValue)"
+    }
+
+    /// 目前綁定的座標是否仍屬於現在這個分類（見 placeScopeStamp）
+    private var placeScopeMatches: Bool { placeScopeStamp == placeScopeKey }
+
+    /// 已經有可用的座標（且屬於目前分類）
+    private var hasResolvedPlace: Bool { placeLatitude != nil && placeScopeMatches }
+
+    /// 同分類最近用過的品名（快速選取膠囊模板選項）：常去的餐廳/診所/娛樂點一下帶入
+    private var recentCategoryTitles: [String] {
+        guard expenseType == .variable else { return [] }
+        let cat = selectedVariableCategory
+        return QuickPickOptions.recent(
+            store.expenses
+                .filter { $0.expenseType == .variable && $0.variableCategory == cat }
+                .map { (value: $0.title, date: $0.date) }
+        )
     }
 
     // MARK: - 儲蓄險自動計算
@@ -190,7 +456,7 @@ struct AddExpenseView: View {
         guard Date() >= insStartDate else { return 0 }
         let months = Calendar.current.dateComponents([.month], from: insStartDate, to: min(Date(), insMaturityDate)).month ?? 0
         let mpp = selectedRecurrence == .monthly ? 1 : (selectedRecurrence == .quarterly ? 3 : 12)
-        return min(months / mpp + 1, insTotalPeriods)
+        return max(0, min(months / mpp + 1, insTotalPeriods))
     }
 
     private var insExpectedReturn: Double {
@@ -213,6 +479,14 @@ struct AddExpenseView: View {
     var body: some View {
         NavigationStack {
             Form {
+                // 美化 v2：即時金額預覽卡（金額 > 0 時 spring 滑入）
+                if (Double(amountText) ?? 0) > 0 {
+                    Section {
+                        amountPreviewCard
+                            .listRowBackground(Color.clear)
+                            .listRowInsets(EdgeInsets())
+                    }
+                }
                 basicInfoSection
 
                 // 變動支出：先選關聯資產，再選分類（基本模式隱藏關聯資產選擇）
@@ -233,6 +507,12 @@ struct AddExpenseView: View {
                     if !suppressCategory {
                         categorySection
                     }
+                    // [v25.538] 基本模式看不到關聯資產，選了「汽車」以前沒地方選車，存成哪張車卡都看不到的支出
+                    if !advancedMode && selectedVariableCategory == .vehicle {
+                        basicVehicleArea
+                    }
+                    // [v25.424] 旅遊期間的花費可以直接掛到那一趟行程上
+                    if showTripLinkSection { tripLinkSection }
                     // 進階模式：分類區塊下方加照片廊
                     if advancedMode {
                         photoGallerySection
@@ -241,9 +521,9 @@ struct AddExpenseView: View {
                     // 固定支出：先選關聯資產（若適用），再選分類
                     if showFixedAssetLink {
                         fixedAssetLinkSection
-                        if selectedFixedAssetLink == .vehicle { fixedVehicleLinkSection }
-                        if selectedFixedAssetLink == .realEstate { fixedRealEstateLinkSection }
-                        if selectedFixedAssetLink == .insurance { fixedInsuranceLinkSection }
+                        if effectiveFixedAssetLink == .vehicle { fixedVehicleLinkSection }
+                        if effectiveFixedAssetLink == .realEstate { fixedRealEstateLinkSection }
+                        if effectiveFixedAssetLink == .insurance { fixedInsuranceLinkSection }
                     }
                     categorySection
                 }
@@ -257,6 +537,11 @@ struct AddExpenseView: View {
                     taxDeductibleToggleSection
                 }
 
+                // [v25.347] 固定支出：停止（取消訂閱、繳清貸款、退租⋯）
+                if expenseType == .fixed && !isSavingsInsurance {
+                    fixedEndSection
+                }
+
                 if isSavingsInsurance {
                     savingsInsuranceSection
                     savingsCalcSection
@@ -268,8 +553,30 @@ struct AddExpenseView: View {
 
                 if showValidationError {
                     Section {
-                        Text("請輸入名稱和有效金額").foregroundStyle(.red).font(.caption)
+                        // 美化：帶圖示的錯誤卡片，比裸紅字更明確且不突兀
+                        HStack(spacing: 12) {
+                            ZStack {
+                                Circle()
+                                    .fill(Color.red.opacity(0.12))
+                                    .frame(width: 34, height: 34)
+                                Image(systemName: "exclamationmark.triangle.fill")
+                                    .font(.system(size: 15, weight: .semibold))
+                                    .foregroundStyle(.red)
+                            }
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text("無法儲存")
+                                    .font(.subheadline.weight(.semibold))
+                                    .foregroundStyle(.red)
+                                Text(validationErrorMessage)
+                                    .font(.caption)
+                                    .foregroundStyle(.secondary)
+                            }
+                            Spacer(minLength: 0)
+                        }
+                        .padding(.vertical, 4)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
                     }
+                    .listRowBackground(Color.red.opacity(0.05))
                 }
             }
             .navigationTitle(isEditing ? "編輯\(expenseType.rawValue)" : "新增\(expenseType.rawValue)")
@@ -284,22 +591,50 @@ struct AddExpenseView: View {
                     sheetDetent = newValue ? .large : .height(440)
                 }
             }
+            // 儲存失敗顯示「無法儲存」錯誤卡片後，使用者若接著修正名稱／金額，
+            // 卡片應立即消失；先前只在下次按儲存才會重新判斷，卡片會誤導使用者以為仍未修正。
+            .onChange(of: title) { _, _ in showValidationError = false }
+            .onChange(of: amountText) { _, _ in showValidationError = false }
+            .onChange(of: rePurchasePriceText) { _, _ in showValidationError = false }
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
-                    Button("取消") { dismiss() }
+                    Button("取消") { cancelAddExpense() }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(isEditing ? "儲存" : "新增") { saveExpense() }
-                        .bold().foregroundStyle(.green)
+                    HStack(spacing: 6) {
+                        // [美化] 存檔中顯示同主題色 ProgressView，對齊 AddSavingsInsuranceView 儲存按鈕載入狀態規格
+                        if isSaving {
+                            ProgressView().scaleEffect(0.7).tint(.green)
+                        }
+                        Button(isEditing ? "儲存" : "新增") { saveExpense() }
+                            .bold().foregroundStyle(.green)
+                            .disabled(isSaving)
+                    }
                 }
             }
             .onAppear {
                 loadEditing()
                 applyPreset()
+                applyLastPayment()
+                focusAmountIfRequested()
                 // 依進階開關決定初始 sheet 高度（須在 loadEditing 後再算，因為它可能會打開進階模式）
+                // [v25.538] 從車子帶進來要直接顯示車輛區的，也一開始就拉滿，不然度數那幾欄在半屏下面看不到
                 if expenseType == .variable {
-                    sheetDetent = advancedMode ? .large : .height(440)
+                    sheetDetent = (advancedMode || presetShowsVehicleSection) ? .large : .height(440)
                 }
+            }
+            // [v25.479] 換分類不該把已經選好的地點丟掉。
+            //
+            // v25.365 讓座標「只屬於選它的那個分類」，理由是改了分類之後
+            // 停車紀錄會掛到餐廳的經緯度上。但那個年代多數分類根本看不到
+            // 地點欄——使用者看不到也改不掉，只能靠系統偷偷作廢。現在幾乎
+            // 每個分類都看得到地點，留著並讓他自己改掉才是對的：
+            // 看得見的錯誤改得掉，看不見的消失只會讓人以為壞了。
+            .onChange(of: selectedVariableCategory) { _, _ in
+                if placeLatitude != nil { placeScopeStamp = placeScopeKey }
+            }
+            .onChange(of: selectedVehicleExpenseCategory) { _, _ in
+                if placeLatitude != nil { placeScopeStamp = placeScopeKey }
             }
             .onChange(of: selectedAssetLink) { _, newValue in
                 if newValue == .vehicle {
@@ -311,49 +646,51 @@ struct AddExpenseView: View {
                 }
                 applyAutoTitleIfLinked()
             }
-            .onChange(of: selectedVehicleId) { _, _ in applyAutoTitleIfLinked() }
-            .onChange(of: selectedVehicleExpenseCategory) { _, _ in applyAutoTitleIfLinked() }
-            .onChange(of: selectedRealEstateLinkId) { _, _ in applyAutoTitleIfLinked() }
-            .onChange(of: realEstateLinkExisting) { _, _ in applyAutoTitleIfLinked() }
-            .onChange(of: selectedRealEstateExpenseCategory) { _, _ in
-                applyAutoTitleIfLinked()
-            }
-            .onChange(of: selectedMortgageRealEstateId) { _, _ in applyAutoTitleIfLinked() }
-            .onChange(of: mortgageLinkExisting) { _, _ in applyAutoTitleIfLinked() }
-            .onChange(of: note) { _, _ in
-                if isMortgage { applyAutoTitleIfLinked() }
-            }
-            .onChange(of: selectedFixedAssetLink) { _, _ in applyAutoTitleIfLinked() }
-            .onChange(of: fixedLinkVehicleId) { _, _ in applyAutoTitleIfLinked() }
-            .onChange(of: selectedFixedCategory) { _, _ in applyAutoTitleIfLinked() }
-            .onChange(of: selectedLoanSubCategory) { _, _ in applyAutoTitleIfLinked() }
+            // 上述多個連結欄位若各自掛一條 .onChange 會讓 body 型別檢查逾時；
+            // 改為合併成單一「連結欄位簽章」字串，任一欄位變動即觸發自動命名。
+            .onChange(of: autoTitleSignature) { _, _ in applyAutoTitleIfLinked() }
+            .onDisappear { completerDebounceTask?.cancel() }
+            // [v25.563] 改固定支出金額時問「從今天起／全部都改」（D9）；選了才真的存
+            .modifier(AmountFromDialog(ask: $amountAsk, onPick: pickAmountFrom))
+            // [v25.564] 卡費提醒〔改成標已繳〕、對存摺提示〔再對一次〕
+            .modifier(AddExpenseWealthSheetModifier(sheet: $wealthSheet, showPremium: $showWealthPremium,
+                                                    onClosed: { wealthSheetClosed() }))
         }
     }
 
     // MARK: - 連結資產名稱自動生成
 
-    /// 若此筆支出連結到理財模式中的具體項目（車輛/房地產），回傳自動生成的名稱「項目 N：型號-類別」。
+    /// 將所有會影響自動命名的連結欄位濃縮成單一字串；任一欄位變動時字串就不同，
+    /// 供單一 .onChange 觀測（取代原本十多條 .onChange，避免 body 型別檢查逾時）。
+    /// 備註（note）僅在房貸情境下納入，維持原本「note 變動只在房貸時重算標題」的行為。
+    private var autoTitleSignature: String {
+        [
+            String(describing: selectedVehicleId),
+            String(describing: selectedVehicleExpenseCategory),
+            String(describing: selectedRealEstateLinkId),
+            String(describing: realEstateLinkExisting),
+            String(describing: selectedRealEstateExpenseCategory),
+            String(describing: selectedMortgageRealEstateId),
+            String(describing: mortgageLinkExisting),
+            isMortgage ? note : "",
+            String(describing: selectedFixedAssetLink),
+            String(describing: fixedLinkVehicleId),
+            String(describing: selectedFixedCategory),
+            String(describing: selectedLoanSubCategory),
+            // [v25.538] 基本模式把分類從「汽車」改走就不連車了（variableVehicleLinked），預設名稱要跟著換
+            String(describing: selectedVariableCategory)
+        ].joined(separator: "|")
+    }
+
+    /// 若此筆支出連結到理財模式中的房地產，回傳自動生成的名稱「項目 N：型號-類別」（唯讀）。
+    /// [v25.538] 車子不再走這裡（決定 19）：名稱可以自己打，空白才用 vehicleDefaultTitle。
     private var linkedAssetTitle: String? {
-        // 變動支出 - 汽車
-        if expenseType == .variable, selectedAssetLink == .vehicle,
-           let id = selectedVehicleId,
-           let vehicle = financeStore.vehicles.first(where: { $0.id == id }) {
-            let n = itemNumber(in: vehicle.variableExpenses) { $0.linkedExpenseId }
-            return "項目 \(n)：\(vehicle.name)-\(selectedVehicleExpenseCategory.rawValue)"
-        }
         // 變動支出 - 房地產
         if expenseType == .variable, selectedAssetLink == .realEstate,
            let id = selectedRealEstateLinkId,
            let re = financeStore.realEstates.first(where: { $0.id == id }) {
             let n = itemNumber(in: re.variableExpenses) { $0.linkedExpenseId }
             return "項目 \(n)：\(re.name)-\(selectedRealEstateExpenseCategory.rawValue)"
-        }
-        // 固定支出 - 車貸
-        if isCarLoan,
-           let id = selectedVehicleId,
-           let vehicle = financeStore.vehicles.first(where: { $0.id == id }) {
-            let n = itemNumber(in: vehicle.fixedExpenses) { $0.linkedExpenseId }
-            return "項目 \(n)：\(vehicle.name)-車貸"
         }
         // 固定支出 - 房貸（連動既有物件）
         if isMortgage, mortgageLinkExisting,
@@ -373,14 +710,26 @@ struct AddExpenseView: View {
             }
             return "【\(re.name)】貸款\(n)-\(mortgageName)"
         }
-        // 固定支出 - 一般類別連結汽車
-        if expenseType == .fixed, showFixedAssetLink, selectedFixedAssetLink == .vehicle,
-           let id = fixedLinkVehicleId,
-           let vehicle = financeStore.vehicles.first(where: { $0.id == id }) {
-            let n = itemNumber(in: vehicle.fixedExpenses) { $0.linkedExpenseId }
-            return "項目 \(n)：\(vehicle.name)-\(selectedFixedCategory.rawValue)"
-        }
         return nil
+    }
+
+    /// [v25.538] 連到車子的記帳，名稱空白時用的「車名-分類名」（決定 19）。
+    /// 不再加「項目 N」：N 是鏡像的位置，刪掉中間一筆新舊就撞號，打開編輯還會重新編號蓋掉名稱。
+    /// 車險不套（決定 8），名稱照你打的。
+    private var vehicleDefaultTitle: String? {
+        guard !isInsurance, let id = targetVehicleId,
+              let vehicle = financeStore.vehicles.first(where: { $0.id == id }) else { return nil }
+        if expenseType == .variable { return "\(vehicle.name)-\(selectedVehicleExpenseCategory.rawValue)" }
+        if isCarLoan { return "\(vehicle.name)-車貸" }
+        return "\(vehicle.name)-\(selectedFixedCategory.rawValue)"
+    }
+
+    /// 舊版的自動名稱：「項目 N：車名-分類」（N 是數字），或房貸的「【房名】貸款N-…」
+    private static func isLegacyAutoTitle(_ t: String) -> Bool {
+        if t.hasPrefix("【") && t.contains("】貸款") { return true }
+        guard t.hasPrefix("項目 "), let colon = t.firstIndex(of: "：") else { return false }
+        let digits = t[t.index(t.startIndex, offsetBy: 3)..<colon]
+        return !digits.isEmpty && digits.allSatisfy { $0.isNumber }
     }
 
     private func itemNumber<T>(in items: [T], idExtractor: (T) -> UUID?) -> Int {
@@ -392,9 +741,26 @@ struct AddExpenseView: View {
     }
 
     private func applyAutoTitleIfLinked() {
+        // 先比對再寫入，避免 isMortgage 時每次 note 打字都重新賦值 @State title，
+        // 造成金額/標題區塊不必要的 body 重新 diff
         if let auto = linkedAssetTitle {
-            title = auto
+            if auto != title { title = auto }
+            return
         }
+        // [v25.538] 車子（決定 19）：名稱是你的。只有空白、還是上次自動填的、
+        // 或（連著車時）舊版的「項目 N：…」，才換成現在的「車名-分類名」；不連車了就清回空白
+        let current = title.trimmingCharacters(in: .whitespaces)
+        let def = vehicleDefaultTitle
+        let isAuto = current.isEmpty || current == autoVehicleTitle || current == def
+            || (def != nil && Self.isLegacyAutoTitle(current))
+        guard isAuto else { return }
+        let next = def ?? ""
+        if title != next {
+            // 名稱欄同時是地點欄（飲食等）時，這是我們改的、不是你打的：別因此清掉選好的地點或去搜尋
+            if showsInlinePlacePicker { suppressNextCompleterUpdate = true }
+            title = next
+        }
+        if autoVehicleTitle != def { autoVehicleTitle = def }
     }
 
     // MARK: - 基本資訊
@@ -437,6 +803,9 @@ struct AddExpenseView: View {
                 }
                 TextField(isMortgage ? "每月房貸金額" : (isCarLoan ? "每月車貸金額" : (isSavingsInsurance ? "保費金額" : "金額")), text: $amountText)
                     .keyboardType(.decimalPad)
+                    .focused($amountFieldFocused)
+                // 計算機：先算再填（例：多筆發票加總、帳單分攤），結果直接帶入金額
+                CalcFieldButton(text: $amountText, accent: expenseType == .variable ? .orange : .blue)
             }
 
             if showLoanCalcFields {
@@ -444,6 +813,7 @@ struct AddExpenseView: View {
                     Text("NT$").foregroundStyle(.secondary)
                     TextField("總貸款金額", text: $loanTotalAmountText)
                         .keyboardType(.decimalPad)
+                    CalcFieldButton(text: $loanTotalAmountText, accent: .blue)
                 }
             }
 
@@ -463,16 +833,32 @@ struct AddExpenseView: View {
                             .multilineTextAlignment(.trailing)
                             .lineLimit(2)
                     }
-                } else if supportsPlacePicker {
+                } else if showsInlinePlacePicker {
                     placeNameAutocomplete
                 } else {
-                    TextField(expenseType == .variable ? "名稱（留空自動以分類為名）" : "名稱", text: $title)
+                    TextField(namePlaceholder, text: $title)
+                }
+                // 快速選取膠囊模板：同分類最近用過的品名（用餐/醫療/娛樂等全分類適用），
+                // 點一下帶入名稱欄；放在 if/else 之外讓地點選擇器分支（用餐/娛樂）也吃得到
+                if expenseType == .variable {
+                    QuickPickCapsuleRow(options: recentCategoryTitles, selection: $title, accent: .green)
                 }
             }
 
+            // [v25.365] 汽車：地點自成一列（名稱欄已被「項目 N：型號-類別」佔用），
+            // 停車場／充電站／加油站選完會一併存下座標，之後才畫得出里程路線圖。
+            if usesSeparatePlaceField {
+                placeNameAutocomplete
+            }
+
             // 扣款目標（進階模式或固定支出才顯示）
-            if showBankPicker && !isSavingsInsurance {
+            // [v25.563] 儲蓄險也可以選從哪扣（以前選不到）；外幣保單只列同幣別的子帳戶和信用卡（bankChoices）
+            if showBankPicker {
                 bankPicker
+                paymentHints
+            } else if showPaymentCapsule {
+                paymentCapsule
+                paymentHints
             }
 
             if showLoanCalcFields {
@@ -485,27 +871,58 @@ struct AddExpenseView: View {
             }
 
             // 備註（移到基本資訊最下方；變動支出基本模式時隱藏）
-            if expenseType == .fixed || advancedMode {
-                TextField("備註", text: $note, axis: .vertical).lineLimit(3)
+            // [v25.516] 掛在某一站的例外。景點卡與花費氣泡的提示列叫使用者
+            // 點進來補「備註」，而這一欄原本只綁 advancedMode——那是
+            // @AppStorage、不跨裝置、使用者也關得掉（表單標頭那顆「進階」）。
+            // 換機或關掉之後，提示列會指向一張沒有那個欄位的表單。
+            // 承諾只跟「這筆有掛站別」有關，不該綁在一顆全域開關上。
+            if expenseType == .fixed || advancedMode || linkedTripStopId != nil {
+                TextField(notePrompt, text: $note, axis: .vertical).lineLimit(3)
             }
         } header: {
-            HStack {
+            // 美化：左側 Capsule 色條 + 強化標題字重，進階 Toggle 加圖示
+            HStack(spacing: 10) {
+                Capsule()
+                    .fill(
+                        LinearGradient(
+                            colors: [expenseType == .variable ? Color.orange : Color.blue,
+                                     expenseType == .variable ? Color.orange.opacity(0.55) : Color.blue.opacity(0.55)],
+                            startPoint: .top, endPoint: .bottom
+                        )
+                    )
+                    .frame(width: 4, height: 16)
                 Text("基本資訊")
+                    .font(.subheadline.weight(.semibold))
                 Spacer()
                 if expenseType == .variable {
-                    Toggle("進階", isOn: $advancedMode.animation())
-                        .toggleStyle(.switch)
-                        .controlSize(.mini)
-                        .font(.caption2)
+                    HStack(spacing: 4) {
+                        Image(systemName: advancedMode ? "slider.horizontal.3" : "slider.horizontal.below.rectangle")
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundStyle(advancedMode ? .orange : .secondary)
+                        Toggle("進階", isOn: $advancedMode.animation())
+                            .toggleStyle(.switch)
+                            .controlSize(.mini)
+                            .font(.caption2)
+                            .tint(.orange)
+                    }
                 }
             }
             .textCase(.none)
         }
     }
 
-    /// 是否顯示名稱欄位：進階模式 / 固定支出 / 已連結資產 / 飲食類別（要選店家）都顯示
+    /// 是否顯示名稱欄位：進階模式 / 固定支出 / 已連結資產 / 飲食類別（要選店家）都顯示。
+    /// 汽車的地點是獨立一列（usesSeparatePlaceField），不因此多開一個名稱欄。
+    /// [v25.538] 連到車子時名稱欄可以自己打，也要在基本模式看得到（以前是唯讀的自動名稱）
     private var showNameField: Bool {
-        expenseType == .fixed || advancedMode || linkedAssetTitle != nil || supportsPlacePicker
+        expenseType == .fixed || advancedMode || linkedAssetTitle != nil || showsInlinePlacePicker
+            || targetVehicleId != nil
+    }
+
+    /// 名稱欄的提示字：連到車子時寫出留空會用的名稱（決定 19）
+    private var namePlaceholder: String {
+        if let def = vehicleDefaultTitle { return "名稱（留空自動用「\(def)」）" }
+        return expenseType == .variable ? "名稱（留空自動以分類為名）" : "名稱"
     }
 
     /// 是否顯示扣款目標選單
@@ -515,10 +932,18 @@ struct AddExpenseView: View {
         return expenseType == .fixed || advancedMode
     }
 
+    /// [v25.532] 貸款年限輸入框的數字。貼上「inf」「1e30」或多打一串 0 時，Int(年限 × 12) 會閃退；
+    /// 存進去之後 HouseFacts 每次重畫都要逐期算上百萬期，算出的利率是無限大、JSON 也存不了檔。
+    /// 看不懂或不是有限數字的當沒填；超過 100 年的當 100 年（1200 期，跟期數的上限一樣）。
+    private var loanYearsValue: Double? {
+        guard let y = Double(loanYearsText), y.isFinite else { return nil }
+        return min(y, 100)
+    }
+
     private func computedLoanRate() -> Double? {
         let monthly = Double(amountText) ?? 0
         let total = Double(loanTotalAmountText) ?? 0
-        let years = Double(loanYearsText) ?? 0
+        let years = loanYearsValue ?? 0
         guard monthly > 0, total > 0, years > 0 else { return nil }
         let totalPaid = monthly * 12 * years
         let totalInterest = totalPaid - total
@@ -529,36 +954,52 @@ struct AddExpenseView: View {
     private var loanCalcRow: some View {
         let monthly = Double(amountText) ?? 0
         let total = Double(loanTotalAmountText) ?? 0
-        let years = Double(loanYearsText) ?? 0
+        let years = loanYearsValue ?? 0
         if monthly > 0 && total > 0 && years > 0 {
             let totalPaid = monthly * 12 * years
             let totalInterest = totalPaid - total
             let avgAnnualRate = (totalInterest / total / years) * 100
-            VStack(spacing: 6) {
-                HStack {
-                    Text("貸款總繳").font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    Text(fmtCurrency(totalPaid)).font(.caption.bold())
-                }
-                HStack {
-                    Text("利息總額").font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    Text(fmtCurrency(totalInterest)).font(.caption.bold()).foregroundStyle(.orange)
-                }
-                HStack {
-                    Text("實際年利率（估算）").font(.caption).foregroundStyle(.secondary)
-                    Spacer()
-                    Text(String(format: "%.2f%%", avgAnnualRate)).font(.caption.bold()).foregroundStyle(.blue)
-                }
+            // 美化：三欄 KPI 小卡，彩色膠囊數值，對齊 savingsCalcSection 卡片規格
+            VStack(spacing: 0) {
+                loanKpiRow(label: "貸款總繳", value: fmtCurrency(totalPaid), valueColor: .primary)
+                Divider().padding(.leading, 8)
+                loanKpiRow(label: "利息總額", value: fmtCurrency(totalInterest), valueColor: .orange)
+                Divider().padding(.leading, 8)
+                loanKpiRow(label: "實際年利率（估算）",
+                           value: String(format: "%.2f%%", avgAnnualRate),
+                           valueColor: .blue)
             }
-            .padding(.vertical, 4)
+            .padding(.vertical, 2)
         }
     }
 
-    private func fmtCurrency(_ v: Double) -> String {
+    /// 美化：貸款試算 KPI 橫列（label + 彩色膠囊值）
+    private func loanKpiRow(label: String, value: String, valueColor: Color) -> some View {
+        HStack {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(value)
+                .font(.caption.weight(.bold))
+                .foregroundStyle(valueColor)
+                .padding(.horizontal, 7)
+                .padding(.vertical, 3)
+                .background(valueColor.opacity(0.10))
+                .clipShape(Capsule())
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 2)
+    }
+
+    private static let fmtCurrencyFormatter: NumberFormatter = {
         let f = NumberFormatter()
         f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
-        return f.string(from: NSNumber(value: v)) ?? "NT$0"
+        return f
+    }()
+
+    private func fmtCurrency(_ v: Double) -> String {
+        Self.fmtCurrencyFormatter.string(from: NSNumber(value: v)) ?? "NT$0"
     }
 
     // MARK: - 多張照片 Section
@@ -576,22 +1017,38 @@ struct AddExpenseView: View {
                 onDeleteFile: { name in
                     Expense.deletePhoto(name)
                 },
+                onSavePDF: { data in
+                    Expense.savePDF(data, expenseId: expenseId)
+                },
                 title: "照片"
             )
             .padding(.vertical, 4)
         } header: {
             Text("照片")
         } footer: {
-            Text("可拍照或從相簿一次選多張，會跟著本筆支出儲存。儲存後會在美食地圖等頁面顯示。")
+            Text("可拍照、從相簿一次選多張，或從檔案選 PDF 帳單原檔，會跟著本筆支出儲存。儲存後會在美食地圖等頁面顯示。")
         }
     }
 
     /// 為新增模式提供穩定的 expenseId（避免每次 body 重建時產生新 UUID）
     @State private var generatedNewExpenseId: UUID = UUID()
 
-    // MARK: - 地點欄位（飲食 / 娛樂 / 購物 / 日用品 / 醫療）
+    /// 取消時清除本次 session 新增、尚未存檔的照片：photoGallerySection 拍照/多選會立即寫檔並存進
+    /// photoFileNames，但只有 saveExpense() 才會把這個陣列寫回 Expense 紀錄；按「取消」過去直接
+    /// dismiss() 完全不清理，這些照片會永久留在磁碟並被 CloudKit 備份同步上去，變成孤兒檔案。
+    /// 比照 RenovationPhotoEditor.cancel() 同型寫法：只刪「原本沒有」的新增檔案，既有照片不動。
+    private func cancelAddExpense() {
+        let originalPhotos = Set(editingExpense?.photoFileNames ?? [])
+        for name in photoFileNames where !originalPhotos.contains(name) {
+            Expense.deletePhoto(name)
+        }
+        dismiss()
+    }
 
-    /// 名稱欄位列：輸入店名同時跑出歷史地點 + Apple Maps 候選清單
+    // MARK: - 地點欄位（飲食 / 娛樂 / 購物 / 日用品 / 醫療 / 汽車）
+
+    /// 名稱欄位列：輸入店名同時跑出歷史地點 + Apple Maps 候選清單。
+    /// 汽車分類時這一列是獨立的「地點」（綁 placeName），其餘分類就是名稱欄本身（綁 title）。
     @ViewBuilder
     private var placeNameAutocomplete: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -599,18 +1056,18 @@ struct AddExpenseView: View {
                 Image(systemName: placeIcon)
                     .foregroundStyle(placeIconColor)
                     .frame(width: 22)
-                TextField(placeNamePrompt, text: $title)
+                TextField(placeNamePrompt, text: placeQuery)
                     .focused($titleFieldFocused)
                     .textInputAutocapitalization(.never)
                     .disableAutocorrection(true)
-                if placeLatitude != nil {
+                if hasResolvedPlace {
                     Image(systemName: "mappin.circle.fill")
                         .foregroundStyle(.green)
                         .font(.caption)
                 }
-                if !title.isEmpty {
+                if !placeQueryText.isEmpty {
                     Button {
-                        title = ""
+                        placeQuery.wrappedValue = ""
                         clearPlace()
                         expandedSuggestions = false
                     } label: {
@@ -620,13 +1077,34 @@ struct AddExpenseView: View {
                     .buttonStyle(.plain)
                 }
             }
-            if let addr = placeAddress, !addr.isEmpty, placeLatitude != nil {
+            if let addr = placeAddress, !addr.isEmpty, hasResolvedPlace {
                 Text(addr)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
                     .padding(.leading, 32)
             }
+            // [v25.432] 打字搜不到的地方（路邊那攤、產業道路旁的維修廠），
+            // 直接在地圖上挪過去。跟旅遊規劃用的是同一個畫面。
+            VStack(alignment: .leading, spacing: 6) {
+                MapPlacePickerButton(
+                    startCoordinate: mapPickerStart,
+                    hasCoordinate: hasResolvedPlace,
+                    accent: placeIconColor,
+                    subtitle: "打字搜不到的店家，直接挪地圖對準就好",
+                    onPick: { place in
+                        applyMapPickedPlace(name: place.name, address: place.address,
+                                            coordinate: place.coordinate)
+                    },
+                    onClear: { clearPlace() })
+                if !placeFill.offer.isEmpty {
+                    PlaceOfferRow(offer: placeFill.offer) {
+                        placeFill.acceptOffer(into: placeQuery,
+                                              addressField: placeAddressText)
+                    }
+                }
+            }
+            .padding(.leading, 32)
             if titleFieldFocused {
                 placeSuggestionsList
             }
@@ -635,34 +1113,87 @@ struct AddExpenseView: View {
         .onAppear {
             LocationProvider.shared.requestIfNeeded()
             restaurantCompleter.setRegion(LocationProvider.shared.searchRegion)
-            if !title.isEmpty { restaurantCompleter.queryFragment = title }
+            if !placeQueryText.isEmpty { restaurantCompleter.queryFragment = placeQueryText }
+            cachedPastSuggestions = computePastSuggestions()
         }
-        .onChange(of: title) { _, newValue in
+        .onChange(of: placeQueryText) { _, newValue in
             if suppressNextCompleterUpdate {
                 suppressNextCompleterUpdate = false
                 return
             }
-            restaurantCompleter.queryFragment = newValue
             expandedSuggestions = false
-            // 重新輸入時清掉之前選定的座標 / 地址
             if placeLatitude != nil || placeLongitude != nil || placeAddress != nil {
                 clearPlace()
             }
+            // 防抖：300ms 後才真正送出查詢，避免每次按鍵都觸發 MKLocalSearchCompleter，
+            // 同時把「之前去過」對 store.expenses 的線性掃描一併收進同一個防抖視窗，
+            // 避免每次按鍵都在 body 求值時同步全量掃描整個記帳歷史。
+            completerDebounceTask?.cancel()
+            completerDebounceTask = Task {
+                try? await Task.sleep(nanoseconds: 300_000_000)
+                guard !Task.isCancelled else { return }
+                restaurantCompleter.queryFragment = newValue
+                cachedPastSuggestions = computePastSuggestions()
+            }
+        }
+        // 分類（汽車再細到支出類別）一變，「之前去過」的比對範圍就換了，重算一次
+        .onChange(of: placeScopeKey) { _, _ in
+            cachedPastSuggestions = computePastSuggestions()
         }
         .onChange(of: locationProvider.lastLocation) { _, _ in
             restaurantCompleter.setRegion(LocationProvider.shared.searchRegion)
-            if !title.isEmpty { restaurantCompleter.queryFragment = title }
+            if !placeQueryText.isEmpty { restaurantCompleter.queryFragment = placeQueryText }
         }
     }
 
     private var placeNamePrompt: String {
+        if usesSeparatePlaceField { return vehiclePlacePrompt }
         switch selectedVariableCategory {
         case .food: return "店名 / 餐廳"
         case .entertainment: return "電影院 / KTV / 場館"
         case .shopping: return "百貨 / 商家"
         case .dailyNecessities: return "賣場 / 超市"
         case .medical: return "醫院 / 診所 / 藥局"
+        // [v25.479] 這兩類是跟著地點白名單一起開放的，給它們自己的提示字，
+        // 不然一律寫「名稱」會看不出這一欄現在可以挑地點
+        case .transportation: return "車站 / 停車場 / 搭乘地點"
+        case .education: return "學校 / 補習班 / 書店"
         default: return "名稱"
+        }
+    }
+
+    /// [v25.515] 從行程某一站記帳時，名稱欄已經被那一站的地點名佔住
+    /// （fillPlaceFromStop → applyMapPickedPlace → placeQuery，非汽車分類
+    /// placeQuery 綁的就是 $title），而同一站常常會有三、四筆，唯一能寫
+    /// 「這筆是什麼」的欄位就是備註。提示字直接講它要幹什麼——那一欄只寫
+    /// 「備註」看起來是可以不填的，結果行程頁上好幾筆都只剩分類名。
+    ///
+    /// 這不是改根因：prompt 不會進存檔、不碰 placeQuery、不碰三張地圖的聚合鍵
+    /// （FoodMapView／TravelMapView／MedicalMapView 都拿 exp.title 當 key），
+    /// 也不碰編輯載入路徑。只是讓那一欄說出自己的用途。
+    private var notePrompt: String {
+        linkedTripStopId != nil ? "備註（這筆是什麼：門票／紀念品／點心）" : "備註"
+    }
+
+    /// 沒有任何候選時的說明。字串在 ViewBuilder 外組好再丟進 Text，避免型別檢查逾時。
+    private var noPlaceMatchHint: String {
+        let q = placeQueryText.trimmingCharacters(in: .whitespaces)
+        return usesSeparatePlaceField
+            ? "找不到符合的地點，將以「\(q)」儲存（沒有座標）。"
+            : "找不到符合的地點，將以「\(q)」儲存。"
+    }
+
+    /// 汽車地點欄的提示字。未連結車輛時（基本模式）還沒有支出類別，給一個泛用提示。
+    private var vehiclePlacePrompt: String {
+        guard selectedAssetLink == .vehicle else { return "地點（停車場 / 充電站 / 加油站）" }
+        switch selectedVehicleExpenseCategory {
+        case .fuel: return "加油站"
+        case .electricity: return "充電站"
+        case .parking: return "停車場"
+        case .maintenance: return "保養廠"
+        case .wash: return "洗車場"
+        case .repair: return "維修廠"
+        case .other: return "地點"
         }
     }
 
@@ -733,11 +1264,11 @@ struct AddExpenseView: View {
                 RoundedRectangle(cornerRadius: 10, style: .continuous)
                     .stroke(Color.secondary.opacity(0.15), lineWidth: 0.5)
             )
-        } else if !title.trimmingCharacters(in: .whitespaces).isEmpty {
+        } else if !placeQueryText.trimmingCharacters(in: .whitespaces).isEmpty {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
                     .foregroundStyle(.tertiary)
-                Text("找不到符合的地點，將以「\(title)」儲存。")
+                Text(noPlaceMatchHint)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                 Spacer()
@@ -757,10 +1288,10 @@ struct AddExpenseView: View {
                     .font(.callout)
             }
             VStack(alignment: .leading, spacing: 2) {
-                Text(item.title)
+                // [v25.520] 地點名稱過長改跑馬燈（原本切成「…」）
+                MarqueeText(item.title)
                     .font(.subheadline.weight(.medium))
                     .foregroundStyle(.primary)
-                    .lineLimit(1)
                 if !item.subtitle.isEmpty {
                     Text(item.subtitle)
                         .font(.caption2)
@@ -769,6 +1300,12 @@ struct AddExpenseView: View {
                 }
             }
             Spacer()
+                    // [v25.499] 距離。使用者回報：搜尋只跳地址、沒有距離，
+                    // 常常不知道該選哪一個。past 來源沒有座標可算，所以只有
+                    // Apple Maps 那幾筆有。
+            if let completion = item.completion {
+                PlaceDistanceBadge(meters: restaurantCompleter.distance(for: completion))
+            }
             Image(systemName: "arrow.up.left")
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
@@ -778,33 +1315,54 @@ struct AddExpenseView: View {
         .contentShape(Rectangle())
     }
 
-    /// 合併「之前去過」（依名稱含查詢字串）與 Apple Maps POI 結果，去重後產生候選清單
-    private var allPlaceSuggestions: [PlaceSuggestion] {
-        let q = title.trimmingCharacters(in: .whitespaces).lowercased()
+    /// 「之前去過」候選：同類別、含座標、名稱含查詢字串（空字串時也顯示所有歷史）。
+    /// 對 store.expenses 做全量線性掃描，只在 cachedPastSuggestions 的 300ms 防抖視窗
+    /// 或分類切換時呼叫，避免每次按鍵都同步全量掃描整個記帳歷史。
+    private func computePastSuggestions() -> [PlaceSuggestion] {
+        let q = placeQueryText.trimmingCharacters(in: .whitespaces).lowercased()
+        // 汽車要再依支出類別過濾，免得選「停車」時跳出加油站與保養廠
+        let vehicleScope: VehicleVariableCategory? =
+            (usesSeparatePlaceField && selectedAssetLink == .vehicle) ? selectedVehicleExpenseCategory : nil
         var seenKeys: Set<String> = []
         var output: [PlaceSuggestion] = []
-
-        // 1) 之前去過：同類別、含座標、名稱含查詢字串（空字串時也顯示所有歷史）
         for exp in store.expenses
             where exp.expenseType == .variable
                 && exp.variableCategory == selectedVariableCategory
                 && exp.placeLatitude != nil
-                && exp.placeLongitude != nil
-                && !exp.title.trimmingCharacters(in: .whitespaces).isEmpty {
-            if !q.isEmpty && !exp.title.lowercased().contains(q) { continue }
-            let key = "past|\(exp.title.lowercased())|\(exp.placeAddress?.lowercased() ?? "")"
+                && exp.placeLongitude != nil {
+            if let scope = vehicleScope, exp.vehicleExpenseCategory != scope { continue }
+            // 汽車的地點名稱存在 placeName（title 被自動命名佔用），其餘分類就是 title
+            let rawName = usesSeparatePlaceField ? (exp.placeName ?? "") : exp.title
+            let name = rawName.trimmingCharacters(in: .whitespaces)
+            if name.isEmpty { continue }
+            if !q.isEmpty && !name.lowercased().contains(q) { continue }
+            let key = "past|\(name.lowercased())|\(exp.placeAddress?.lowercased() ?? "")"
             if seenKeys.contains(key) { continue }
             seenKeys.insert(key)
             output.append(PlaceSuggestion(
                 id: key,
                 source: .past,
-                title: exp.title,
+                title: name,
                 subtitle: exp.placeAddress ?? "",
                 completion: nil,
                 latitude: exp.placeLatitude,
                 longitude: exp.placeLongitude,
                 address: exp.placeAddress
             ))
+        }
+        return output
+    }
+
+    /// 合併「之前去過」（快取結果）與 Apple Maps POI 結果，去重後產生候選清單
+    private var allPlaceSuggestions: [PlaceSuggestion] {
+        var seenKeys: Set<String> = []
+        var output: [PlaceSuggestion] = []
+
+        // 1) 之前去過：讀取已由 300ms 防抖節流計算好的快取，不在此同步掃描
+        for item in cachedPastSuggestions {
+            if seenKeys.contains(item.id) { continue }
+            seenKeys.insert(item.id)
+            output.append(item)
         }
 
         // 2) Apple Maps：搜尋字串非空才會有結果
@@ -833,19 +1391,27 @@ struct AddExpenseView: View {
     /// 套用使用者選擇的候選
     private func applySuggestion(_ item: PlaceSuggestion) {
         suppressNextCompleterUpdate = true
-        title = item.title
+        placeQuery.wrappedValue = item.title
         expandedSuggestions = false
+        // 遞增 token，讓任何仍在飛行中的舊 .apple resolve 回呼失效，避免它稍後才完成、覆寫這次選擇的地址／座標
+        placeSelectionToken += 1
+        // 記住這組座標是在哪個分類（汽車再細到支出類別）選的，之後改分類就不會誤用
+        placeScopeStamp = placeScopeKey
         switch item.source {
         case .past:
             placeAddress = item.address
             placeLatitude = item.latitude
             placeLongitude = item.longitude
+            // 這個名稱與地址是挑進來的、不是打進來的——之後在地圖上重挑
+            // 一個地方時才會跟著換，而不是卡在上一家店的名字上
+            placeFill.markFilled(name: item.title, address: item.address ?? "")
             titleFieldFocused = false
         case .apple:
             // 先帶 fallback，再呼叫 resolve 補完整地址 / 座標
             placeAddress = item.address
             placeLatitude = nil
             placeLongitude = nil
+            let myToken = placeSelectionToken
             if let c = item.completion {
                 restaurantCompleter.resolve(c) { mapItem in
                     guard let mapItem else { return }
@@ -854,9 +1420,13 @@ struct AddExpenseView: View {
                     let lon = mapItem.placemark.coordinate.longitude
                     let fallback = item.address
                     Task { @MainActor in
+                        // 期間若使用者又選了別的候選，token 已前進，此筆過期結果直接丟棄，避免覆寫成不相符的座標
+                        guard myToken == placeSelectionToken else { return }
                         placeAddress = resolved.isEmpty ? fallback : resolved
                         placeLatitude = lat
                         placeLongitude = lon
+                        placeFill.markFilled(name: item.title,
+                                             address: placeAddress ?? "")
                     }
                 }
             }
@@ -864,25 +1434,81 @@ struct AddExpenseView: View {
         }
     }
 
+    /// 地圖選位置的起點：這一筆已經有座標就停在那裡，
+    /// 沒有就交給 MapPlacePickerSheet 用使用者目前位置
+    private var mapPickerStart: CLLocationCoordinate2D? {
+        guard hasResolvedPlace, let la = placeLatitude, let lo = placeLongitude else { return nil }
+        return CLLocationCoordinate2D(latitude: la, longitude: lo)
+    }
+
+    /// placeAddress 是 Optional，共用模板要的是 Binding<String>，這裡轉一層。
+    /// 空字串存回 nil——「有這個欄位但裡面是空的」跟「沒有地址」在儲存端是同一件事。
+    private var placeAddressText: Binding<String> {
+        Binding(
+            get: { placeAddress ?? "" },
+            set: { placeAddress = $0.isEmpty ? nil : $0 }
+        )
+    }
+
+    /// 從地圖上挑了一個位置。
+    private func applyMapPickedPlace(name picked: String?, address addr: String,
+                                     coordinate: CLLocationCoordinate2D) {
+        // 仍在飛行中的 Apple 候選 resolve 要作廢，不然它晚一點回來會蓋掉這次挑的座標
+        placeSelectionToken += 1
+        placeScopeStamp = placeScopeKey
+        placeLatitude = coordinate.latitude
+        placeLongitude = coordinate.longitude
+        placeFill.apply(name: picked, address: addr,
+                        into: placeQuery, addressField: placeAddressText)
+        // 帶入名稱會觸發搜尋候選，先擋掉這一次
+        suppressNextCompleterUpdate = true
+        titleFieldFocused = false
+        // [v25.467] 先選旅遊、後選地點的順序也要能對上（只在還沒指定站別時）。
+        // 這裡不會無限遞迴：autoPickStop 設了站別會觸發 fillPlaceFromStop，
+        // 而那一支要求「還沒有座標」——此刻座標剛設好，它會直接返回。
+        autoPickStop()
+    }
+
     /// 清掉先前綁定的地點資料
     private func clearPlace() {
         placeAddress = nil
         placeLatitude = nil
         placeLongitude = nil
+        placeScopeStamp = ""
+        // 同步作廢任何仍在飛行中的 resolve 回呼，避免清除後被舊結果覆寫回來
+        placeSelectionToken += 1
     }
 
     private var placeIcon: String {
+        if usesSeparatePlaceField { return vehiclePlaceIcon }
         switch selectedVariableCategory {
         case .food: return "fork.knife.circle.fill"
         case .entertainment: return "gamecontroller.fill"
         case .shopping: return "bag.fill"
         case .dailyNecessities: return "house.fill"
         case .medical: return "cross.case.fill"
+        case .transportation: return "tram.circle.fill"
+        case .education: return "book.circle.fill"
         default: return "mappin.circle.fill"
         }
     }
 
+    /// 汽車地點欄的圖示：依支出類別換，未連結車輛時用通用地標
+    private var vehiclePlaceIcon: String {
+        guard selectedAssetLink == .vehicle else { return "mappin.and.ellipse" }
+        switch selectedVehicleExpenseCategory {
+        case .fuel: return "fuelpump.fill"
+        case .electricity: return "bolt.car.fill"
+        case .parking: return "parkingsign.circle.fill"
+        case .maintenance: return "wrench.and.screwdriver.fill"
+        case .wash: return "drop.circle.fill"
+        case .repair: return "hammer.fill"
+        case .other: return "mappin.and.ellipse"
+        }
+    }
+
     private var placeIconColor: Color {
+        if usesSeparatePlaceField { return .teal }
         switch selectedVariableCategory {
         case .food: return .orange
         case .entertainment: return .pink
@@ -913,50 +1539,74 @@ struct AddExpenseView: View {
         allCreditCardMilestones.filter { $0.isDisabled != true }
     }
 
-    private func bankCurrencies(for ms: LifeMilestone) -> [String] {
-        let codes = (ms.bankDeposits ?? [])
-            .filter { !$0.isWithdrawal }
-            .map(\.currencyCode)
-        var unique: [String] = []
-        for c in codes where !unique.contains(c) { unique.append(c) }
-        return unique.isEmpty ? ["NT$"] : unique
+    // [v25.563] 這個帳戶有哪些幣別、選單括號裡的數字都改讀 lifeStore.wealthFacts（同一套數字，D18、D20、C1、C2）：
+    // 以前這裡自己一份「帳戶有哪些幣別」（只看存款紀錄的幣別，美金月薪入帳的玉山選不到美金）
+    // 和一份簡化餘額（不展開固定支出、月薪、不換匯、卡費照刷卡日扣：台新寫成 5.1 萬）。
+
+    /// 儲蓄險而且保單是外幣：扣款只能扣同幣別的子帳戶（例：美元保單只列「玉山 · 美金」），回那個幣別；其他 nil
+    private var savingsForeignCode: String? {
+        guard isSavingsInsurance, !FinanceRates.isNTD(insCurrencyCode) else { return nil }
+        return WealthFacts.norm(insCurrencyCode)
     }
 
-    /// 計算銀行的目前總額（含信用卡彙總扣款）
-    private func bankBalance(for ms: LifeMilestone) -> Double {
-        let now = Date()
-        var total: Double = 0
-        for dep in ms.bankDeposits ?? [] {
-            guard dep.date <= now else { continue }
-            if let expId = dep.linkedExpenseId,
-               let exp = store.expenses.first(where: { $0.id == expId }),
-               exp.linkedCreditCardMilestoneId != nil {
-                continue
-            }
-            total += dep.isWithdrawal ? -dep.amount : dep.amount
-        }
-        let cards = lifeStore.milestones.filter {
-            $0.financeSubCategory == .creditCard && $0.linkedBankMilestoneId == ms.id
-        }
-        for card in cards {
-            let exps = store.expenses.filter {
-                $0.linkedCreditCardMilestoneId == card.id && $0.date <= now
-            }
-            for exp in exps { total -= exp.amount }
-        }
-        return total
+    /// 扣款選單「銀行」那一段：沒收起來、不是定存的銀行（facts.pickerBanks）；外幣儲蓄險只留有那個幣別的
+    private func bankChoices(_ facts: WealthFacts) -> [WealthFacts.Account] {
+        guard let code = savingsForeignCode else { return facts.pickerBanks }
+        return facts.pickerBanks.filter { $0.currencies.contains(code) }
     }
 
-    private func formatBankBalance(_ value: Double) -> String {
-        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0
-        if abs(value) >= 10000 {
-            let wan = value / 10000
-            let str = f.string(from: NSNumber(value: wan)) ?? "0"
-            return "NT$ \(str)萬"
+    /// 這個帳戶可以選的幣別：外幣儲蓄險只有保單那個幣別；其他照帳戶有的幣別（台幣在前）
+    private func bankChoiceCodes(_ acc: WealthFacts.Account) -> [String] {
+        if let code = savingsForeignCode { return [code] }
+        return acc.currencies
+    }
+
+    /// 選了某個銀行的某個幣別（清掉信用卡）
+    private func pickBank(_ id: UUID, code: String) {
+        selectedBankMilestoneId = id
+        selectedBankCurrency = code
+        selectedCreditCardMilestoneId = nil
+    }
+
+    /// 銀行一列：好幾個幣別是子選單「美金（存摺 美金 3,200）」；一個幣別直接一顆「台新銀行（存摺 NT$12.8萬）」
+    @ViewBuilder
+    private func bankChoiceRow(_ acc: WealthFacts.Account) -> some View {
+        let codes = bankChoiceCodes(acc)
+        if codes.count > 1 {
+            Menu(acc.pickerLabel) {
+                ForEach(codes, id: \.self) { code in
+                    Button(acc.pickerLabel(code: code)) { pickBank(acc.id, code: code) }
+                }
+            }
         } else {
-            let str = f.string(from: NSNumber(value: value)) ?? "0"
-            return "NT$ \(str)"
+            Button(singleChoiceLabel(acc, code: codes.first ?? "NT$")) { pickBank(acc.id, code: codes.first ?? "NT$") }
         }
+    }
+
+    /// 一個幣別那一列的字：帳戶本來就只有一個幣別 →「台新銀行（存摺 NT$12.8萬）」；
+    /// 外幣儲蓄險從好幾個幣別裡只留保單那一個 →「玉山銀行 · 美金（存摺 美金 3,200）」（括號是那個幣別的數字，不是整個帳戶的）
+    private func singleChoiceLabel(_ acc: WealthFacts.Account, code: String) -> String {
+        guard acc.currencies.count > 1 else { return acc.pickerLabel }
+        return "\(acc.name) · \(acc.pickerLabel(code: code))"
+    }
+
+    /// [v25.564] 信用卡一列：「CUBE（還能刷 27.5萬）」；沒填額度只寫卡名。
+    /// 卡費從哪個帳戶扣由卡那一期的扣款帳戶決定（judge §6.2），選單不再寫銀行
+    private func cardChoiceLabel(_ card: LifeMilestone, facts: WealthFacts) -> String {
+        let name = WealthFacts.displayName(of: card, book: lifeStore.wealthBook)
+        guard let left = facts.card(card.id)?.available else { return name }
+        return name + "（還能刷 " + WealthFormChoiceText.wan(left) + "）"
+    }
+
+    /// [v25.563] 改了外幣儲蓄險的幣別：已選的銀行幣別跟新的保單幣別不一樣就清掉銀行（選的是信用卡不動）。
+    /// 寫在幣別選單的按鈕裡、不用 onChange：onChange 在打開編輯（loadEditing 帶回幣別）時也會跑，舊資料會被默默清掉
+    private func setInsCurrency(_ code: String) {
+        insCurrencyCode = code
+        guard selectedCreditCardMilestoneId == nil, selectedBankMilestoneId != nil,
+              !FinanceRates.isNTD(code),
+              WealthFacts.norm(selectedBankCurrency) != WealthFacts.norm(code) else { return }
+        selectedBankMilestoneId = nil
+        selectedBankCurrency = "NT$"
     }
 
     private var bankPickerLabel: String {
@@ -977,60 +1627,221 @@ struct AddExpenseView: View {
         return "未選擇"
     }
 
+    // MARK: - [v25.564] 付款膠囊、卡選單字、卡費提醒、對存摺以前的提示（judge §6.2 v3 列、§4.5 最後一條）
+
+    /// 扣款目標選單的內容（扣款目標那一列、簡易模式的付款膠囊共用）：不指定／銀行／信用卡
+    @ViewBuilder
+    private func paymentMenuItems(_ facts: WealthFacts) -> some View {
+        let banks = bankChoices(facts)
+        let cards = creditCardMilestones
+        Button("不指定") {
+            selectedBankMilestoneId = nil
+            selectedBankCurrency = "NT$"
+            selectedCreditCardMilestoneId = nil
+        }
+        if !banks.isEmpty {
+            Section("銀行") {
+                ForEach(banks) { acc in
+                    bankChoiceRow(acc)
+                }
+            }
+        }
+        if !cards.isEmpty {
+            Section("信用卡") {
+                ForEach(cards) { card in
+                    Button(cardChoiceLabel(card, facts: facts)) {
+                        selectedCreditCardMilestoneId = card.id
+                        selectedBankMilestoneId = card.linkedBankMilestoneId
+                        selectedBankCurrency = "NT$"
+                    }
+                }
+            }
+        }
+    }
+
+    /// 簡易模式（變動支出、沒開進階）也看得到刷哪張卡：一顆「付款」膠囊（有銀行帳戶或卡才出現）
+    private var showPaymentCapsule: Bool {
+        guard expenseType == .variable, !advancedMode else { return false }
+        return !bankMilestones.isEmpty || !creditCardMilestones.isEmpty
+    }
+
+    /// 「付款：CUBE」「付款：薪轉」「付款：不指定」
+    private var paymentCapsuleText: String {
+        if let id = selectedCreditCardMilestoneId,
+           let card = allCreditCardMilestones.first(where: { $0.id == id }) {
+            return "付款：" + WealthFacts.displayName(of: card, book: lifeStore.wealthBook)
+        }
+        if let id = selectedBankMilestoneId,
+           let ms = bankMilestones.first(where: { $0.id == id }) {
+            return "付款：" + WealthFacts.displayName(of: ms, book: lifeStore.wealthBook)
+        }
+        return "付款：不指定"
+    }
+
+    private var paymentCapsuleIcon: String {
+        if selectedCreditCardMilestoneId != nil { return "creditcard.fill" }
+        if selectedBankMilestoneId != nil { return "building.columns.fill" }
+        return "wallet.pass"
+    }
+
+    private var paymentCapsule: some View {
+        let facts = lifeStore.wealthFacts(expense: store, finance: financeStore)
+        return HStack {
+            Menu {
+                paymentMenuItems(facts)
+            } label: {
+                PaymentCapsuleLabel(icon: paymentCapsuleIcon, text: paymentCapsuleText)
+            }
+            Spacer(minLength: 0)
+        }
+    }
+
+    /// 付款選單下面的灰字：選了卡「算在 11/12 結帳那期，11/27 繳」；卡費提醒；對存摺以前的提示
+    @ViewBuilder
+    private var paymentHints: some View {
+        if let line = cardPeriodLine {
+            Text(line)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        if showsCardFeeReminder {
+            cardFeeReminderRow
+        }
+        if let line = anchorHintLine {
+            anchorHintRow(line)
+        }
+    }
+
+    /// 選了卡：這筆算在哪一期（用表單上的日期；結帳日、截止日讀一套數字）
+    private var cardPeriodLine: String? {
+        guard let id = selectedCreditCardMilestoneId else { return nil }
+        let facts = lifeStore.wealthFacts(expense: store, finance: financeStore)
+        guard let c = facts.card(id) else { return nil }
+        let close = WealthCardCycle.statementClose(for: date, billingDay: c.billingDay)
+        let due = WealthCardCycle.dueDate(close: close, billingDay: c.billingDay, paymentDay: c.paymentDay)
+        let base: String = "算在 " + WealthFormat.monthDay(close) + " 結帳那期，" + WealthFormat.monthDay(due) + " 繳"
+        // [v25.570] 日期還沒到（例：旅遊規劃先記的行程花費）：卡片頁先放在「日期還沒到的刷卡」，那天才進帳單
+        guard WealthCal.day(date) > WealthCal.day(Date()) else { return base }
+        return base + "（日期還沒到，卡片頁先列在「日期還沒到的刷卡」）"
+    }
+
+    /// 標題像「繳卡費」而且扣的是銀行（不是卡）：卡費 App 已經自己算了，記了會扣兩次
+    private var showsCardFeeReminder: Bool {
+        guard selectedCreditCardMilestoneId == nil, selectedBankMilestoneId != nil else { return false }
+        return title.contains("卡費") || title.contains("繳卡")
+    }
+
+    /// 從這個帳戶扣卡費的卡只有一張：〔改成標已繳〕標那張卡
+    private var cardFeeTargetCardId: UUID? {
+        guard let bank = selectedBankMilestoneId else { return nil }
+        let cards = creditCardMilestones.filter { $0.linkedBankMilestoneId == bank }
+        return cards.count == 1 ? cards.first?.id : nil
+    }
+
+    private var cardFeeReminderRow: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("卡費會在截止日自己從帳戶扣，不用記成支出", systemImage: "info.circle")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if let cardId = cardFeeTargetCardId {
+                Button("改成標已繳") { openPaidSheet(cardId) }
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.borderless)
+            }
+        }
+    }
+
+    /// 選了銀行、日期在那個帳戶最近一次對存摺那天（含）以前：「薪轉 10/1 已經對過存摺，這筆不會改變現在的數字」
+    /// （只看變動支出：固定支出以後每一期還是會扣）
+    private var anchorHintLine: String? {
+        guard expenseType == .variable, selectedCreditCardMilestoneId == nil,
+              let bank = selectedBankMilestoneId else { return nil }
+        let facts = lifeStore.wealthFacts(expense: store, finance: financeStore)
+        guard let acc = facts.account(bank), let last = acc.lastAnchorDate,
+              WealthCal.day(date) <= WealthCal.day(last) else { return nil }
+        return acc.name + " " + WealthFormat.monthDay(last) + " 已經對過存摺，這筆不會改變現在的數字"
+    }
+
+    private func anchorHintRow(_ line: String) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label(line, systemImage: "checkmark.seal")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Button("再對一次") { openAnchorSheet() }
+                .font(.caption.weight(.semibold))
+                .buttonStyle(.borderless)
+        }
+    }
+
+    /// 〔改成標已繳〕不擋付費（第 10 題）；標好了這張記帳也關、不存
+    private func openPaidSheet(_ cardId: UUID) {
+        wealthRevisionAtOpen = lifeStore.wealthRevision
+        closeAfterWealthSheet = true
+        wealthSheet = .paid(cardId)
+    }
+
+    /// 〔再對一次〕要訂閱（對存摺）
+    private func openAnchorSheet() {
+        guard let bank = selectedBankMilestoneId else { return }
+        guard SubscriptionManager.shared.isPremium else {
+            showWealthPremium = true
+            return
+        }
+        closeAfterWealthSheet = false
+        wealthSheet = .anchor(bank, selectedBankCurrency)
+    }
+
+    /// 財富小表單關掉：〔改成標已繳〕而且真的存了（財富的資料變了）→ 這張記帳也關、不存（卡費不用記成支出）
+    private func wealthSheetClosed() {
+        guard closeAfterWealthSheet else { return }
+        closeAfterWealthSheet = false
+        if lifeStore.wealthRevision != wealthRevisionAtOpen {
+            cancelAddExpense()
+        }
+    }
+
+    /// 新增變動支出：付款方式先帶上次用的（那張卡停用、帳戶收起來或不在了就不帶；從財富頁帶了卡或帳戶的不蓋）
+    private func applyLastPayment() {
+        guard !lastPaymentApplied else { return }
+        lastPaymentApplied = true
+        guard expenseType == .variable, editingExpense == nil,
+              selectedBankMilestoneId == nil, selectedCreditCardMilestoneId == nil else { return }
+        if preset?.paymentCardId != nil || preset?.paymentBankId != nil { return }
+        let parts: [String] = lastPaymentRaw.split(separator: ":").map { String($0) }
+        guard parts.count >= 2, let id = UUID(uuidString: parts[1]) else { return }
+        if parts[0] == "card" {
+            guard let card = creditCardMilestones.first(where: { $0.id == id }) else { return }
+            selectedCreditCardMilestoneId = card.id
+            selectedBankMilestoneId = card.linkedBankMilestoneId
+            selectedBankCurrency = "NT$"
+        } else if parts[0] == "bank" {
+            let facts = lifeStore.wealthFacts(expense: store, finance: financeStore)
+            guard let acc = bankChoices(facts).first(where: { $0.id == id }) else { return }
+            let want: String = parts.count >= 3 ? parts[2] : "NT$"
+            let codes = bankChoiceCodes(acc)
+            pickBank(acc.id, code: codes.contains(want) ? want : (codes.first ?? "NT$"))
+        }
+    }
+
+    /// 存檔時記住這次的付款方式（新增的變動支出才記）
+    private func rememberPayment() {
+        if let c = selectedCreditCardMilestoneId {
+            lastPaymentRaw = "card:" + c.uuidString
+        } else if let b = selectedBankMilestoneId {
+            lastPaymentRaw = "bank:" + b.uuidString + ":" + selectedBankCurrency
+        } else {
+            lastPaymentRaw = ""
+        }
+    }
+
+    /// [v25.563] 扣款目標選單：數字讀 lifeStore.wealthFacts（快取，打字不重算；跟財富頁、股票、房屋水電選單同一個數）
     private var bankPicker: some View {
-        HStack {
+        let facts = lifeStore.wealthFacts(expense: store, finance: financeStore)
+        return HStack {
             Text("扣款目標").foregroundStyle(.secondary)
             Spacer()
             Menu {
-                Button("不指定") {
-                    selectedBankMilestoneId = nil
-                    selectedBankCurrency = "NT$"
-                    selectedCreditCardMilestoneId = nil
-                }
-                if !bankMilestones.isEmpty {
-                    Section("銀行") {
-                        ForEach(bankMilestones) { ms in
-                            let currencies = bankCurrencies(for: ms)
-                            let name = ms.bankName ?? ms.title
-                            let balanceLabel = "\(name)（\(formatBankBalance(bankBalance(for: ms)))）"
-                            if currencies.count > 1 {
-                                Menu(balanceLabel) {
-                                    ForEach(currencies, id: \.self) { code in
-                                        Button(code) {
-                                            selectedBankMilestoneId = ms.id
-                                            selectedBankCurrency = code
-                                            selectedCreditCardMilestoneId = nil
-                                        }
-                                    }
-                                }
-                            } else {
-                                Button(balanceLabel) {
-                                    selectedBankMilestoneId = ms.id
-                                    selectedBankCurrency = currencies.first ?? "NT$"
-                                    selectedCreditCardMilestoneId = nil
-                                }
-                            }
-                        }
-                    }
-                }
-                if !creditCardMilestones.isEmpty {
-                    Section("信用卡") {
-                        ForEach(creditCardMilestones) { card in
-                            let cardName = card.cardName ?? card.title
-                            let bankInfo: String? = {
-                                guard let bankId = card.linkedBankMilestoneId,
-                                      let bank = bankMilestones.first(where: { $0.id == bankId }) else { return nil }
-                                let bankName = bank.bankName ?? bank.title
-                                return "\(bankName)（\(formatBankBalance(bankBalance(for: bank)))）"
-                            }()
-                            Button(bankInfo.map { "\(cardName) → \($0)" } ?? cardName) {
-                                selectedCreditCardMilestoneId = card.id
-                                selectedBankMilestoneId = card.linkedBankMilestoneId
-                                selectedBankCurrency = "NT$"
-                            }
-                        }
-                    }
-                }
+                paymentMenuItems(facts)
             } label: {
                 HStack(spacing: 4) {
                     Text(bankPickerLabel)
@@ -1044,13 +1855,27 @@ struct AddExpenseView: View {
     /// 飲食人員多選清單（popover 內容，可連續勾選不會關閉）
     private var diningMemberSelectorList: some View {
         VStack(spacing: 0) {
-            HStack {
-                Text("選擇人員")
-                    .font(.headline)
-                Spacer()
-                Button("完成") { showDiningMemberPopover = false }
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.green)
+            // v4：ZStack 置中標題 + 置左「完成」鈕，對齊 NavigationStack toolbar 版面，
+            // 與同一元件的 socialRecipientSelectorList 視覺語言一致。
+            ZStack {
+                HStack(spacing: 6) {
+                    Text("選擇人員")
+                        .font(.headline)
+                    if !selectedDiningMembers.isEmpty {
+                        Text("已選 \(selectedDiningMembers.count)")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.green)
+                            .padding(.horizontal, 7).padding(.vertical, 2.5)
+                            .background(Color.green.opacity(0.12))
+                            .clipShape(Capsule())
+                    }
+                }
+                HStack {
+                    Button("完成") { showDiningMemberPopover = false }
+                        .font(.subheadline.weight(.medium))
+                        .foregroundStyle(.green)
+                    Spacer()
+                }
             }
             .padding(.horizontal, 16).padding(.vertical, 12)
             .background(Color(.secondarySystemBackground))
@@ -1098,10 +1923,18 @@ struct AddExpenseView: View {
         .buttonStyle(.plain)
     }
 
+    /// 依目前家人清單排序已選人員，並保留清單中已找不到（改名／被刪除）的舊名字，
+    /// 避免編輯既有記帳時因為家人名單變動而把舊的用餐人員資料整批洗掉
+    private var orderedSelectedDiningMembers: [String] {
+        let known = familyNames.filter { selectedDiningMembers.contains($0) }
+        let stale = selectedDiningMembers.subtracting(familyNames).sorted()
+        return known + stale
+    }
+
     /// 多選人員的顯示文字：未選 / 1 人 / N 人
     private var diningMembersLabel: String {
         if selectedDiningMembers.isEmpty { return "不指定" }
-        let ordered = familyNames.filter { selectedDiningMembers.contains($0) }
+        let ordered = orderedSelectedDiningMembers
         if ordered.count == 1 { return ordered[0] }
         return "\(ordered.count) 人"
     }
@@ -1109,8 +1942,7 @@ struct AddExpenseView: View {
     /// 將多選人員 Set 序列化為 `、` 分隔字串（向下相容單名格式）
     private var diningMembersString: String {
         guard !selectedDiningMembers.isEmpty else { return "" }
-        return familyNames.filter { selectedDiningMembers.contains($0) }
-            .joined(separator: "、")
+        return orderedSelectedDiningMembers.joined(separator: "、")
     }
 
     private var familyNames: [String] {
@@ -1125,25 +1957,145 @@ struct AddExpenseView: View {
 
     // MARK: - 社交禮金收受人選單
 
-    /// 候選人來源：家人 + 人際關係（朋友 / 同事 / 客戶）
-    private var socialRecipientCandidates: [(group: String, names: [String])] {
-        var groups: [(String, [String])] = []
-        let famNames = lifeStore.familyMembers
-            .map { $0.chineseName }
-            .filter { !$0.isEmpty }
-        if !famNames.isEmpty { groups.append(("家人", famNames)) }
+    /// [v25.537] 收受人名單的一個人：名字（存檔就是存名字）＋一行小字（部門、職稱、公司）
+    private struct RecipientCandidate: Identifiable {
+        let name: String
+        let detail: String
+        var id: String { name }
+    }
+
+    private struct RecipientGroup: Identifiable {
+        let title: String
+        let people: [RecipientCandidate]
+        var id: String { title }
+    }
+
+    /// 候選人來源：家人、人際關係（朋友／同事／客戶…），
+    /// [v25.537] 再加上公司的人：部屬（依課別）、組織圖的同事（依部門）、名片
+    /// （使用者：「收受人我不能選擇公司的人，可以幫我加入名單，並且有搜尋功能嗎」）。
+    /// 同一個名字只出現一次（先出現的那一組贏），因為存檔存的是名字。
+    private var socialRecipientGroups: [RecipientGroup] {
+        var seen = Set<String>()
+        var groups: [RecipientGroup] = []
+        func add(_ title: String, _ people: [RecipientCandidate]) {
+            var unique: [RecipientCandidate] = []
+            for c in people where !c.name.isEmpty && !seen.contains(c.name) {
+                seen.insert(c.name)
+                unique.append(c)
+            }
+            guard !unique.isEmpty else { return }
+            // 同名的組（家人履歷的「家人」和人際關係的「家人」）併成一組：
+            // 兩組同一個 id，List 在搜尋時增減分組會出錯
+            if let i = groups.firstIndex(where: { $0.title == title }) {
+                groups[i] = RecipientGroup(title: title, people: groups[i].people + unique)
+            } else {
+                groups.append(RecipientGroup(title: title, people: unique))
+            }
+        }
+        add("家人", lifeStore.familyMembers.map { RecipientCandidate(name: $0.chineseName, detail: "") })
         let relGroups = Dictionary(grouping: lifeStore.relationships) { $0.group.rawValue }
         for key in ["朋友", "同事", "客戶", "家人", "其他"] {
-            let names = (relGroups[key] ?? [])
-                .map { $0.name }
-                .filter { !$0.isEmpty }
-            if !names.isEmpty { groups.append((key, names)) }
+            add(key, (relGroups[key] ?? []).map { RecipientCandidate(name: $0.name, detail: "") })
         }
-        // 去重（保留首次出現順序）
-        return groups.map { (g, list) in
-            var seen = Set<String>(); var unique: [String] = []
-            for n in list where !seen.contains(n) { seen.insert(n); unique.append(n) }
-            return (g, unique)
+        for g in subordinateRecipientGroups { add(g.title, g.people) }
+        for g in orgPersonRecipientGroups { add(g.title, g.people) }
+        add("名片", businessCardRecipients)
+        return groups
+    }
+
+    /// 部門顯示名（名稱優先，沒有才用代碼），先整理成表，免得每個人都把部門清單掃一遍
+    private var recipientDepartmentNames: [UUID: String] {
+        var out: [UUID: String] = [:]
+        for d in lifeStore.departments {
+            let n = d.name.isEmpty ? d.code : d.name
+            if !n.isEmpty { out[d.id] = n }
+        }
+        return out
+    }
+
+    private static func recipientSorted(_ list: [RecipientCandidate]) -> [RecipientCandidate] {
+        list.sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+    }
+
+    private static func joinedDetail(_ parts: [String]) -> String {
+        parts.map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+            .joined(separator: " · ")
+    }
+
+    /// 部屬，依課別分組（跟「選擇部屬」同一套課別名）
+    /// [v25.593 轉組織 v2] 已轉出的同仁照樣選得到（送禮給調走、離職的同仁；judge §7.1-8），
+    /// 收在在職的後面「部屬・已轉出」那一組、小字多「已轉出」（同組織圖「公司・已離職」放最後）。
+    /// 要退回這一件：拿掉 archived 那幾行
+    private var subordinateRecipientGroups: [RecipientGroup] {
+        let deptNames = recipientDepartmentNames
+        var buckets: [String: [RecipientCandidate]] = [:]
+        var archived: [RecipientCandidate] = []
+        for sub in lifeStore.subordinates {
+            if OrgMoveIndex.isArchived(sub.id) {
+                let detail = Self.joinedDetail([sub.jobTitle, sub.plantArea, OrgMovePlan.archivedChipText])
+                archived.append(RecipientCandidate(name: sub.name, detail: detail))
+                continue
+            }
+            let raw = sub.department.trimmingCharacters(in: .whitespaces)
+            let linked = sub.departmentId.flatMap { deptNames[$0] }
+            let dept = linked ?? (raw.isEmpty ? "未分課別" : raw)
+            buckets[dept, default: []].append(
+                RecipientCandidate(name: sub.name, detail: Self.joinedDetail([sub.jobTitle, sub.plantArea])))
+        }
+        var out: [RecipientGroup] = buckets.keys
+            .sorted { a, b in
+                if (a == "未分課別") != (b == "未分課別") { return b == "未分課別" }
+                return a.localizedStandardCompare(b) == .orderedAscending
+            }
+            .map { RecipientGroup(title: "部屬・\($0)", people: Self.recipientSorted(buckets[$0] ?? [])) }
+        if !archived.isEmpty {
+            out.append(RecipientGroup(title: "部屬・\(OrgMovePlan.archivedChipText)", people: Self.recipientSorted(archived)))
+        }
+        return out
+    }
+
+    /// 組織圖裡的同事，依部門分組；已離職的放最後一組
+    private var orgPersonRecipientGroups: [RecipientGroup] {
+        let deptNames = recipientDepartmentNames
+        var buckets: [String: [RecipientCandidate]] = [:]
+        var left: [RecipientCandidate] = []
+        for p in lifeStore.orgPeople {
+            let c = RecipientCandidate(name: p.name, detail: Self.joinedDetail([p.jobTitle]))
+            if p.isInactive { left.append(c); continue }
+            let dept = p.departmentId.flatMap { deptNames[$0] } ?? "未分部門"
+            buckets[dept, default: []].append(c)
+        }
+        var out = buckets.keys
+            .sorted { a, b in
+                if (a == "未分部門") != (b == "未分部門") { return b == "未分部門" }
+                return a.localizedStandardCompare(b) == .orderedAscending
+            }
+            .map { RecipientGroup(title: "公司・\($0)", people: Self.recipientSorted(buckets[$0] ?? [])) }
+        if !left.isEmpty { out.append(RecipientGroup(title: "公司・已離職", people: Self.recipientSorted(left))) }
+        return out
+    }
+
+    /// 名片：依公司再依姓名排，小字寫公司與職稱
+    private var businessCardRecipients: [RecipientCandidate] {
+        lifeStore.businessCards
+            .sorted { a, b in
+                if a.company != b.company { return a.company.localizedStandardCompare(b.company) == .orderedAscending }
+                return a.name.localizedStandardCompare(b.name) == .orderedAscending
+            }
+            .map { RecipientCandidate(name: $0.name, detail: Self.joinedDetail([$0.company, $0.jobTitle])) }
+    }
+
+    /// 搜尋：姓名、小字（部門、職稱、公司）、組名都能打
+    private var filteredRecipientGroups: [RecipientGroup] {
+        let q = socialRecipientQuery.trimmingCharacters(in: .whitespaces).lowercased()
+        guard !q.isEmpty else { return socialRecipientGroups }
+        return socialRecipientGroups.compactMap { g in
+            let groupHit = g.title.lowercased().contains(q)
+            let people = groupHit ? g.people : g.people.filter {
+                $0.name.lowercased().contains(q) || $0.detail.lowercased().contains(q)
+            }
+            return people.isEmpty ? nil : RecipientGroup(title: g.title, people: people)
         }
     }
 
@@ -1157,89 +2109,156 @@ struct AddExpenseView: View {
         return selectedSocialRecipients.sorted().joined(separator: "、")
     }
 
-    private var socialRecipientSelectorList: some View {
-        NavigationStack {
-            List {
-                Section {
-                    Button {
-                        selectedSocialRecipients.removeAll()
-                    } label: {
-                        HStack {
-                            Image(systemName: selectedSocialRecipients.isEmpty
-                                  ? "checkmark.circle.fill" : "circle")
-                                .foregroundStyle(selectedSocialRecipients.isEmpty ? Color.green : Color.secondary)
-                            Text("不指定")
-                            Spacer()
-                        }
-                        .contentShape(Rectangle())
+    private func toggleSocialRecipient(_ name: String) {
+        if selectedSocialRecipients.contains(name) {
+            selectedSocialRecipients.remove(name)
+        } else {
+            selectedSocialRecipients.insert(name)
+        }
+    }
+
+    private func socialRecipientRow(name: String, detail: String) -> some View {
+        let picked = selectedSocialRecipients.contains(name)
+        return Button {
+            toggleSocialRecipient(name)
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: picked ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(picked ? Color.green : Color.secondary)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(name)
+                    if !detail.isEmpty {
+                        Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
-                    .buttonStyle(.plain)
                 }
-                ForEach(socialRecipientCandidates, id: \.group) { group in
-                    Section(group.group) {
-                        ForEach(group.names, id: \.self) { name in
-                            Button {
-                                if selectedSocialRecipients.contains(name) {
-                                    selectedSocialRecipients.remove(name)
-                                } else {
-                                    selectedSocialRecipients.insert(name)
-                                }
-                            } label: {
-                                HStack {
-                                    Image(systemName: selectedSocialRecipients.contains(name)
-                                          ? "checkmark.circle.fill" : "circle")
-                                        .foregroundStyle(selectedSocialRecipients.contains(name) ? Color.green : Color.secondary)
-                                    Text(name)
-                                    Spacer()
-                                }
-                                .contentShape(Rectangle())
-                            }
-                            .buttonStyle(.plain)
+                Spacer()
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// 最上面：不指定，以及已經選的人（名單很長時不用捲下去找；舊紀錄裡、名單已經沒有的名字也能取消）
+    @ViewBuilder
+    private var socialRecipientTopSections: some View {
+        Section {
+            Button {
+                selectedSocialRecipients.removeAll()
+            } label: {
+                HStack {
+                    Image(systemName: selectedSocialRecipients.isEmpty
+                          ? "checkmark.circle.fill" : "circle")
+                        .foregroundStyle(selectedSocialRecipients.isEmpty ? Color.green : Color.secondary)
+                    Text("不指定")
+                    Spacer()
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+        }
+        if !selectedSocialRecipients.isEmpty {
+            Section("已選") {
+                ForEach(selectedSocialRecipients.sorted(), id: \.self) { name in
+                    socialRecipientRow(name: name, detail: "")
+                }
+            }
+        }
+    }
+
+    private var socialRecipientSelectorList: some View {
+        let groups = filteredRecipientGroups
+        let searching = !socialRecipientQuery.trimmingCharacters(in: .whitespaces).isEmpty
+        return NavigationStack {
+            List {
+                if !searching {
+                    socialRecipientTopSections
+                }
+                if searching && groups.isEmpty {
+                    Text("找不到符合「\(socialRecipientQuery)」的人")
+                        .font(.callout).foregroundStyle(.secondary)
+                }
+                ForEach(groups) { group in
+                    Section(group.title) {
+                        ForEach(group.people) { c in
+                            socialRecipientRow(name: c.name, detail: c.detail)
                         }
                     }
                 }
             }
+            .searchable(text: $socialRecipientQuery,
+                        placement: .navigationBarDrawer(displayMode: .always),
+                        prompt: "搜尋姓名、部門、公司、職稱")
             .navigationTitle("收受人")
             .navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarTrailing) {
-                    Button("完成") { showSocialRecipientPopover = false }
-                        .bold().foregroundStyle(.green)
+            .toolbar { socialRecipientToolbar }
+        }
+    }
+
+    @ToolbarContentBuilder
+    private var socialRecipientToolbar: some ToolbarContent {
+        // v4：從 topBarTrailing 修正為 topBarLeading，對齊全 App 關閉鈕一律置左規則
+        ToolbarItem(placement: .topBarLeading) {
+            Button("完成") { showSocialRecipientPopover = false }
+                .bold().foregroundStyle(.green)
+        }
+        // v4：已選人數提示膠囊，取代 navigationTitle 靜態標題（僅在有選取時顯示）
+        if !selectedSocialRecipients.isEmpty {
+            ToolbarItem(placement: .principal) {
+                HStack(spacing: 6) {
+                    Text("收受人").font(.headline)
+                    Text("已選 \(selectedSocialRecipients.count)")
+                        .font(.caption2.weight(.semibold))
+                        .foregroundStyle(.pink)
+                        .padding(.horizontal, 7).padding(.vertical, 2.5)
+                        .background(Color.pink.opacity(0.12))
+                        .clipShape(Capsule())
                 }
             }
         }
     }
 
     private var categorySection: some View {
-        Section("分類") {
+        Section {
             if expenseType == .variable {
-                HStack {
-                    Picker("類別", selection: $selectedVariableCategory) {
-                        ForEach(VariableCategory.allCases) { cat in
-                            Label(cat.rawValue, systemImage: cat.icon).tag(cat)
+                // [v3] FilterChip 橫向膠囊列（對齊 AddIncomeView.categoryChipPicker + VariableExpenseView.categoryFilter 規格）
+                variableCategoryChipPicker
+                    .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                    .listRowBackground(Color.clear)
+                    .listRowSeparator(.hidden)
+
+                // [v3] 人員多選移至獨立行（進階模式，支援多選）
+                if advancedMode && Self.memberCategories.contains(selectedVariableCategory) && !familyNames.isEmpty {
+                    Button {
+                        showDiningMemberPopover = true
+                    } label: {
+                        HStack(spacing: 8) {
+                            ZStack {
+                                Circle()
+                                    .fill(Color(.secondarySystemFill))
+                                    .frame(width: 28, height: 28)
+                                Image(systemName: "person.2.fill")
+                                    .font(.system(size: 12, weight: .semibold))
+                                    .foregroundStyle(.secondary)
+                            }
+                            Text("同行人員")
+                                .font(.subheadline)
+                                .foregroundStyle(.primary)
+                            Spacer()
+                            Text(diningMembersLabel)
+                                .font(.subheadline)
+                                .foregroundStyle(selectedDiningMembers.isEmpty ? .secondary : .primary)
+                                .lineLimit(1)
+                            Image(systemName: "chevron.right")
+                                .font(.caption2)
+                                .foregroundStyle(.tertiary)
                         }
                     }
-                    .frame(maxWidth: .infinity)
-
-                    // 人員選擇（飲食 / 娛樂 / 購物 / 日用 / 醫療 / 教育 / 社交 / 其他）只在進階模式才顯示，支援多選 + 點外部才關閉
-                    if advancedMode && Self.memberCategories.contains(selectedVariableCategory) && !familyNames.isEmpty {
-                        Divider()
-                        Button {
-                            showDiningMemberPopover = true
-                        } label: {
-                            HStack(spacing: 2) {
-                                Image(systemName: "person.2.fill").font(.caption)
-                                Text(diningMembersLabel).lineLimit(1)
-                                Image(systemName: "chevron.down").font(.caption2)
-                            }
-                            .foregroundStyle(.secondary)
-                        }
-                        .buttonStyle(.plain)
-                        .sheet(isPresented: $showDiningMemberPopover) {
-                            diningMemberSelectorList
-                                .presentationDetents([.height(380), .medium])
-                                .presentationDragIndicator(.visible)
-                        }
+                    .buttonStyle(.plain)
+                    .sheet(isPresented: $showDiningMemberPopover) {
+                        diningMemberSelectorList
+                            .presentationDetents([.height(380), .medium])
+                            .presentationDragIndicator(.visible)
+                            .appStores()
                     }
                 }
 
@@ -1265,9 +2284,10 @@ struct AddExpenseView: View {
                         }
                         .frame(maxWidth: .infinity)
 
-                        if !socialRecipientCandidates.isEmpty {
+                        if !socialRecipientGroups.isEmpty {
                             Divider()
                             Button {
+                                socialRecipientQuery = ""
                                 showSocialRecipientPopover = true
                             } label: {
                                 HStack(spacing: 2) {
@@ -1280,14 +2300,15 @@ struct AddExpenseView: View {
                             .buttonStyle(.plain)
                             .sheet(isPresented: $showSocialRecipientPopover) {
                                 socialRecipientSelectorList
-                                    .presentationDetents([.height(420), .medium])
+                                    .presentationDetents([.medium, .large])
                                     .presentationDragIndicator(.visible)
+                                    .appStores()
                             }
                         }
                     }
                 }
             } else {
-                Picker("類別", selection: $selectedFixedCategory) {
+                Picker("類別", selection: fixedCategorySelection) {
                     ForEach(FixedCategory.allCases) { cat in
                         Label(cat.rawValue, systemImage: cat.icon).tag(cat)
                     }
@@ -1301,10 +2322,379 @@ struct AddExpenseView: View {
                     }
                 }
             }
+        } header: {
+            // [v3] variable 分類區塊標題顏色跟隨當前選取分類（與預覽卡保持一致）
+            sectionHeader(title: "分類",
+                          accentColor: expenseType == .variable
+                            ? selectedVariableCategory.accentColor
+                            : .blue)
+        }
+    }
+
+    // MARK: - [v25.347] 固定支出停止
+
+    /// 這筆固定支出到目前為止已經扣了幾期、合計多少（含結束日當期）
+    private var parsedAmount: Double { Double(amountText.replacingOccurrences(of: ",", with: "")) ?? 0 }
+
+    private var endedSummary: (periods: Int, total: Double) {
+        let probe = Expense(
+            title: "", amount: parsedAmount, date: date, expenseType: .fixed,
+            fixedCategory: selectedFixedCategory, recurrence: selectedRecurrence,
+            endDate: hasEndDate ? endDate : nil
+        )
+        let n = probe.fixedPeriodCount()
+        return (n, Double(n) * parsedAmount)
+    }
+
+    private var fixedEndSection: some View {
+        Section {
+            Toggle(isOn: $hasEndDate.animation(.spring(response: 0.3, dampingFraction: 0.85))) {
+                Label("已停止（不再扣款）", systemImage: hasEndDate ? "stop.circle.fill" : "stop.circle")
+                    .foregroundStyle(hasEndDate ? .orange : .primary)
+            }
+            .tint(.orange)
+            .onChange(of: hasEndDate) { _, on in
+                guard on else { return }
+                // 貸款有年期 → 自動帶最後一期；其他類型預設今天
+                endDate = suggestedEnd ?? Date()
+                endReason = FixedEndReason.suggested(for: selectedFixedCategory).first ?? .cancelled
+            }
+            if hasEndDate {
+                HStack {
+                    Text("最後一次扣款日")
+                    Spacer()
+                    DatePicker("", selection: $endDate, displayedComponents: .date)
+                        .labelsHidden()
+                }
+                Picker("停止原因", selection: $endReason) {
+                    ForEach(FixedEndReason.suggested(for: selectedFixedCategory)) { r in
+                        Label(r.rawValue, systemImage: r.icon).tag(r)
+                    }
+                }
+                if let s = suggestedEnd, !Calendar.current.isDate(s, inSameDayAs: endDate) {
+                    Button {
+                        endDate = s
+                        endReason = .paidOff
+                    } label: {
+                        Label("套用推算的最後一期（\(Self.endFmt.string(from: s))）", systemImage: "wand.and.stars")
+                            .font(.footnote)
+                    }
+                }
+                let sum = endedSummary
+                HStack {
+                    Text("實際扣款期數").font(.footnote).foregroundStyle(.secondary)
+                    Spacer()
+                    Text("\(sum.periods) 期・合計 \(formatCurrency(sum.total))")
+                        .font(.footnote.weight(.semibold).monospacedDigit())
+                        .foregroundStyle(.orange)
+                }
+            }
+        } header: {
+            sectionHeader(title: "停止", accentColor: .orange)
+        } footer: {
+            Text(hasEndDate
+                 ? "排定扣款日在「最後一次扣款日」當天或之前的期數才算數。例：8/15 起每月扣，結束日填 9/14 只算 1 期，填 9/16 算 2 期。停止後不再計入月固定支出、銀行扣款、信用卡消費與節稅金額，過去已發生的期數完全保留。"
+                 : "取消訂閱、退租、貸款繳清時打開這個開關，填上最後一次扣款日即可——不用刪除項目，歷史紀錄與統計都會保留。")
+        }
+    }
+
+    /// 貸款年期推算出的最後一期扣款日（沒有年期資料時 nil）
+    private var suggestedEnd: Date? {
+        Expense(
+            title: "", amount: 0, date: date, expenseType: .fixed,
+            fixedCategory: selectedFixedCategory, recurrence: selectedRecurrence,
+            loanYears: loanYearsValue
+        ).suggestedEndDate
+    }
+
+    private static let endFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "yyyy/M/d"; return f
+    }()
+
+    // [v3] 變動支出分類 FilterChip 橫向膠囊列
+    // 14 個分類可橫向捲動；選中時主題色底+白字+投影；未選時 secondarySystemFill
+    // 對齊 AddIncomeView.categoryChipPicker / VariableExpenseView.categoryFilter 設計規格
+    private var variableCategoryChipPicker: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(VariableCategory.allCases) { cat in
+                    let isSelected = selectedVariableCategory == cat
+                    let accent = cat.accentColor
+                    Button {
+                        withAnimation(.spring(response: 0.28, dampingFraction: 0.72)) {
+                            selectedVariableCategory = cat
+                        }
+                        // [v25.538] 基本模式選「汽車」：幫你選好車（剛選過的那台、或只有一台車時）。
+                        // 改選別的分類就連車子一起放掉：不然切到進階模式會看到「關聯汽車」、分類被藏起來，
+                        // 存下去卻是沒連車的另一個分類（targetVehicleId 要分類是汽車）。
+                        if cat == .vehicle {
+                            autoPickOnlyVehicle()
+                        } else if selectedAssetLink == .vehicle {
+                            selectedAssetLink = .none
+                        }
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: cat.icon)
+                                .font(.caption)
+                                .foregroundStyle(isSelected ? .white : accent)
+                            Text(cat.rawValue)
+                                .font(.caption.weight(isSelected ? .semibold : .medium))
+                                .foregroundStyle(isSelected ? .white : .primary)
+                        }
+                        .padding(.horizontal, 13)
+                        .padding(.vertical, 8)
+                        .background(isSelected ? accent : Color(.secondarySystemFill))
+                        .clipShape(Capsule())
+                        .shadow(
+                            color: isSelected ? accent.opacity(0.30) : .clear,
+                            radius: 5, x: 0, y: 3
+                        )
+                        .scaleEffect(isSelected ? 1.04 : 1.0)
+                    }
+                    .buttonStyle(.plain)
+                    .animation(.spring(response: 0.26, dampingFraction: 0.72), value: isSelected)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
         }
     }
 
     // MARK: - 關聯資產選擇
+
+    // MARK: - 旅遊關聯（[v25.424]）
+
+    /// 這筆支出的日期落在哪幾趟旅遊裡。
+    ///
+    /// 日期比對用「整天」：行程的 startDate/endDate 帶著時分，但一筆午餐不該
+    /// 因為比出發時刻早兩小時就被判定不在這趟裡。
+    private var tripCandidates: [TripPlan] {
+        let cal = Calendar.current
+        let day = cal.startOfDay(for: date)
+        return lifeStore.tripPlans
+            .filter { plan in
+                let from = cal.startOfDay(for: plan.startDate)
+                let to = cal.startOfDay(for: plan.endDate)
+                return day >= from && day <= to
+            }
+            .sorted { $0.startDate > $1.startDate }
+    }
+
+    /// 已經選了但日期不在範圍內的那一趟（改日期之後才會出現）。
+    /// 要一起列進選單，不然使用者會看到「選了卻不見了」。
+    private var linkedTripOutOfRange: TripPlan? {
+        guard let id = linkedTripPlanId,
+              !tripCandidates.contains(where: { $0.id == id }) else { return nil }
+        return lifeStore.tripPlan(id: id)
+    }
+
+    private var tripOptions: [TripPlan] {
+        var list = tripCandidates
+        if let extra = linkedTripOutOfRange { list.insert(extra, at: 0) }
+        return list
+    }
+
+    /// 沒有任何一趟旅遊涵蓋這一天就不要擺這一區——多數支出跟旅行無關，
+    /// 平常不該在表單裡多一個看不懂的選單。
+    ///
+    /// [v25.425] 基本模式也一律不出現：基本模式的用意就是「只填金額、分類、日期」，
+    /// 關聯資產、照片廊都收起來了，關聯旅遊沒道理是唯一冒出來的例外。
+    /// 要掛旅遊的人切到進階模式就看得到——已經掛好的關聯不會因為切回基本而掉，
+    /// 存檔時是照載入的值寫回去的。
+    private var showTripLinkSection: Bool { advancedMode && !tripOptions.isEmpty }
+
+    private var tripLinkSection: some View {
+        Section {
+            Picker("旅遊行程", selection: $linkedTripPlanId) {
+                Text("不關聯").tag(UUID?.none)
+                ForEach(tripOptions) { plan in
+                    Text(plan.displayTitle).tag(UUID?.some(plan.id))
+                }
+            }
+            // [v25.467] 兩邊自動對上，少按一次。
+            //   選了旅遊 → 這筆已經有地點的話，自動挑距離最近的那一站
+            //   選了站   → 這筆還沒有地點的話，把那一站的地點帶進來
+            .onChange(of: linkedTripPlanId) { _, _ in
+                linkedTripStopId = nil
+                autoPickStop()
+            }
+            .onChange(of: linkedTripStopId) { _, newValue in
+                if skipPlaceFillOnce {
+                    skipPlaceFillOnce = false
+                } else {
+                    fillPlaceFromStop(newValue)
+                }
+            }
+
+            if let planId = linkedTripPlanId, let plan = lifeStore.tripPlan(id: planId) {
+                Picker("算在哪一站", selection: $linkedTripStopId) {
+                    Text("整趟（不指定）").tag(UUID?.none)
+                    ForEach(Array(plan.stops.enumerated()), id: \.element.id) { index, stop in
+                        Text("\(index + 1). " + stop.displayName).tag(UUID?.some(stop.id))
+                    }
+                }
+                if !photoFileNames.isEmpty {
+                    HStack(spacing: 8) {
+                        Image(systemName: "photo.on.rectangle.angled")
+                            .font(.system(size: 13)).foregroundStyle(.purple)
+                        Text("這筆的 \(photoFileNames.count) 張照片會一起進「\(plan.displayTitle)」的相本")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+            }
+        } header: {
+            HStack(spacing: 6) {
+                Image(systemName: "airplane").font(.system(size: 10))
+                Text("旅遊")
+            }
+        } footer: {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(linkedTripOutOfRange == nil
+                     ? "這一天剛好在旅遊規劃的期間內。掛上去之後，這筆的照片會一起出現在那趟旅遊的相本裡；金額照舊算在這個月的支出與分類統計，不會重複計算。"
+                     : "目前選的行程沒有涵蓋這一天——改過日期的話記得確認一下。")
+                // [v25.467] 自動挑的站不能是暗的：把距離寫出來，挑錯了看得出來
+                if let hint = stopDistanceHint {
+                    Text(hint)
+                }
+                // [v25.475] 時間也一樣要寫出來——站是自動挑的，依據得看得見
+                if let hint = stopTimeHint {
+                    Text(hint)
+                }
+                if linkedTripStopId == nil {
+                    Text("掛上行程之後會自動挑一站：這筆有地點就挑最近的，"
+                         + "否則挑停留時間最接近的。挑錯了直接改上面的選單。")
+                }
+            }
+        }
+    }
+
+    // MARK: - [v25.467] 旅遊與地點互相帶入
+
+    /// 自動挑站的距離上限。超過這個距離就不自動挑——最近的一站在三公里外時，
+    /// 那八成不是同一個地方（整趟行程可能散在一個城市裡），寧可留給使用者自己選。
+    private static let maxAutoStopMeters: CLLocationDistance = 3_000
+
+    /// 這筆支出目前的座標（要在對的分類底下選的才算，見 placeScopeStamp）
+    private var currentPlaceCoordinate: CLLocationCoordinate2D? {
+        guard placeScopeMatches,
+              let lat = placeLatitude, let lon = placeLongitude else { return nil }
+        return CLLocationCoordinate2D(latitude: lat, longitude: lon)
+    }
+
+    /// 自動挑站的時間上限。離最近那一站的停留時間超過這麼久，就不猜了——
+    /// 那天根本沒排行程時，硬挑一站只是亂指。
+    private static let maxAutoStopSeconds: TimeInterval = 6 * 3600
+
+    /// 選了旅遊之後自動挑一站。兩個依據，依序試：
+    ///   1. 距離：這筆有地點 → 挑最近的一站（3 公里內）
+    ///   2. 時間：挑停留時間最接近這筆時刻的那一站
+    ///
+    /// [v25.475] 時間那一條是使用者要求的：「關聯旅程之後應該自動選時間最靠近的
+    /// 站別，而不是都預設整趟」。原本只有距離那一條，但多數花費是隨手記的、
+    /// 沒有地點，等於九成的情況都還是停在「整趟（不指定）」。
+    private func autoPickStop() {
+        // 已經指定站別就不要動——那可能是使用者手挑的
+        guard linkedTripStopId == nil,
+              let planId = linkedTripPlanId,
+              let plan = lifeStore.tripPlan(id: planId) else { return }
+        if let byPlace = nearestStopByDistance(plan) {
+            linkedTripStopId = byPlace
+            return
+        }
+        if let byTime = nearestStopByTime(plan) {
+            // 只憑時間猜的站不帶地點（理由見 skipPlaceFillOnce）
+            skipPlaceFillOnce = true
+            linkedTripStopId = byTime
+        }
+    }
+
+    /// 距離最近的一站（要有地點，且在 3 公里內）
+    private func nearestStopByDistance(_ plan: TripPlan) -> UUID? {
+        guard let here = currentPlaceCoordinate else { return nil }
+        let origin = CLLocation(latitude: here.latitude, longitude: here.longitude)
+        var best: (id: UUID, meters: CLLocationDistance)?
+        for stop in plan.stops {
+            guard let c = stop.coordinate else { continue }
+            let meters = origin.distance(from: CLLocation(latitude: c.latitude,
+                                                          longitude: c.longitude))
+            if best == nil || meters < best!.meters { best = (stop.id, meters) }
+        }
+        guard let best, best.meters <= Self.maxAutoStopMeters else { return nil }
+        return best.id
+    }
+
+    /// 時間上最接近的一站。
+    ///
+    /// 比的是時間軸的停留區間（抵達～離開，打過卡的話是實際時間），不是只比抵達：
+    /// 中午十二點半那筆午餐，落在「11:50–13:30 的那一站」裡面才對，
+    /// 只比抵達時刻的話會挑到下午那一站。落在區間內距離算 0。
+    private func nearestStopByTime(_ plan: TripPlan) -> UUID? {
+        let when = date
+        var best: (id: UUID, gap: TimeInterval)?
+        for slot in plan.timeline {
+            let gap: TimeInterval
+            if when < slot.arrival {
+                gap = slot.arrival.timeIntervalSince(when)
+            } else if when > slot.departure {
+                gap = when.timeIntervalSince(slot.departure)
+            } else {
+                gap = 0
+            }
+            if best == nil || gap < best!.gap { best = (slot.stop.id, gap) }
+        }
+        guard let best, best.gap <= Self.maxAutoStopSeconds else { return nil }
+        return best.id
+    }
+
+    /// 反過來：選了站、而這筆還沒有地點 → 把那一站的地點帶進來。
+    ///
+    /// 只在「還沒有座標」時做。已經選過地點的就別動了——那是使用者刻意挑的，
+    /// 被一個站別選擇覆蓋掉會很惱人。名稱與地址走 PlaceFieldFill（與地圖選點
+    /// 同一套「空的或還是上次自動帶的才覆蓋」規則），不會蓋掉手打的店名。
+    private func fillPlaceFromStop(_ stopId: UUID?) {
+        guard supportsPlacePicker, currentPlaceCoordinate == nil,
+              let stopId, let planId = linkedTripPlanId,
+              let plan = lifeStore.tripPlan(id: planId),
+              let stop = plan.stops.first(where: { $0.id == stopId }),
+              let c = stop.coordinate else { return }
+        applyMapPickedPlace(name: stop.displayName, address: stop.address, coordinate: c)
+    }
+
+    /// 「『清水寺』的停留時間是 13:40–15:10」。站是自動挑的，依據要看得見——
+    /// 暗著挑會讓人以為是自己選的，挑錯了也不會發現。
+    private var stopTimeHint: String? {
+        guard let planId = linkedTripPlanId,
+              let plan = lifeStore.tripPlan(id: planId),
+              let stopId = linkedTripStopId,
+              let slot = plan.timeline.first(where: { $0.stop.id == stopId }) else { return nil }
+        let window = Self.tripStopClock.string(from: slot.arrival)
+            + "–" + Self.tripStopClock.string(from: slot.departure)
+        let inside = date >= slot.arrival && date <= slot.departure
+        return "「" + slot.stop.displayName + "」的停留時間是 " + window
+            + (inside ? "，這筆的時間就在裡面。" : "。")
+    }
+
+    private static let tripStopClock: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW")
+        f.dateFormat = "HH:mm"; return f
+    }()
+
+    /// 「這筆的地點離「清水寺」約 450 公尺」。兩邊都有座標才寫。
+    private var stopDistanceHint: String? {
+        guard let here = currentPlaceCoordinate,
+              let planId = linkedTripPlanId,
+              let plan = lifeStore.tripPlan(id: planId),
+              let stopId = linkedTripStopId,
+              let stop = plan.stops.first(where: { $0.id == stopId }),
+              let c = stop.coordinate else { return nil }
+        let meters = CLLocation(latitude: here.latitude, longitude: here.longitude)
+            .distance(from: CLLocation(latitude: c.latitude, longitude: c.longitude))
+        let text = meters < 1_000
+            ? "約 \(Int(meters.rounded())) 公尺"
+            : String(format: "約 %.1f 公里", meters / 1_000)
+        return "這筆的地點離「" + stop.displayName + "」" + text
+    }
 
     private var assetLinkSection: some View {
         Section {
@@ -1315,7 +2705,7 @@ struct AddExpenseView: View {
             }
             .pickerStyle(.menu)
         } header: {
-            Text("關聯理財資產（選填）")
+            sectionHeader(title: "關聯理財資產（選填）", accentColor: .teal)
         } footer: {
             Text("選擇後可將此筆支出連結到理財模式的對應項目。")
         }
@@ -1346,7 +2736,7 @@ struct AddExpenseView: View {
                 }
             }
         } header: {
-            Text("股票投資（連動理財模式）")
+            sectionHeader(title: "股票投資（連動理財模式）", accentColor: .orange)
         } footer: {
             Text("儲存後將自動在理財模式的股票頁面建立對應的持股紀錄。金額欄位將自動填入投入金額。")
         }
@@ -1368,7 +2758,7 @@ struct AddExpenseView: View {
                 }
             }
         } header: {
-            Text("儲蓄險（連動理財模式）")
+            sectionHeader(title: "儲蓄險（連動理財模式）", accentColor: .green)
         } footer: {
             Text("將此筆支出關聯到已有的儲蓄險保單。")
         }
@@ -1430,8 +2820,19 @@ struct AddExpenseView: View {
                     Label(cat.rawValue, systemImage: cat.icon).tag(cat)
                 }
             }
+
+            // [v25.530] 選了既有物件時名稱是自動的「項目 N：房名-水電瓦斯」，看不出是水、電還是瓦斯，
+            // 讓你直接選；留在「自動」才從名稱和備註判斷。
+            if selectedRealEstateExpenseCategory == .utility {
+                Picker("水電類型", selection: $selectedUtilityType) {
+                    Text("自動").tag(nil as UtilityType?)
+                    ForEach(UtilityType.allCases) { kind in
+                        Label(kind.rawValue, systemImage: kind.icon).tag(kind as UtilityType?)
+                    }
+                }
+            }
         } header: {
-            Text("房地產（連動理財模式）")
+            sectionHeader(title: "房地產（連動理財模式）", accentColor: .purple)
         } footer: {
             Text(realEstateLinkExisting
                  ? "房屋價金將同步至已支出房屋金額章節，其餘類別同步至變動支出章節。"
@@ -1464,37 +2865,269 @@ struct AddExpenseView: View {
                         Label(cat.rawValue, systemImage: cat.icon).tag(cat)
                     }
                 }
+                .onChange(of: selectedVehicleId) { _, newVehicleId in
+                    // 切換車輛後，若原本選的支出類別不適用於新車輛的動力類型（例如油電車換成
+                    // 純電車，「油錢」在新車輛的選項列表中已不存在），Picker 只是不顯示該選項，
+                    // 底層的 selectedVehicleExpenseCategory 狀態不會被自動改掉，存檔會把不合動力
+                    // 類型的類別寫進新車輛的變動支出；用新車輛重新算一次可用類別再校正。
+                    let newCategories = VehicleVariableCategory.categories(
+                        for: financeStore.vehicles.first(where: { $0.id == newVehicleId })?.powerType ?? .gasoline
+                    )
+                    if !newCategories.contains(selectedVehicleExpenseCategory),
+                       let fallback = newCategories.first {
+                        selectedVehicleExpenseCategory = fallback
+                    }
+                }
+
+                // [v25.312] 電費類別的充電資訊：度數＋電量 %（皆選填），
+                // 供車輛卡片算每度電價、推估電池容量等 KPI 與趨勢圖
+                if selectedVehicleExpenseCategory == .electricity {
+                    HStack {
+                        Text("充電度數")
+                        Spacer()
+                        TextField("選填", text: $evKwhText)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 90)
+                        Text("kWh").foregroundStyle(.secondary)
+                    }
+                    HStack {
+                        Text("電量")
+                        Spacer()
+                        TextField("從", text: $evFromText)
+                            .keyboardType(.numberPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 52)
+                        Text("%").foregroundStyle(.secondary)
+                        Image(systemName: "arrow.right")
+                            .font(.caption2).foregroundStyle(.tertiary)
+                        TextField("到", text: $evToText)
+                            .keyboardType(.numberPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 52)
+                        Text("%").foregroundStyle(.secondary)
+                    }
+                }
+                // [v25.539] 油錢：公升數（選填，決定 7）。有了它才算得出每公升、油耗；
+                // 每公升就寫在欄名下面，邊打邊看得到跟加油站的價錢對不對得上
+                if selectedVehicleExpenseCategory == .fuel {
+                    fuelLitersRow
+                }
+                // [v25.539] 里程錶不再只給充電：油錢、保養、維修也記（決定 7），一年開多少、多久保養一次都靠它
+                if Self.odometerCategories.contains(selectedVehicleExpenseCategory) {
+                    HStack {
+                        Text("里程錶")
+                        Spacer()
+                        TextField("選填", text: $evOdoText)
+                            .keyboardType(.decimalPad)
+                            .multilineTextAlignment(.trailing)
+                            .frame(width: 130)
+                        Text("公里").foregroundStyle(.secondary)
+                    }
+                }
+                if selectedVehicleExpenseCategory == .electricity, let perKwh = evPricePerKwhText {
+                    HStack {
+                        Text("每度電價").foregroundStyle(.secondary)
+                        Spacer()
+                        Text(perKwh)
+                            .font(.subheadline.weight(.semibold))
+                            .foregroundStyle(.teal)
+                    }
+                }
             }
         } header: {
-            Text("汽車資訊（連動理財模式）")
+            sectionHeader(title: "汽車資訊（連動理財模式）", accentColor: .teal)
         } footer: {
-            Text("選擇後分類自動設為「汽車」並隱藏分類區塊，名稱自動生成為「項目 N：型號-支出類別」並轉為唯讀。支出類別會依照車輛動力類型自動篩選。")
+            Text(vehicleSectionFooter)
+        }
+    }
+
+    /// [v25.539] 里程錶可以記的支出類別（存在 evOdometer 這一欄，讀的時候用 Expense.odometer）
+    private static let odometerCategories: Set<VehicleVariableCategory> = [.fuel, .electricity, .maintenance, .repair]
+
+    /// [v25.539] 加油的公升數一列；每公升放在欄名下面（「旁邊即時顯示」），一列放得下、不用多佔一行
+    private var fuelLitersRow: some View {
+        HStack {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("公升數")
+                if let perLiter = fuelPricePerLiterText {
+                    Text(perLiter)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.teal)
+                }
+            }
+            Spacer()
+            TextField("選填", text: $fuelLitersText)
+                .keyboardType(.decimalPad)
+                .multilineTextAlignment(.trailing)
+                .frame(width: 90)
+            Text("公升").foregroundStyle(.secondary)
+        }
+    }
+
+    /// [v25.539] 正在打的金額換成台幣（外幣照匯率）；還沒打或打的不是數字時 nil
+    private var typedAmountNTD: Double? {
+        guard let amt = Double(amountText), amt > 0 else { return nil }
+        return amt * currencyMultiplier
+    }
+
+    /// 「NT$7.9／kWh」：[v25.539] 決定 13，每度、每公升一律一位小數，跟卡片、看板同一個寫法
+    private var evPricePerKwhText: String? {
+        guard let kwh = Double(evKwhText), kwh > 0, let ntd = typedAmountNTD else { return nil }
+        return "NT$" + FinanceItemText.number(ntd / kwh, digits: 1) + "／kWh"
+    }
+
+    /// 「每公升 NT$29.1」：[v25.539] 金額 ÷ 公升，一位小數（跟列表膠囊同一個寫法）
+    private var fuelPricePerLiterText: String? {
+        guard let liters = Double(fuelLitersText), liters > 0, let ntd = typedAmountNTD else { return nil }
+        return "每公升 NT$" + FinanceItemText.number(ntd / liters, digits: 1)
+    }
+
+    /// 車輛區下面的說明：[v25.539] 依支出類別講那幾個選填欄能算出什麼
+    private var vehicleSectionFooter: String {
+        switch selectedVehicleExpenseCategory {
+        case .electricity:
+            return "充電度數、電量 % 與里程錶皆選填。填度數→每度電價；填電量 %→推估電池容量；連續兩筆都填里程錶→電耗（km/kWh）與每公里電費。車輛卡片會顯示 KPI 與趨勢圖。"
+        case .fuel:
+            return "公升數、里程錶皆選填。填公升數→每公升油價；連續兩次加油都填里程錶→每公里油錢，再加上公升數→油耗（公里／公升）。"
+        case .maintenance:
+            return "里程錶選填。記下保養當時的讀數，就算得出這台車一年開多少公里、大約每幾公里保養一次。"
+        case .repair:
+            return "里程錶選填。記下維修當時的讀數，就算得出這台車一年開多少公里。"
+        case .parking, .wash, .other:
+            return "選擇後分類自動設為「汽車」；名稱留空時自動用「車名-支出類別」，也可以自己打。支出類別會依照車輛動力類型自動篩選。"
+        }
+    }
+
+    /// [v25.538] 基本模式選了「汽車」：從車子帶進來要直接記度數的（showVehicleSection）給整個車輛區，
+    /// 其他情況給一列選車＋支出類別
+    @ViewBuilder
+    private var basicVehicleArea: some View {
+        if presetShowsVehicleSection && selectedAssetLink == .vehicle {
+            vehicleLinkSection
+        } else if !financeStore.vehicles.isEmpty {
+            basicVehiclePickerSection
+        }
+    }
+
+    private var basicVehiclePickerSection: some View {
+        Section {
+            Picker("選擇車輛", selection: basicVehicleSelection) {
+                Text("請選擇").tag(nil as UUID?)
+                ForEach(financeStore.vehicles) { v in
+                    Text("\(v.name)\(!v.brand.isEmpty ? " (\(v.brand))" : "")").tag(v.id as UUID?)
+                }
+            }
+            if let v = financeStore.vehicles.first(where: { $0.id == targetVehicleId }) {
+                Picker("支出類別", selection: $selectedVehicleExpenseCategory) {
+                    ForEach(VehicleVariableCategory.categories(for: v.powerType)) { cat in
+                        Label(cat.rawValue, systemImage: cat.icon).tag(cat)
+                    }
+                }
+            }
+        } header: {
+            sectionHeader(title: "汽車（連動理財模式）", accentColor: .teal)
+        } footer: {
+            Text("選了車，這筆才會算進那台車。")
+        }
+    }
+
+    /// 基本模式的選車：選了車就等於關聯資產選「汽車」（切到進階模式看到的是同一份），選「請選擇」就不連
+    private var basicVehicleSelection: Binding<UUID?> {
+        Binding(
+            get: { selectedAssetLink == .vehicle ? selectedVehicleId : nil },
+            set: { pickVehicle($0) }
+        )
+    }
+
+    private func pickVehicle(_ id: UUID?) {
+        selectedVehicleId = id
+        selectedAssetLink = id == nil ? .none : .vehicle
+        // 同 vehicleLinkSection 的 onChange：原本的支出類別不適用新車的動力類型（油錢 vs 電車）就改成第一個可用的
+        guard let vid = id, let v = financeStore.vehicles.first(where: { $0.id == vid }) else { return }
+        let cats = VehicleVariableCategory.categories(for: v.powerType)
+        if !cats.contains(selectedVehicleExpenseCategory), let first = cats.first {
+            selectedVehicleExpenseCategory = first
+        }
+    }
+
+    /// 基本模式選「汽車」時幫你選車（已經連著車就不動）：分類切走又切回來的，接回剛剛那台；
+    /// 不然只有一台車就直接選它
+    private func autoPickOnlyVehicle() {
+        guard !advancedMode, expenseType == .variable,
+              selectedAssetLink != .vehicle || selectedVehicleId == nil else { return }
+        if let vid = selectedVehicleId, financeStore.vehicles.contains(where: { $0.id == vid }) {
+            pickVehicle(vid)
+        } else if financeStore.vehicles.count == 1, let only = financeStore.vehicles.first {
+            pickVehicle(only.id)
         }
     }
 
     // MARK: - 保險子分類
 
     private var insuranceSubCategorySection: some View {
-        Section("保險類別") {
+        Section {
             Picker("保險類別", selection: $selectedInsuranceSubCategory) {
                 ForEach(InsuranceSubCategory.allCases) { sub in
                     Text(sub.rawValue).tag(sub)
                 }
             }
             .pickerStyle(.menu)
+        } header: {
+            sectionHeader(title: "保險類別", accentColor: .green)
+        } footer: {
+            insuranceSubCategoryFooter
         }
+    }
+
+    /// [v25.567] 保險類別那段 footer：連不到車的提醒＋這筆連著財富保單的一句（兩句都可能有）
+    private var insuranceSubCategoryFooter: some View {
+        insuranceFooterLines(blockedVehicle: vehicleNameBlockedBySubCategory, policyNote: linkedPolicyNote)
+    }
+
+    @ViewBuilder
+    private func insuranceFooterLines(blockedVehicle: String?, policyNote: String?) -> some View {
+        if blockedVehicle != nil || policyNote != nil {
+            VStack(alignment: .leading, spacing: 4) {
+                if let name = blockedVehicle {
+                    Text("儲蓄險、壽險、意外險不能連到車子；要算進「\(name)」的養車，請選強制險或綜合險。")
+                        .foregroundStyle(.orange)
+                }
+                if let n = policyNote {
+                    Text(n)
+                }
+            }
+        }
+    }
+
+    /// [v25.567] 編輯中的這一筆被財富的某張保單連著：「這筆保費連著財富的保單「國泰人壽 醫療險」：改金額、扣款，保單跟著。」；
+    /// 沒連（或新增）nil。保單名字讀一套數字的保單總表（快取，打字不重算）
+    private var linkedPolicyNote: String? {
+        guard let id = editingExpense?.id else { return nil }
+        let facts = lifeStore.wealthFacts(expense: store, finance: financeStore)
+        guard let p = facts.policies.policy(linkedTo: id) else { return nil }
+        return "這筆保費連著財富的保單「" + p.title + "」：改金額、扣款，保單跟著。"
+    }
+
+    /// [v25.541] 表單連著車、保險類別卻選了儲蓄險／壽險／意外險時的車名（其他時候 nil）。
+    /// 這三種連不到車，選車的區塊會消失、存檔會拿掉車子的連結，要講清楚為什麼，不然看起來像被重置
+    private var vehicleNameBlockedBySubCategory: String? {
+        guard isInsurance, !isVehicleInsurance, let v = fixedFormLinkedVehicle else { return nil }
+        return v.name
     }
 
     // MARK: - 貸款子分類
 
     private var loanSubCategorySection: some View {
-        Section("貸款類別") {
+        Section {
             Picker("貸款類別", selection: $selectedLoanSubCategory) {
                 ForEach(LoanSubCategory.allCases) { sub in
                     Text(sub.rawValue).tag(sub)
                 }
             }
             .pickerStyle(.menu)
+        } header: {
+            sectionHeader(title: "貸款類別", accentColor: .blue)
         }
     }
 
@@ -1511,9 +3144,11 @@ struct AddExpenseView: View {
 
     /// 自動推斷預設值（與 Expense.autoTaxDeductible 同邏輯）
     private var autoTaxDeductibleDefault: Bool {
-        if selectedFixedCategory == .insurance { return selectedInsuranceSubCategory != .savings }
+        // [v25.539] 車險（強制險、綜合險）不是人身保險，預設不算（同 Expense.autoTaxDeductible）
+        if selectedFixedCategory == .insurance { return !isSavingsInsurance && !isVehicleInsurance }
         if selectedFixedCategory == .loan && selectedLoanSubCategory == .mortgage { return true }
-        if selectedFixedCategory == .rent { return true }
+        // [v25.539] 連到車子的租金是車位月租，不是住的房子的租金：預設不算（同 Expense.autoTaxDeductible）
+        if selectedFixedCategory == .rent { return targetVehicleId == nil }
         return false
     }
 
@@ -1525,6 +3160,8 @@ struct AddExpenseView: View {
     }
 
     private var inferredTaxSavingLimitNote: String {
+        // [v25.541] 車險不是人身保險，「人身保險每人每年最高 2.4 萬」這句會讓人以為它能扣；改由 footer 另一行講清楚
+        if isVehicleInsurance { return "" }
         if selectedFixedCategory == .insurance { return TaxSavingSubCategory.insurance.limitNote }
         if selectedFixedCategory == .loan && selectedLoanSubCategory == .mortgage { return TaxSavingSubCategory.mortgage.limitNote }
         if selectedFixedCategory == .rent { return TaxSavingSubCategory.rent.limitNote }
@@ -1541,7 +3178,7 @@ struct AddExpenseView: View {
                     .foregroundStyle(.green)
             }
         } header: {
-            Text("稅務")
+            sectionHeader(title: "稅務", accentColor: .green)
         } footer: {
             VStack(alignment: .leading, spacing: 4) {
                 Text("開啟後本筆固定支出會以「\(inferredTaxSavingSubLabel)」計入稅務頁節稅累積。")
@@ -1551,6 +3188,11 @@ struct AddExpenseView: View {
                 }
                 if isSavingsInsurance {
                     Text("注意：儲蓄險預設不列入扣除額；若你的方案含人身保險成分，可手動開啟。")
+                        .foregroundStyle(.orange)
+                }
+                // [v25.541] v25.539 起車險預設不列入（autoTaxDeductibleDefault），這裡跟著講為什麼
+                if isVehicleInsurance {
+                    Text("車險（強制險、綜合險）不是人身保險，不能列舉扣除，預設不列入；你自己打開照樣算。")
                         .foregroundStyle(.orange)
                 }
             }
@@ -1573,7 +3215,7 @@ struct AddExpenseView: View {
                 }
             }
         } header: {
-            Text("車輛資訊（連動理財模式）")
+            sectionHeader(title: "車輛資訊（連動理財模式）", accentColor: .teal)
         } footer: {
             Text("儲存後將自動在理財模式的汽車定期支出中新增對應的車貸紀錄。")
         }
@@ -1631,7 +3273,7 @@ struct AddExpenseView: View {
                 }
             }
         } header: {
-            Text("房地產資訊（連動理財模式）")
+            sectionHeader(title: "房地產資訊（連動理財模式）", accentColor: .purple)
         } footer: {
             Text(mortgageLinkExisting
                  ? "儲存後將自動在選擇的房地產物件中新增對應的房貸紀錄。"
@@ -1643,13 +3285,14 @@ struct AddExpenseView: View {
 
     private var savingsInsuranceSection: some View {
         Group {
-            Section("繳費設定") {
+            Section {
                 HStack {
                     Text("幣別")
                     Spacer()
                     Menu {
+                        // [v25.563] setInsCurrency：保單改成外幣時，扣款選的銀行幣別不一樣就清掉
                         Button {
-                            insCurrencyCode = "NT$"
+                            setInsCurrency("NT$")
                         } label: {
                             if insCurrencyCode == "NT$" {
                                 Label("NT$", systemImage: "checkmark")
@@ -1659,7 +3302,7 @@ struct AddExpenseView: View {
                         }
                         ForEach(store.currencyRates) { rate in
                             Button {
-                                insCurrencyCode = rate.code
+                                setInsCurrency(rate.code)
                             } label: {
                                 if insCurrencyCode == rate.code {
                                     Label("\(rate.code)（1=\(rateDisplay(rate.rate)) 元）", systemImage: "checkmark")
@@ -1692,7 +3335,9 @@ struct AddExpenseView: View {
                 }
                 TextField("保險公司", text: $insCompany)
                 DatePicker("起始日", selection: $insStartDate, displayedComponents: .date)
-                DatePicker("到期日", selection: $insMaturityDate, displayedComponents: .date)
+                DatePicker("到期日", selection: $insMaturityDate, in: insStartDate..., displayedComponents: .date)
+            } header: {
+                sectionHeader(title: "繳費設定", accentColor: .green)
             }
         }
     }
@@ -1701,38 +3346,36 @@ struct AddExpenseView: View {
 
     private var savingsCalcSection: some View {
         Group {
-            Section("繳費資訊") {
+            // 美化：加 Capsule 色條 section header，對齊 basicInfoSection 規格
+            Section {
                 row("繳費期數", "\(insTotalPeriods) 期")
                 row("已繳期數", "\(insElapsedPeriods) 期")
                 row("已繳總額", formatCurrency(insPremium * Double(insElapsedPeriods)))
+            } header: {
+                sectionHeader(title: "繳費資訊", accentColor: .blue)
             }
             Section {
-                HStack {
-                    Text("目前帳戶價值"); Spacer()
-                    Text(formatCurrency(insCurrentValue)).font(.body.bold()).foregroundStyle(.blue)
-                }
-                HStack {
-                    Text("期滿預估領回"); Spacer()
-                    Text(formatCurrency(insExpectedReturn)).font(.body.bold()).foregroundStyle(.green)
-                }
+                // 美化：數值改用彩色膠囊，視覺層次更清晰
+                savingsKpiRow(label: "目前帳戶價值", value: formatCurrency(insCurrentValue), color: .blue)
+                savingsKpiRow(label: "期滿預估領回", value: formatCurrency(insExpectedReturn), color: .green)
                 if insTotalPeriods > 0 {
                     let totalPremium = insPremium * Double(insTotalPeriods)
                     let gain = insExpectedReturn - totalPremium
-                    HStack {
-                        Text("複利增值"); Spacer()
-                        Text((gain >= 0 ? "+" : "") + formatCurrency(gain))
-                            .foregroundStyle(gain >= 0 ? .green : .red)
-                    }
+                    savingsKpiRow(
+                        label: "複利增值",
+                        value: (gain >= 0 ? "+" : "") + formatCurrency(gain),
+                        color: gain >= 0 ? .green : .red
+                    )
                     if totalPremium > 0 {
-                        HStack {
-                            Text("預估總報酬率"); Spacer()
-                            Text(String(format: "%.2f%%", gain / totalPremium * 100))
-                                .font(.body.bold()).foregroundStyle(gain >= 0 ? .green : .red)
-                        }
+                        savingsKpiRow(
+                            label: "預估總報酬率",
+                            value: String(format: "%.2f%%", gain / totalPremium * 100),
+                            color: gain >= 0 ? .green : .red
+                        )
                     }
                 }
             } header: {
-                Text("自動計算結果")
+                sectionHeader(title: "自動計算結果", accentColor: .green)
             } footer: {
                 if insRate > 0, insPremium > 0 {
                     Text("以年利率 \(String(format: "%.2f%%", insRate)) 複利計算，\(selectedRecurrence.rawValue)繳 \(formatCurrency(insPremium))，共 \(insTotalPeriods) 期。")
@@ -1741,25 +3384,185 @@ struct AddExpenseView: View {
         }
     }
 
+    /// 美化：儲蓄險 KPI 橫列（label + 彩色膠囊值），對齊 loanKpiRow 規格
+    private func savingsKpiRow(label: String, value: String, color: Color) -> some View {
+        HStack {
+            Text(label)
+                .foregroundStyle(.secondary)
+            Spacer()
+            Text(value)
+                .font(.body.weight(.bold))
+                .foregroundStyle(color)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(color.opacity(0.10))
+                .clipShape(Capsule())
+        }
+    }
+
+    // MARK: - 美化 v2：即時金額預覽卡
+
+    /// 萬/億格式化輔助（預覽卡專用）
+    private static let previewDecimalFmt: NumberFormatter = {
+        let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 2; return f
+    }()
+
+    private func previewAmountString(_ value: Double) -> String {
+        // 外幣：看板以所選幣別顯示原幣金額，不再硬掛 NT$（使用者回報）；
+        // 有匯率時附 NT$ 等值換算
+        if selectedCurrencyCode != "NT$", !selectedCurrencyCode.isEmpty {
+            let s = Self.previewDecimalFmt.string(from: NSNumber(value: value)) ?? "0"
+            if let rate = store.currencyRates.first(where: { $0.code == selectedCurrencyCode }),
+               rate.rate > 0 {
+                let twd = value * rate.rate
+                let twdStr = abs(twd) >= 10_000
+                    ? String(format: "%.1f 萬", twd / 10_000)
+                    : (Self.previewDecimalFmt.string(from: NSNumber(value: twd)) ?? "0")
+                return "\(selectedCurrencyCode) \(s) ≈ NT$\(twdStr)"
+            }
+            return "\(selectedCurrencyCode) \(s)"
+        }
+        let absVal = abs(value)
+        if absVal >= 100_000_000 { return String(format: "%.1f 億", value / 100_000_000) }
+        if absVal >= 10_000      { return String(format: "%.1f 萬", value / 10_000) }
+        return fmtCurrency(value)
+    }
+
+    /// 頂端即時金額預覽卡：漸層背景 + 48pt 類別圖示圓 + 萬/億大字金額
+    private var amountPreviewCard: some View {
+        let amount = Double(amountText) ?? 0
+        // [v3] variable 依選取分類動態著色；fixed 維持藍色
+        let accentColor: Color = expenseType == .variable
+            ? selectedVariableCategory.accentColor
+            : .blue
+        let icon = expenseType == .variable ? selectedVariableCategory.icon : selectedFixedCategory.icon
+        let label = expenseType == .variable ? selectedVariableCategory.rawValue : selectedFixedCategory.rawValue
+
+        return HStack(spacing: 14) {
+            // 48pt 漸層圖示圓 + 細邊框 + 陰影（對齊 incomeRow / ExpenseRow 44pt 規格，預覽卡稍大）
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [accentColor.opacity(0.22), accentColor.opacity(0.08)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 48, height: 48)
+                Circle()
+                    .stroke(accentColor.opacity(0.22), lineWidth: 1.2)
+                    .frame(width: 48, height: 48)
+                Image(systemName: icon)
+                    .font(.system(size: 20, weight: .semibold))
+                    .foregroundStyle(accentColor)
+            }
+            .shadow(color: accentColor.opacity(0.22), radius: 6, x: 0, y: 3)
+            // [v3] 圖示圓隨分類切換有 spring 動畫
+            .animation(.spring(response: 0.30, dampingFraction: 0.70), value: accentColor.description)
+
+            VStack(alignment: .leading, spacing: 4) {
+                // [v3] 分類標籤升級為彩色 Capsule（對齊 AddIncomeView.amountPreviewCard 膠囊規格）
+                Text(label)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(accentColor)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(accentColor.opacity(0.12))
+                    .clipShape(Capsule())
+                    .animation(.spring(response: 0.28, dampingFraction: 0.72), value: label)
+
+                Text(previewAmountString(amount))
+                    .font(.system(size: 26, weight: .bold, design: .rounded))
+                    .foregroundStyle(.primary)
+                    .contentTransition(.numericText())
+                    .minimumScaleFactor(0.65)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            // 散景裝飾圓
+            Circle()
+                .fill(accentColor.opacity(0.06))
+                .frame(width: 70, height: 70)
+                .blur(radius: 12)
+                .offset(x: 10)
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+        .background(
+            ZStack {
+                Color(.systemBackground)
+                accentColor.opacity(0.04)
+                Circle()
+                    .fill(accentColor.opacity(0.06))
+                    .frame(width: 110, height: 110)
+                    .offset(x: 90, y: -15)
+                    .blur(radius: 18)
+                // [v3] glass shine 頂部白色高光（對齊全 App 英雄卡 glass shine 規格）
+                LinearGradient(
+                    colors: [.white.opacity(0.16), .clear],
+                    startPoint: .top,
+                    endPoint: .center
+                )
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(accentColor.opacity(0.14), lineWidth: 0.75)
+        )
+        .shadow(color: accentColor.opacity(0.10), radius: 10, x: 0, y: 4)
+        .shadow(color: .black.opacity(0.04), radius: 3, x: 0, y: 2)
+        .opacity(amountCardAppeared ? 1 : 0)
+        .offset(y: amountCardAppeared ? 0 : 14)
+        .onAppear {
+            amountCardAppeared = false
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.05)) {
+                amountCardAppeared = true
+            }
+        }
+        .onDisappear { amountCardAppeared = false }
+    }
+
+    /// 美化：帶 Capsule 漸層色條的 Section header，對齊全 App 其他頁面 section 標題規格
+    private func sectionHeader(title: String, accentColor: Color) -> some View {
+        HStack(spacing: 10) {
+            Capsule()
+                .fill(
+                    LinearGradient(
+                        colors: [accentColor, accentColor.opacity(0.55)],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                )
+                .frame(width: 4, height: 16)
+            Text(title)
+                .font(.subheadline.weight(.semibold))
+        }
+        .textCase(.none)
+    }
+
     // MARK: - 固定支出關聯資產
 
     private var fixedAssetLinkSection: some View {
         Section {
-            Picker("關聯資產", selection: $selectedFixedAssetLink) {
-                ForEach(FixedAssetLinkType.allCases) { type in
+            // [v25.538] 車險只列「無」「汽車」（fixedAssetLinkOptions）
+            Picker("關聯資產", selection: fixedAssetLinkSelection) {
+                ForEach(fixedAssetLinkOptions) { type in
                     Text(type.rawValue).tag(type)
                 }
             }
             .pickerStyle(.menu)
         } header: {
-            Text("關聯理財資產（選填）")
+            sectionHeader(title: "關聯理財資產（選填）", accentColor: .blue)
         } footer: {
             Text("選擇後可將此筆固定支出連結到理財模式的對應項目。")
         }
     }
 
     private var fixedVehicleLinkSection: some View {
-        Section("汽車（連動理財模式）") {
+        Section {
             if financeStore.vehicles.isEmpty {
                 Text("尚無車輛，請先在理財模式新增汽車")
                     .font(.subheadline).foregroundStyle(.secondary)
@@ -1771,11 +3574,13 @@ struct AddExpenseView: View {
                     }
                 }
             }
+        } header: {
+            sectionHeader(title: "汽車（連動理財模式）", accentColor: .teal)
         }
     }
 
     private var fixedRealEstateLinkSection: some View {
-        Section("房地產（連動理財模式）") {
+        Section {
             if financeStore.realEstates.isEmpty {
                 Text("尚無房地產，請先在理財模式新增")
                     .font(.subheadline).foregroundStyle(.secondary)
@@ -1787,11 +3592,13 @@ struct AddExpenseView: View {
                     }
                 }
             }
+        } header: {
+            sectionHeader(title: "房地產（連動理財模式）", accentColor: .purple)
         }
     }
 
     private var fixedInsuranceLinkSection: some View {
-        Section("儲蓄險（連動理財模式）") {
+        Section {
             if financeStore.insurances.isEmpty {
                 Text("尚無儲蓄險，請先在理財模式新增")
                     .font(.subheadline).foregroundStyle(.secondary)
@@ -1803,13 +3610,68 @@ struct AddExpenseView: View {
                     }
                 }
             }
+        } header: {
+            sectionHeader(title: "儲蓄險（連動理財模式）", accentColor: .green)
         }
+    }
+
+    // MARK: - [v25.563] 改固定支出金額問「從今天起／全部都改」（D9）
+
+    /// 金額欄、幣別的樣子（loadEditing 最後記一份到 loadedAmountKey；沒動過金額就不問）
+    private var amountKey: String { "\(amountText)|\(selectedCurrencyCode)|\(insCurrencyCode)" }
+
+    /// 要不要問：編輯中的週期性固定支出、表單還是固定支出、金額欄動過而且金額真的變了、第一期在今天以前、還沒選過。
+    /// 要問回確認框的字；不用問回 nil。name：存檔用的名稱
+    private func amountChangeAsk(candidate: Double, title name: String) -> AmountFromAsk? {
+        guard amountChangeAll == nil,
+              let e = editingExpense,
+              e.expenseType == .fixed, e.recurrence != nil,
+              expenseType == .fixed,
+              amountKey != loadedAmountKey,
+              Swift.abs(candidate - e.amount) > 0.004,
+              WealthCal.day(e.date) < WealthCal.day(Date()) else { return nil }
+        // 外幣儲蓄險的金額是原幣（e.originalCurrencyAmount）；其他都是台幣
+        let oldCode = e.originalCurrencyAmount?.code ?? "NT$"
+        let newCode = isSavingsInsurance ? WealthFacts.norm(insCurrencyCode) : "NT$"
+        let oldText = WealthFormat.money(e.amount, code: oldCode)
+        let newText = WealthFormat.money(candidate, code: newCode)
+        let linked = selectedBankMilestoneId != nil || selectedCreditCardMilestoneId != nil
+        let why = linked ? "財富頁銀行的數字照這個算。" : "固定支出頁的金額走勢照這個記。"
+        return AmountFromAsk(
+            title: "\(name)從 \(oldText) 改成 \(newText)",
+            message: "以前扣過的那幾期要不要跟著改？" + why,
+            fromLabel: "從今天起（以前的照舊）",
+            allLabel: "全部都改（以前的也算 \(newText)）"
+        )
+    }
+
+    /// 確認框選了（all：全部都改）：記下來、再存一次（這次不會再問）
+    private func pickAmountFrom(_ all: Bool) {
+        amountChangeAll = all
+        saveExpense()
+    }
+
+    /// 存檔時的金額歷史：沒問（新增、金額沒改、不是週期性）→ 照舊帶回；全部都改 → 清空（每一期都是新金額）；
+    /// 從今天起 → 今天以前每一期照原本算出來的金額不變、今天起是新金額（同固定支出頁「更新金額」記今天）
+    private func savedAmountHistory(newAmount: Double) -> [AmountSnapshot] {
+        guard let prev = editingExpense else { return [] }
+        guard let all = amountChangeAll else { return prev.amountHistory }
+        if all { return [] }
+        return AmountHistoryChange.from(Date(), history: prev.amountHistory, current: prev.amount,
+                                        firstDate: prev.date, newAmount: newAmount)
     }
 
     // MARK: - 儲存
 
     private func saveExpense() {
+        guard !isSaving else { return }
         var trimmedTitle = title.trimmingCharacters(in: .whitespaces)
+
+        // [v25.538] 連到車子、名稱空白：用「車名-分類名」（決定 19；車險不套，見 vehicleDefaultTitle）
+        if trimmedTitle.isEmpty, let def = vehicleDefaultTitle {
+            trimmedTitle = def
+            title = def
+        }
 
         // 變動支出：名稱留空時以分類名稱當預設（讓基本模式更省事）
         if expenseType == .variable && trimmedTitle.isEmpty {
@@ -1818,8 +3680,9 @@ struct AddExpenseView: View {
         }
 
         // 股票連動時自動計算金額
+        // [v25.562] 股票頁「賣出虧損」自動建的那筆不算：它的金額是虧損，以前在記帳改個備註就被換成股數 × 買價
         var finalAmountText = amountText
-        if expenseType == .variable && selectedAssetLink == .stock {
+        if expenseType == .variable && selectedAssetLink == .stock && !isStockSaleLossExpense {
             if let shares = Double(stockSharesText), let price = Double(stockPriceText), shares > 0, price > 0 {
                 finalAmountText = String(format: "%.0f", shares * price)
             }
@@ -1827,15 +3690,64 @@ struct AddExpenseView: View {
 
         guard !trimmedTitle.isEmpty,
               let rawAmount = Double(finalAmountText), rawAmount > 0 else {
-            showValidationError = true
+            validationErrorMessage = "請輸入有效的名稱與金額（大於 0）。"
+            // 美化：withAnimation 讓錯誤卡片的 transition 動畫生效
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                showValidationError = true
+            }
             return
         }
+
+        // 「新增物件」模式會建立全新的 RealEstate，購入價格若留空／為 0，
+        // 會被 (Double(rePurchasePriceText) ?? 0) 靜默存成 0，資產淨值、排序、
+        // 稀有度全部跟著算錯卻不會有任何錯誤提示；比照 AddRealEstateView／
+        // AddVehicleView／AddStockView 既有的「新增資產必填價格」守衛補上。
+        let willCreateNewRealEstate =
+            (isMortgage && !mortgageLinkExisting)
+            || (expenseType == .variable && selectedAssetLink == .realEstate && !realEstateLinkExisting)
+        if willCreateNewRealEstate, (Double(rePurchasePriceText) ?? 0) <= 0 {
+            validationErrorMessage = "新增不動產物件時，請輸入有效的購入價格（大於 0）。"
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                showValidationError = true
+            }
+            return
+        }
+
+        // 同上：變動支出「關聯資產＝股票」且尚未連結既有股票時會經 syncStockInvestment()
+        // 建立全新 Stock，股數／價格留空會被 (Double(...) ?? 0) 靜默存成 0，變成一筆與本支出
+        // 金額完全脫鉤、股數 0 的空殼持股卻沒有任何提示；比照上面不動產守衛補上必填檢查。
+        // [v25.562] 連著的股票已經被刪掉（syncStockInvestment 會新建一筆）也算新建，一樣要檢查
+        var linkedStockStillExists = false
+        if let sid = editingExpense?.linkedStockId {
+            linkedStockStillExists = financeStore.stocks.contains(where: { $0.id == sid })
+        }
+        let willCreateNewStock =
+            expenseType == .variable && selectedAssetLink == .stock && !linkedStockStillExists
+        if willCreateNewStock, !((Double(stockSharesText) ?? 0) > 0 && (Double(stockPriceText) ?? 0) > 0) {
+            validationErrorMessage = "新增股票投資時，請輸入有效的股數與價格（大於 0）。"
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                showValidationError = true
+            }
+            return
+        }
+
+        // [v25.563] 改了週期性固定支出的金額：先問以前扣過的那幾期要不要跟著改（D9）；選了 pickAmountFrom 再叫一次這裡。
+        // 金額算法跟下面存檔同一條（儲蓄險是原幣，其他換台幣）
+        let candidateAmount = isSavingsInsurance ? rawAmount : rawAmount * currencyMultiplier
+        if let ask = amountChangeAsk(candidate: candidateAmount, title: trimmedTitle) {
+            amountAsk = ask
+            return
+        }
+
+        isSaving = true
 
         // 自訂幣別換算為 NT$（儲蓄險不適用，使用其自身幣別欄位）
         let amount = isSavingsInsurance ? rawAmount : rawAmount * currencyMultiplier
 
         let expenseId = editingExpense?.id ?? generatedNewExpenseId
+        // 正向連結遺失時，改用反向連結（儲蓄險記得連到本支出）找回既有保單，避免重存時建立重複保單
         var linkedInsId = editingExpense?.linkedInsuranceId
+            ?? financeStore.insurances.first(where: { $0.linkedExpenseId == expenseId })?.id
         var linkedStkId = editingExpense?.linkedStockId
         var linkedREId = editingExpense?.linkedRealEstateId
         var linkedVehId = editingExpense?.linkedVehicleId
@@ -1848,6 +3760,14 @@ struct AddExpenseView: View {
             if mortgageLinkExisting, let reId = selectedMortgageRealEstateId {
                 linkedREId = reId
                 syncMortgageToExistingRealEstate(realEstateId: reId, expenseId: expenseId, amount: amount)
+                // 編輯時把房貸改連到另一筆不動產：舊不動產的 mortgageItems 只會由
+                // syncMortgageToExistingRealEstate 寫入新目標，不會自動清掉舊目標殘留的那筆，
+                // 否則會變成兩筆房地產各自掛著同一筆支出的房貸紀錄（其中一筆孤兒、金額不再更新）。
+                if let oldREId = editingExpense?.linkedRealEstateId, oldREId != reId,
+                   var oldRE = financeStore.realEstates.first(where: { $0.id == oldREId }) {
+                    oldRE.mortgageItems.removeAll { $0.linkedExpenseId == expenseId }
+                    financeStore.update(oldRE)
+                }
                 if let re = financeStore.realEstates.first(where: { $0.id == reId }) {
                     let idx = re.mortgageItems.firstIndex(where: { $0.linkedExpenseId == expenseId }).map { $0 + 1 } ?? re.mortgageItems.count
                     let mTitle = re.mortgageItems.first(where: { $0.linkedExpenseId == expenseId })?.title ?? "房貸"
@@ -1862,24 +3782,44 @@ struct AddExpenseView: View {
                 }
             }
         }
-        if isCarLoan, let vehicleId = selectedVehicleId {
-            linkedVehId = vehicleId
-            syncCarLoanToVehicle(vehicleId: vehicleId, expenseId: expenseId, amount: amount)
+        // [v25.538] 車子的連結一律照表單「現在」的狀態（targetVehicleId），不再沿用舊值：
+        // 以前關聯資產改成「無」或別的資產、車貸改成信貸／房貸時照樣連著舊車、鏡像也留著，
+        // 油錢改成交通後車子照算，信貸被 carLoanIds 當成車貸。
+        let targetVehId = targetVehicleId
+        // 車險只寫 linkedVehicleId、不寫鏡像（決定 8：舊畫面會把它標成「稅費」）
+        let writesVehicleMirror = targetVehId != nil && !isInsurance
+        // 先清再寫：不該有鏡像、或鏡像掛在別台車上，先把每台車身上指到這筆的拿掉，
+        // 再照原本流程同步到新車。順序反過來會把剛寫進新車的那份一起刪掉。
+        // 同一台車就不清，鏡像原地更新（列的位置、id 不變）。
+        func hasMirror(_ v: Vehicle) -> Bool {
+            v.fixedExpenses.contains { $0.linkedExpenseId == expenseId }
+                || v.variableExpenses.contains { $0.linkedExpenseId == expenseId }
+        }
+        let hasStrayMirror = financeStore.vehicles.contains { v in
+            hasMirror(v) && (!writesVehicleMirror || v.id != targetVehId)
+        }
+        if hasStrayMirror {
+            VehicleMirrors.removeMirrors(of: [expenseId], financeStore: financeStore)
+        }
+        linkedVehId = targetVehId
+        if writesVehicleMirror, let vehicleId = targetVehId {
+            if expenseType == .variable {
+                syncVehicleVariableExpense(vehicleId: vehicleId, expenseId: expenseId, amount: amount)
+            } else if isCarLoan {
+                syncCarLoanToVehicle(vehicleId: vehicleId, expenseId: expenseId, amount: amount)
+            } else {
+                syncFixedToVehicle(vehicleId: vehicleId, expenseId: expenseId, amount: amount)
+            }
         }
 
-        // 固定支出一般類別關聯資產
+        // 固定支出一般類別關聯資產（汽車在上面統一處理）
         if showFixedAssetLink {
-            switch selectedFixedAssetLink {
-            case .vehicle:
-                if let vehicleId = fixedLinkVehicleId {
-                    linkedVehId = vehicleId
-                    syncFixedToVehicle(vehicleId: vehicleId, expenseId: expenseId, amount: amount)
-                }
+            switch effectiveFixedAssetLink {
             case .realEstate:
                 linkedREId = fixedLinkRealEstateId
             case .insurance:
                 linkedInsId = fixedLinkInsuranceId
-            case .none:
+            case .vehicle, .none:
                 break
             }
         }
@@ -1888,10 +3828,7 @@ struct AddExpenseView: View {
         if expenseType == .variable {
             switch selectedAssetLink {
             case .vehicle:
-                if let vehicleId = selectedVehicleId {
-                    linkedVehId = vehicleId
-                    syncVehicleVariableExpense(vehicleId: vehicleId, expenseId: expenseId, amount: amount)
-                }
+                break  // [v25.538] 上面統一處理（targetVehicleId）
             case .stock:
                 linkedStkId = syncStockInvestment(existingId: linkedStkId)
             case .insurance:
@@ -1901,6 +3838,16 @@ struct AddExpenseView: View {
                     if let reId = selectedRealEstateLinkId {
                         linkedREId = reId
                         syncRealEstateVariableExpense(realEstateId: reId, expenseId: expenseId, amount: amount)
+                        // 編輯時把變動支出改連到另一筆不動產：清掉舊不動產殘留的那筆紀錄
+                        // （可能落在 variableExpenses／paidItems／utilityPayments 三處之一），
+                        // 避免舊不動產留下孤兒紀錄、金額不再隨這筆支出更新。
+                        if let oldREId = editingExpense?.linkedRealEstateId, oldREId != reId,
+                           var oldRE = financeStore.realEstates.first(where: { $0.id == oldREId }) {
+                            oldRE.variableExpenses.removeAll { $0.linkedExpenseId == expenseId }
+                            oldRE.paidItems.removeAll { $0.linkedExpenseId == expenseId }
+                            oldRE.utilityPayments.removeAll { $0.linkedExpenseId == expenseId }
+                            financeStore.update(oldRE)
+                        }
                     }
                 } else {
                     let reId = syncNewRealEstateForVariable(existingId: linkedREId)
@@ -1914,7 +3861,14 @@ struct AddExpenseView: View {
         }
 
         let savedCurrencyCode = isSavingsInsurance ? insCurrencyCode : selectedCurrencyCode
-        let expense = Expense(
+        // [v25.365] 汽車的地點名稱存獨立欄位；其餘分類店名本來就在 title，不重複存一份
+        let trimmedPlaceName = placeName.trimmingCharacters(in: .whitespaces)
+        let savedPlaceName: String? =
+            (supportsPlacePicker && usesSeparatePlaceField && !trimmedPlaceName.isEmpty)
+            ? trimmedPlaceName : nil
+        // 座標只在「仍屬於現在這個分類」時才存（選完餐廳又把分類改成汽車不該沿用餐廳座標）
+        let keepPlaceCoordinate = supportsPlacePicker && placeScopeMatches
+        var expense = Expense(
             id: expenseId,
             title: trimmedTitle,
             amount: amount,
@@ -1929,7 +3883,8 @@ struct AddExpenseView: View {
             linkedStockId: linkedStkId,
             linkedRealEstateId: linkedREId,
             linkedVehicleId: linkedVehId,
-            vehicleExpenseCategory: (expenseType == .variable && selectedAssetLink == .vehicle) ? selectedVehicleExpenseCategory : nil,
+            // [v25.538] 有連到車才存子分類（不連車了要清掉，見 targetVehicleId）
+            vehicleExpenseCategory: (expenseType == .variable && targetVehId != nil) ? selectedVehicleExpenseCategory : nil,
             realEstateExpenseCategory: (expenseType == .variable && selectedAssetLink == .realEstate) ? selectedRealEstateExpenseCategory : nil,
             taxSavingSubCategory: (expenseType == .variable && selectedVariableCategory == .taxSaving) ? selectedTaxSavingSubCategory : nil,
             socialSubCategory: (expenseType == .variable && selectedVariableCategory == .social) ? selectedSocialSubCategory : nil,
@@ -1939,19 +3894,63 @@ struct AddExpenseView: View {
             currencyCode: savedCurrencyCode,
             diningMember: (expenseType == .variable && Self.memberCategories.contains(selectedVariableCategory) && !selectedDiningMembers.isEmpty) ? diningMembersString : nil,
             loanTotalAmount: showLoanCalcFields ? Double(loanTotalAmountText) : nil,
-            loanYears: showLoanCalcFields ? Double(loanYearsText) : nil,
+            loanYears: showLoanCalcFields ? loanYearsValue : nil,
             loanRate: showLoanCalcFields ? computedLoanRate() : nil,
+            insuranceRate: isSavingsInsurance ? insRate : nil,
             linkedBankMilestoneId: selectedBankMilestoneId,
             linkedBankCurrency: selectedBankMilestoneId != nil ? selectedBankCurrency : nil,
             linkedCreditCardMilestoneId: selectedCreditCardMilestoneId,
-            placeAddress: supportsPlacePicker ? placeAddress : nil,
-            placeLatitude: supportsPlacePicker ? placeLatitude : nil,
-            placeLongitude: supportsPlacePicker ? placeLongitude : nil,
-            photoFileNames: photoFileNames
+            placeName: savedPlaceName,
+            placeAddress: keepPlaceCoordinate ? placeAddress : nil,
+            placeLatitude: keepPlaceCoordinate ? placeLatitude : nil,
+            placeLongitude: keepPlaceCoordinate ? placeLongitude : nil,
+            photoFileNames: photoFileNames,
+            // [v25.347] 固定支出的停止；非固定或未開啟一律存 nil
+            endDate: (expenseType == .fixed && hasEndDate) ? endDate : nil,
+            endReason: (expenseType == .fixed && hasEndDate) ? endReason : nil
         )
+        // 金額歷史（不在 memberwise init）：編輯重建時帶回，不然存個檔走勢就被清空
+        // [v25.563] 改了金額而且選了「從今天起／全部都改」照選的寫（D9；savedAmountHistory）
+        expense.amountHistory = savedAmountHistory(newAmount: amount)
+        // [v2 小工具] 「從小工具一按記的」標記（不在 memberwise init）：編輯那一筆不要把它洗掉（電子發票防重複看它）
+        expense.fromQuickRecord = editingExpense?.fromQuickRecord
+        // 充電資訊：只在「變動＋關聯汽車＋電費」時存（比照子分類條件化原則）
+        // [v25.538] 還要真的選了車：沒選車存進去，卡片（要 linkedVehicleId）永遠看不到
+        let linksVehicleVariable = expenseType == .variable && targetVehId != nil
+        let isEVCharge = linksVehicleVariable && selectedVehicleExpenseCategory == .electricity
+        // [v25.539] 公升數只給加油；里程錶從「只有電費」放寬到油錢、電費、保養、維修（決定 7）。
+        // 條件不合一律存 nil：取消關聯汽車、改成別的分類時跟度數一起清掉。這裡是整筆重建，
+        // 不指派的話編輯一次就會把原本的公升數洗掉
+        let isFuelFill = linksVehicleVariable && selectedVehicleExpenseCategory == .fuel
+        let takesOdometer = linksVehicleVariable && Self.odometerCategories.contains(selectedVehicleExpenseCategory)
+        expense.evKwh = isEVCharge ? Double(evKwhText).flatMap { $0 > 0 ? $0 : nil } : nil
+        expense.evFromPct = isEVCharge ? Double(evFromText).flatMap { (0...100).contains($0) ? $0 : nil } : nil
+        expense.evToPct = isEVCharge ? Double(evToText).flatMap { (0...100).contains($0) ? $0 : nil } : nil
+        expense.evOdometer = takesOdometer ? Double(evOdoText).flatMap { $0 > 0 ? $0 : nil } : nil
+        expense.fuelLiters = isFuelFill ? Double(fuelLitersText).flatMap { $0 > 0 ? $0 : nil } : nil
+        // [v25.424] 旅遊關聯：只有變動支出有意義（固定支出是每月扣款，跟某一趟旅行無關）
+        if expenseType == .variable, let planId = linkedTripPlanId,
+           lifeStore.tripPlan(id: planId) != nil {
+            expense.linkedTripPlanId = planId
+            // 站別要確認還在那趟行程裡——站可能在這期間被刪掉了
+            expense.linkedTripStopId = lifeStore.tripPlan(id: planId)?
+                .stops.first(where: { $0.id == linkedTripStopId })?.id
+        } else {
+            expense.linkedTripPlanId = nil
+            expense.linkedTripStopId = nil
+        }
 
+        // [v25.564] 新增的變動支出：記住這次的付款方式（下次新增帶入）
+        if expenseType == .variable && !isEditing { rememberPayment() }
         if isEditing { store.update(expense) } else { store.add(expense) }
         syncBankWithdrawal(for: expense, previous: editingExpense)
+        // [v25.567] 改了一筆保費：連著它的財富保單照寫一份舊欄位（里程碑保費、帳本繳法／從哪扣／下次；給醫療地圖、舊 iPad、網頁版）。
+        // 先 dismiss，下一個 runloop 才寫（store 先抓進區域常數）；沒連保單的 policyExpenseChanged 自己什麼都不做
+        if isEditing && (isInsurance || editingExpense?.fixedCategory == .insurance) {
+            let life = lifeStore
+            let saved = expense
+            DispatchQueue.main.async { life.policyExpenseChanged(saved) }
+        }
         dismiss()
     }
 
@@ -1974,45 +3973,124 @@ struct AddExpenseView: View {
             }
             return
         }
+        // [v25.562] 連到的股票自己有交割帳戶（股票頁選了銀行或證券戶）：銀行的錢只看股票自己寫的交割紀錄，
+        // 這筆記帳不再寫扣款（不然同一筆買進扣兩次）；跟財富頁算餘額的 WealthFacts.isReplaced 同一條。
+        // 只清掉目前這個帳戶裡以前寫的那筆。記帳「買 0050（台新）」建出來、還沒選交割帳戶的股票照扣。
+        if let sid = expense.linkedStockId,
+           financeStore.stocks.first(where: { $0.id == sid })?.hasOwnSettlementAccount == true {
+            if let bankId = expense.linkedBankMilestoneId,
+               var ms = lifeStore.milestones.first(where: { $0.id == bankId }) {
+                ms.bankDeposits?.removeAll { $0.linkedExpenseId == expense.id }
+                lifeStore.update(ms)
+            }
+            return
+        }
         // 寫入新的連結記錄（直接扣款的銀行）
         guard let bankId = expense.linkedBankMilestoneId,
               var ms = lifeStore.milestones.first(where: { $0.id == bankId }) else { return }
         var list = ms.bankDeposits ?? []
         list.removeAll { $0.linkedExpenseId == expense.id }
+        // [v25.562] 扣外幣子帳戶要換匯：記帳金額存的是台幣，以前直接寫成「美金 320」。
+        // 全 App 同一支 FinanceRates.bankAmount（台幣格照寫、外幣儲蓄險原幣照寫、有匯率就換、查不到寫台幣格）
+        let withdrawal = FinanceRates(store).bankAmount(of: expense, ntd: store.ntdValue(of: expense))
         list.append(BankDeposit(
-            id: UUID(), date: expense.date, amount: expense.amount,
-            currencyCode: expense.linkedBankCurrency ?? "NT$",
+            id: UUID(), date: expense.date, amount: withdrawal.amount,
+            currencyCode: withdrawal.code,
             isWithdrawal: true, linkedExpenseId: expense.id
         ))
         ms.bankDeposits = list
         lifeStore.update(ms)
     }
 
+    /// [v25.562] 正在編輯的這筆是股票頁賣出虧損時自動建的記帳（AddStockView.syncSoldExpense；
+    /// 股票的 linkedExpenseId 指回它，刪支出時 VariableExpenseView 也用同一條認）。金額是虧損，不是投入金額。
+    private var isStockSaleLossExpense: Bool {
+        guard let e = editingExpense, let sid = e.linkedStockId else { return false }
+        return financeStore.stocks.first(where: { $0.id == sid })?.linkedExpenseId == e.id
+    }
+
     /// 同步建立股票投資紀錄
+    /// [v25.562] 編輯時不再用 Stock(...) 整筆重建：以前存一次記帳，股票的交割帳戶、交易紀錄、股利、
+    /// 已賣出全被洗掉（W8 靠「股票自己有交割帳戶」判斷，股票被洗掉後重複扣款又會回來）。
+    /// 既有股票只改名稱、代號、備註；沒有交易紀錄、沒賣出的舊版單筆股票才改股數、買價、日期；
+    /// 目前價格有填才改。找不到那檔股票（在股票頁刪掉了）才新建一筆。
     private func syncStockInvestment(existingId: UUID?) -> UUID {
-        let stockId = existingId ?? UUID()
         let shares = Double(stockSharesText) ?? 0
         let price = Double(stockPriceText) ?? 0
-        let currentPrice = Double(stockCurrentPriceText) ?? price
+        let trimmedStockName = stockName.trimmingCharacters(in: .whitespaces)
+        let finalName = trimmedStockName.isEmpty ? title.trimmingCharacters(in: .whitespaces) : trimmedStockName
+        let finalSymbol = stockSymbol.trimmingCharacters(in: .whitespaces).uppercased()
+        let finalNote = note.trimmingCharacters(in: .whitespaces)
 
+        if let sid = existingId, var s = financeStore.stocks.first(where: { $0.id == sid }) {
+            s.name = finalName
+            s.symbol = finalSymbol
+            // 備註：股票的備註還是空的、或還是當初從這筆記帳抄過去的才跟著改；在股票頁自己寫過的留著
+            let previousNote = editingExpense?.note.trimmingCharacters(in: .whitespaces) ?? ""
+            if s.note.isEmpty || s.note == previousNote { s.note = finalNote }
+            var legacyCostChanged = false
+            if s.transactions.isEmpty && !s.isSold {
+                let oldDate = s.purchaseDate
+                let oldShares = s.shares
+                let oldPrice = s.purchasePrice
+                s.purchaseDate = date
+                // 欄位清空不把股數、買價洗成 0
+                if shares > 0 { s.shares = shares }
+                if price > 0 { s.purchasePrice = price }
+                legacyCostChanged = s.purchaseDate != oldDate || s.shares != oldShares || s.purchasePrice != oldPrice
+            }
+            if let typedCurrent = Double(stockCurrentPriceText), typedCurrent > 0 {
+                s.currentPrice = typedCurrent
+            }
+            financeStore.update(s)
+            if legacyCostChanged && s.hasOwnSettlementAccount {
+                resyncLegacyStockPurchase(s)
+            }
+            return sid
+        }
+
+        let stockId = existingId ?? UUID()
+        let currentPrice = Double(stockCurrentPriceText) ?? price
         let stock = Stock(
             id: stockId,
-            name: stockName.trimmingCharacters(in: .whitespaces).isEmpty ? title.trimmingCharacters(in: .whitespaces) : stockName.trimmingCharacters(in: .whitespaces),
-            symbol: stockSymbol.trimmingCharacters(in: .whitespaces).uppercased(),
+            name: finalName,
+            symbol: finalSymbol,
             purchaseDate: date,
             shares: shares,
             purchasePrice: price,
             currentPrice: currentPrice,
-            note: note.trimmingCharacters(in: .whitespaces)
+            note: finalNote
         )
-
-        if existingId != nil { financeStore.update(stock) } else { financeStore.add(stock) }
+        financeStore.add(stock)
         return stockId
+    }
+
+    /// [v25.562 驗證補] 舊版單筆股票（沒有交易紀錄、沒賣出）自己有交割帳戶時，記帳改了股數、買價、日期，
+    /// 交割帳戶裡那筆買進扣款跟著重寫——W8 之後銀行只看股票自己的交割紀錄、這筆記帳不扣，
+    /// 不重寫的話台新還是扣舊的金額（記帳改成 20 萬，台新還是 −19 萬）。
+    /// [v25.567] 改叫 LifeStore.rewriteStockSettlements（股票表單、股票卡加交易同一支）：從所有帳戶清掉這檔的交割、
+    /// 照「那一天該記在哪」重寫（成本＝股數 × 買價、T+2 交割、stockAmountForAccount 一條規則）；股利入帳不動
+    private func resyncLegacyStockPurchase(_ stock: Stock) {
+        lifeStore.rewriteStockSettlements(stock, rates: FinanceRates(store))
     }
 
     /// 同步房地產支出（房屋價金→已支出章節，其餘→變動支出章節）
     private func syncRealEstateVariableExpense(realEstateId: UUID, expenseId: UUID, amount: Double) {
         guard var re = financeStore.realEstates.first(where: { $0.id == realEstateId }) else { return }
+
+        // [v25.530] 房子編輯頁的保險、附屬資產建出來的支出，在房子裡已經有自己那一項；
+        // 以前在記帳這邊再存一次，會被當成變動支出又加一列，同一筆錢算兩次。
+        // 改成只把金額寫回那一項（兩種項目都沒有日期欄位），並清掉以前多加出來的重複列。
+        let insuranceIdx = re.insuranceItems.firstIndex(where: { $0.linkedExpenseId == expenseId })
+        let assetIdx = re.propertyAssets.firstIndex(where: { $0.linkedExpenseId == expenseId })
+        if insuranceIdx != nil || assetIdx != nil {
+            if let i = insuranceIdx { re.insuranceItems[i].amount = amount }
+            if let i = assetIdx { re.propertyAssets[i].amount = amount }
+            re.variableExpenses.removeAll { $0.linkedExpenseId == expenseId }
+            re.paidItems.removeAll { $0.linkedExpenseId == expenseId }
+            financeStore.update(re)
+            return
+        }
 
         if selectedRealEstateExpenseCategory == .housePayment {
             // 房屋價金 → paidItems（已支出房屋金額）
@@ -2027,13 +4105,16 @@ struct AddExpenseView: View {
             re.variableExpenses.removeAll { $0.linkedExpenseId == expenseId }
 
             if let idx = re.paidItems.firstIndex(where: { $0.linkedExpenseId == expenseId }) {
+                let keptId = re.paidItems[idx].id
                 re.paidItems[idx] = RealEstatePaidItem(
-                    id: re.paidItems[idx].id,
+                    id: keptId,
                     title: title.trimmingCharacters(in: .whitespaces),
                     amount: amount,
                     date: date,
                     linkedExpenseId: expenseId
                 )
+                // [v25.530] 同一筆支出只留一列（以前重複加進來的一起收掉）
+                re.paidItems.removeAll { $0.linkedExpenseId == expenseId && $0.id != keptId }
             } else {
                 re.paidItems.append(newPaid)
             }
@@ -2042,25 +4123,30 @@ struct AddExpenseView: View {
             re.paidItems.removeAll { $0.linkedExpenseId == expenseId }
             re.variableExpenses.removeAll { $0.linkedExpenseId == expenseId }
 
-            let inferredType: UtilityType = {
-                let lower = title.lowercased()
-                if title.contains("水") { return .water }
-                if title.contains("電") || lower.contains("electric") { return .electricity }
-                if title.contains("瓦斯") || lower.contains("gas") { return .gas }
-                return .electricity
-            }()
-
+            // [v25.530] 類型的優先順序：上面選擇器選的 > 原本連著的那筆繳費紀錄（編輯既有的就沿用，不重猜）
+            // > 從名稱／備註判斷（guessUtilityType，跟 AI 記帳共用）。
             if let idx = re.utilityPayments.firstIndex(where: { $0.linkedExpenseId == expenseId }) {
                 let old = re.utilityPayments[idx]
-                re.utilityPayments[idx] = UtilityPayment(
-                    id: old.id, type: old.type, date: date, amount: amount,
+                let newType: UtilityType = selectedUtilityType ?? old.type
+                var rebuilt = UtilityPayment(
+                    id: old.id, type: newType, date: date, amount: amount,
                     photoFileName: old.photoFileName,
+                    photoFileNames: old.photoFileNames,
                     note: note.trimmingCharacters(in: .whitespaces),
                     linkedExpenseId: expenseId
                 )
+                // [v25.560] 「哪一個表」在房子那邊選的，記帳這裡改金額不要把它洗掉（換了水電類型才清）
+                rebuilt.meterId = newType == old.type ? old.meterId : nil
+                re.utilityPayments[idx] = rebuilt
             } else {
+                // 編輯時換了房子：舊房子那筆還在（存完才清），沿用它的類型
+                let previousType = financeStore.realEstates
+                    .flatMap { $0.utilityPayments }
+                    .first(where: { $0.linkedExpenseId == expenseId })?.type
+                let resolvedType: UtilityType = selectedUtilityType ?? previousType
+                    ?? guessUtilityType(title: title, note: note, estateName: re.name)
                 re.utilityPayments.append(UtilityPayment(
-                    type: inferredType, date: date, amount: amount,
+                    type: resolvedType, date: date, amount: amount,
                     note: note.trimmingCharacters(in: .whitespaces),
                     linkedExpenseId: expenseId
                 ))
@@ -2081,14 +4167,17 @@ struct AddExpenseView: View {
             re.utilityPayments.removeAll { $0.linkedExpenseId == expenseId }
 
             if let idx = re.variableExpenses.firstIndex(where: { $0.linkedExpenseId == expenseId }) {
+                let keptId = re.variableExpenses[idx].id
                 re.variableExpenses[idx] = RealEstateVariableExpense(
-                    id: re.variableExpenses[idx].id,
+                    id: keptId,
                     category: selectedRealEstateExpenseCategory,
                     name: trimmedNote,
                     amount: amount,
                     date: date,
                     linkedExpenseId: expenseId
                 )
+                // [v25.530] 同一筆支出只留一列（以前重複加進來的一起收掉）
+                re.variableExpenses.removeAll { $0.linkedExpenseId == expenseId && $0.id != keptId }
             } else {
                 re.variableExpenses.append(newEntry)
             }
@@ -2104,7 +4193,10 @@ struct AddExpenseView: View {
         let trimmedName = reName.trimmingCharacters(in: .whitespaces)
         let resolvedName = trimmedName.isEmpty ? title.trimmingCharacters(in: .whitespaces) : trimmedName
         let purchasePrice = (Double(rePurchasePriceText) ?? 0) * 10000
-        let currentValue = (Double(reCurrentValueText) ?? 0) * 10000
+        // [v25.530] 估值沒填（或 ≤ 0）就用購入價，跟 AddRealEstateView 一樣；
+        // 以前存成 0，房子變成增值 −100%，淨資產少一大截。
+        let enteredValue = (Double(reCurrentValueText) ?? 0) * 10000
+        let currentValue = enteredValue > 0 ? enteredValue : purchasePrice
 
         if var re = existingRE {
             re.name = resolvedName
@@ -2162,7 +4254,7 @@ struct AddExpenseView: View {
         let reId = existingRE?.id ?? UUID()
         let trimmedNote = note.trimmingCharacters(in: .whitespaces)
         let mortgageTitle = trimmedNote.isEmpty ? "房貸" : trimmedNote
-        let years = Double(loanYearsText) ?? 0
+        let years = loanYearsValue ?? 0
         let computedPeriods = years > 0 ? Int(years * 12) : 240
         let mortgageItem = RealEstateMortgageItem(
             title: mortgageTitle,
@@ -2174,7 +4266,10 @@ struct AddExpenseView: View {
         let trimmedName = reName.trimmingCharacters(in: .whitespaces)
         let resolvedName = trimmedName.isEmpty ? title.trimmingCharacters(in: .whitespaces) : trimmedName
         let purchasePrice = (Double(rePurchasePriceText) ?? 0) * 10000
-        let currentValue = (Double(reCurrentValueText) ?? 0) * 10000
+        // [v25.530] 估值沒填（或 ≤ 0）就用購入價，跟 AddRealEstateView 一樣；
+        // 以前存成 0，房子變成增值 −100%，淨資產少一大截。
+        let enteredValue = (Double(reCurrentValueText) ?? 0) * 10000
+        let currentValue = enteredValue > 0 ? enteredValue : purchasePrice
 
         if var re = existingRE {
             re.name = resolvedName
@@ -2187,12 +4282,13 @@ struct AddExpenseView: View {
             re.monthlyRental = Double(reMonthlyRentalText) ?? 0
             if let idx = re.mortgageItems.firstIndex(where: { $0.linkedExpenseId == expenseId }) {
                 let prev = re.mortgageItems[idx]
+                // [v25.532] 起始日一律跟著這筆的日期（以前沒填年限就留舊的，兩邊對不上）；期數有年限才改
                 re.mortgageItems[idx] = RealEstateMortgageItem(
                     id: prev.id,
                     title: mortgageTitle,
                     amount: mortgageAmount,
                     totalPeriods: years > 0 ? computedPeriods : prev.totalPeriods,
-                    startDate: years > 0 ? date : prev.startDate,
+                    startDate: date,
                     linkedExpenseId: expenseId
                 )
             } else {
@@ -2223,17 +4319,18 @@ struct AddExpenseView: View {
         guard var re = financeStore.realEstates.first(where: { $0.id == realEstateId }) else { return }
         let trimmedNote = note.trimmingCharacters(in: .whitespaces)
         let mortgageTitle = trimmedNote.isEmpty ? "房貸" : trimmedNote
-        let years = Double(loanYearsText) ?? 0
+        let years = loanYearsValue ?? 0
         let computedPeriods = years > 0 ? Int(years * 12) : 240
 
         if let idx = re.mortgageItems.firstIndex(where: { $0.linkedExpenseId == expenseId }) {
             let prev = re.mortgageItems[idx]
+            // [v25.532] 起始日一律跟著這筆的日期；期數有年限才改，沒有就沿用
             re.mortgageItems[idx] = RealEstateMortgageItem(
                 id: prev.id,
                 title: mortgageTitle,
                 amount: amount,
                 totalPeriods: years > 0 ? computedPeriods : prev.totalPeriods,
-                startDate: years > 0 ? date : prev.startDate,
+                startDate: date,
                 linkedExpenseId: expenseId
             )
         } else {
@@ -2249,15 +4346,28 @@ struct AddExpenseView: View {
         financeStore.update(re)
     }
 
+    /// [v25.538] 車子身上的鏡像週期只有「月」「年」兩種（留給還沒更新的舊版 App 讀）。
+    /// 以前除了每年一律存成每月、金額不變：每季繳 3,000 變成每月 3,000，月固定、每月養車、
+    /// 現金流全部多算 3 倍。現在每年照存；其他週期換算成每月的金額（每季 ÷ 3）。
+    /// 不加新的 enum case：舊版認不得會把整筆丟掉。
+    private func vehicleMirrorPeriod(amount: Double) -> (period: VehicleExpensePeriod, amount: Double) {
+        switch selectedRecurrence {
+        case .monthly: return (.monthly, amount)
+        case .quarterly: return (.monthly, amount / 3)
+        case .yearly: return (.yearly, amount)
+        }
+    }
+
     /// 同步車貸到理財模式的汽車定期支出
     private func syncCarLoanToVehicle(vehicleId: UUID, expenseId: UUID, amount: Double) {
         guard var vehicle = financeStore.vehicles.first(where: { $0.id == vehicleId }) else { return }
+        let mirror = vehicleMirrorPeriod(amount: amount)
 
         let newEntry = VehicleFixedExpense(
             id: UUID(),
             category: .carLoan,
-            amount: amount,
-            period: selectedRecurrence == .yearly ? .yearly : .monthly,
+            amount: mirror.amount,
+            period: mirror.period,
             linkedExpenseId: expenseId
         )
 
@@ -2265,8 +4375,8 @@ struct AddExpenseView: View {
             vehicle.fixedExpenses[existingIdx] = VehicleFixedExpense(
                 id: vehicle.fixedExpenses[existingIdx].id,
                 category: .carLoan,
-                amount: amount,
-                period: selectedRecurrence == .yearly ? .yearly : .monthly,
+                amount: mirror.amount,
+                period: mirror.period,
                 linkedExpenseId: expenseId
             )
         } else {
@@ -2286,22 +4396,39 @@ struct AddExpenseView: View {
         default: category = .tax  // 房租/水電/管理費等歸為稅費雜支
         }
 
-        let period: VehicleExpensePeriod = selectedRecurrence == .yearly ? .yearly : .monthly
+        // [v25.538] 季繳換算成每月金額（見 vehicleMirrorPeriod）
+        let mirror = vehicleMirrorPeriod(amount: amount)
 
         if let idx = vehicle.fixedExpenses.firstIndex(where: { $0.linkedExpenseId == expenseId }) {
             vehicle.fixedExpenses[idx] = VehicleFixedExpense(
                 id: vehicle.fixedExpenses[idx].id,
-                category: category, amount: amount, period: period, linkedExpenseId: expenseId
+                category: category, amount: mirror.amount, period: mirror.period, linkedExpenseId: expenseId
             )
         } else {
             vehicle.fixedExpenses.append(VehicleFixedExpense(
-                id: UUID(), category: category, amount: amount, period: period, linkedExpenseId: expenseId
+                id: UUID(), category: category, amount: mirror.amount, period: mirror.period, linkedExpenseId: expenseId
             ))
         }
         financeStore.update(vehicle)
     }
 
     // MARK: - 載入編輯資料
+
+    /// [v25.541] 只靠車子身上的鏡像連到這筆的車（linkedVehicleId 是空的舊資料用）
+    private func mirrorVehicle(fixedExpenseId id: UUID) -> Vehicle? {
+        financeStore.vehicles.first { v in v.fixedExpenses.contains { $0.linkedExpenseId == id } }
+    }
+
+    private func mirrorVehicle(variableExpenseId id: UUID) -> Vehicle? {
+        financeStore.vehicles.first { v in v.variableExpenses.contains { $0.linkedExpenseId == id } }
+    }
+
+    /// [v25.541] 舊版把「其他」改成車險時沒清車子身上的鏡像：只靠鏡像連著的強制險、綜合險也帶出那台車，
+    /// 不然存一次就跟車子斷開（儲蓄險、壽險、意外險本來就不能連車，不帶）
+    private func mirrorCarForInsurance(_ expense: Expense) -> UUID? {
+        guard expense.insuranceSubCategory == .compulsory || expense.insuranceSubCategory == .comprehensive else { return nil }
+        return mirrorVehicle(fixedExpenseId: expense.id)?.id
+    }
 
     private func loadEditing() {
         guard let expense = editingExpense else { return }
@@ -2310,15 +4437,21 @@ struct AddExpenseView: View {
         if expense.expenseType == .variable {
             let hasAdvancedFields = expense.linkedRealEstateId != nil
                 || expense.linkedVehicleId != nil
+                || mirrorVehicle(variableExpenseId: expense.id) != nil
                 || expense.linkedStockId != nil
                 || expense.linkedInsuranceId != nil
                 || expense.linkedBankMilestoneId != nil
                 || expense.linkedCreditCardMilestoneId != nil
+                // [v25.516] 掛了旅遊的也算進階：不展開的話「關聯旅遊／算在哪一站」
+                // 那一區（showTripLinkSection，同樣綁 advancedMode）會不見，
+                // 使用者看得到備註欄，卻看不到自己改的是哪一站。
+                || expense.linkedTripPlanId != nil
             if hasAdvancedFields { advancedMode = true }
         }
 
         title = expense.title
         // 編輯飲食支出時，還原店家位置資訊但不要觸發完成器
+        if let pName = expense.placeName { placeName = pName }
         if let addr = expense.placeAddress { placeAddress = addr }
         if let lat = expense.placeLatitude { placeLatitude = lat }
         if let lon = expense.placeLongitude { placeLongitude = lon }
@@ -2361,19 +4494,29 @@ struct AddExpenseView: View {
         }
         if let lt = expense.loanTotalAmount, lt > 0 { loanTotalAmountText = String(format: "%.0f", lt) }
         if let ly = expense.loanYears, ly > 0 { loanYearsText = String(format: "%g", ly) }
+        // [v25.347] 停止（結束日／原因）
+        if let end = expense.endDate {
+            hasEndDate = true
+            endDate = end
+            endReason = expense.endReason ?? .cancelled
+        }
         selectedBankMilestoneId = expense.linkedBankMilestoneId
         selectedBankCurrency = expense.linkedBankCurrency ?? "NT$"
         selectedCreditCardMilestoneId = expense.linkedCreditCardMilestoneId
         note = expense.note
 
-        // 載入連結的儲蓄險
-        if let linkedId = expense.linkedInsuranceId,
-           let linked = financeStore.insurances.first(where: { $0.id == linkedId }) {
+        // 載入連結的儲蓄險：先用正向連結，找不到再用反向連結（相容早期連結遺失的資料）
+        if let linked = financeStore.insurances.first(where: { $0.id == expense.linkedInsuranceId })
+                        ?? financeStore.insurances.first(where: { $0.linkedExpenseId == expense.id }) {
             insCompany = linked.company
             insCurrencyCode = linked.currencyCode
             insRateText = linked.annualRate > 0 ? String(format: "%.2f", linked.annualRate) : ""
             insStartDate = linked.startDate
             insMaturityDate = linked.maturityDate
+        }
+        // 利率以支出自身欄位為主：即使連結的儲蓄險找不到（或利率為 0），也能把利率帶回編輯欄位
+        if let r = expense.insuranceRate, r > 0 {
+            insRateText = String(format: "%.2f", r)
         }
 
         // 載入連結的房地產
@@ -2388,13 +4531,9 @@ struct AddExpenseView: View {
                     if !mortgageTitle.isEmpty {
                         note = mortgageTitle
                     }
-                    // 還原貸款年限（從 totalPeriods 換算）
-                    if loanYearsText.isEmpty && item.totalPeriods > 0 {
-                        let years = Double(item.totalPeriods) / 12.0
-                        loanYearsText = String(format: "%g", years)
-                    }
-                    // 開始日期從 mortgageItem.startDate 同步
-                    date = item.startDate
+                    // [v25.532] 不再用房貸項目的 totalPeriods 反推年限、也不再用它的 startDate 蓋掉日期：
+                    // 沒填年限的段 totalPeriods 是預設的 240，反推會默默存成 20 年；
+                    // 起始日、年限都以記帳這筆為準（房子那邊的段是跟著這裡同步的）。
                 }
             }
             reName = linked.name
@@ -2415,27 +4554,54 @@ struct AddExpenseView: View {
         }
 
         // 載入車貸連結的車輛
-        if expense.expenseType == .fixed && expense.fixedCategory == .loan
-           && expense.loanSubCategory == .car && expense.linkedVehicleId != nil {
-            selectedVehicleId = expense.linkedVehicleId
+        if expense.expenseType == .fixed && expense.fixedCategory == .loan && expense.loanSubCategory == .car {
+            if let vid = expense.linkedVehicleId {
+                selectedVehicleId = vid
+            } else if let mirrorCar = mirrorVehicle(fixedExpenseId: expense.id) {
+                // [v25.541] 舊車貸只靠車子身上的鏡像連過來：不帶出那台車的話，存一次就把鏡像拿掉、車貸從車子消失
+                selectedVehicleId = mirrorCar.id
+            }
+        }
+
+        // [v25.424] 載入旅遊關聯
+        if expense.expenseType == .variable,
+           let planId = expense.linkedTripPlanId,
+           lifeStore.tripPlan(id: planId) != nil {
+            linkedTripPlanId = planId
+            linkedTripStopId = expense.linkedTripStopId
         }
 
         // 載入變動支出的資產連結
         if expense.expenseType == .variable {
-            if expense.linkedVehicleId != nil {
+            // [v25.541] 舊資料只靠車子身上的鏡像連過來（linkedVehicleId 是空的、也沒連別的資產）：
+            // 照卡片的認定（VehicleLinks）帶出那台車和鏡像的分類，不然存一次就從車子消失
+            let mirrorCar: Vehicle? = expense.linkedVehicleId == nil && expense.linkedStockId == nil
+                && expense.linkedInsuranceId == nil && expense.linkedRealEstateId == nil
+                ? mirrorVehicle(variableExpenseId: expense.id) : nil
+            let mirrorCategory = mirrorCar?.variableExpenses
+                .first(where: { $0.linkedExpenseId == expense.id })?.category
+            if let carId = expense.linkedVehicleId ?? mirrorCar?.id {
                 selectedAssetLink = .vehicle
-                selectedVehicleId = expense.linkedVehicleId
-                if let veCat = expense.vehicleExpenseCategory {
+                selectedVehicleId = carId
+                if let veCat = expense.vehicleExpenseCategory ?? mirrorCategory {
                     selectedVehicleExpenseCategory = veCat
+                    // [v25.539] 帶回欄位改用不丟位數的寫法：%g 只留 6 位有效數字，
+                    // 里程 123,456.7 會變 123457、1,234,567 會變 1.23457e+06，存一次就被改掉
+                    if let kwh = expense.evKwh { evKwhText = Self.editableNumber(kwh) }
+                    if let f = expense.evFromPct { evFromText = Self.editableNumber(f) }
+                    if let t = expense.evToPct { evToText = Self.editableNumber(t) }
+                    if let odo = expense.odometer { evOdoText = Self.editableNumber(odo) }
+                    if let liters = expense.fuelLiters { fuelLitersText = Self.editableNumber(liters) }
                 }
             } else if let linkedId = expense.linkedStockId,
                       let linked = financeStore.stocks.first(where: { $0.id == linkedId }) {
                 selectedAssetLink = .stock
                 stockName = linked.name
                 stockSymbol = linked.symbol
-                stockSharesText = String(format: "%.0f", linked.shares)
-                stockPriceText = String(format: "%.2f", linked.purchasePrice)
-                stockCurrentPriceText = linked.currentPrice > 0 ? String(format: "%.2f", linked.currentPrice) : ""
+                // [v25.562] 帶回不丟位數（以前 %.0f：1.5 股帶成「2」，存一次股票就被改成 2 股）
+                stockSharesText = Self.editableNumber(linked.shares)
+                stockPriceText = Self.editableNumber(linked.purchasePrice)
+                stockCurrentPriceText = linked.currentPrice > 0 ? Self.editableNumber(linked.currentPrice) : ""
             } else if expense.linkedInsuranceId != nil {
                 selectedAssetLink = .insurance
                 selectedInsuranceLinkId = expense.linkedInsuranceId
@@ -2451,6 +4617,10 @@ struct AddExpenseView: View {
                 if let reCat = expense.realEstateExpenseCategory {
                     selectedRealEstateExpenseCategory = reCat
                 }
+                // [v25.530] 水電瓦斯：選擇器帶出原本那筆繳費紀錄的類型，存檔時沿用、不重猜
+                selectedUtilityType = financeStore.realEstates
+                    .flatMap { $0.utilityPayments }
+                    .first(where: { $0.linkedExpenseId == expense.id })?.type
             }
         }
 
@@ -2465,11 +4635,33 @@ struct AddExpenseView: View {
             } else if expense.linkedInsuranceId != nil {
                 selectedFixedAssetLink = .insurance
                 fixedLinkInsuranceId = expense.linkedInsuranceId
+            } else if let mirrorCar = mirrorVehicle(fixedExpenseId: expense.id) {
+                // [v25.541] 舊資料只靠車子身上的鏡像連過來（linkedVehicleId 是空的）：卡片照樣算在那台車，
+                // 這裡卻顯示「無」。存檔照表單現在的狀態，會把鏡像拿掉、這筆從車子消失；
+                // 「其他」改成保險時也因為看不到車，停在儲蓄險。照卡片的認定（VehicleLinks）帶出那台車
+                selectedFixedAssetLink = .vehicle
+                fixedLinkVehicleId = mirrorCar.id
             }
+        } else if expense.expenseType == .fixed && expense.fixedCategory == .insurance,
+                  let vid = expense.linkedVehicleId ?? mirrorCarForInsurance(expense) {
+            // [v25.538] 車險（強制險、綜合險）只會連汽車
+            selectedFixedAssetLink = .vehicle
+            fixedLinkVehicleId = vid
         }
 
         // 編輯時若已連動理財項目，依目前清單重新計算「項目 N：型號-類別」
+        // [v25.538] 車子只把舊版的「項目 N：…」換成「車名-分類名」，你打的名稱不動
         applyAutoTitleIfLinked()
+
+        // [v25.365] 分類與資產連結都還原完了，才把座標的歸屬分類蓋章起來
+        // （放在最後是必要的：placeScopeKey 讀的就是上面這些狀態）。
+        // 沒有座標的舊資料不蓋章，免得誤以為一個空座標屬於這個分類。
+        if expense.placeLatitude != nil || expense.placeLongitude != nil {
+            placeScopeStamp = placeScopeKey
+        }
+
+        // [v25.563] 記下帶回來的金額欄、幣別：存檔時沒動過就不問「從今天起／全部都改」（amountChangeAsk）
+        loadedAmountKey = amountKey
     }
 
     /// 同步汽車變動支出到理財模式的汽車
@@ -2509,9 +4701,14 @@ struct AddExpenseView: View {
         }
     }
 
+    // 複用同一個 NumberFormatter 物件（只更新 currencySymbol/maximumFractionDigits），
+    // 避免每次 view body render 都 alloc 新的 NumberFormatter（建立成本高）。
+    private static let savingsCurrencyFmt: NumberFormatter = {
+        let f = NumberFormatter(); f.numberStyle = .currency; return f
+    }()
+
     private func formatCurrency(_ value: Double) -> String {
-        let f = NumberFormatter()
-        f.numberStyle = .currency
+        let f = Self.savingsCurrencyFmt
         f.currencySymbol = isSavingsInsurance ? insCurrencySymbol : "NT$"
         f.maximumFractionDigits = isSavingsInsurance && insIsUSD ? 2 : 0
         return f.string(from: NSNumber(value: value)) ?? "NT$0"
@@ -2522,6 +4719,14 @@ struct AddExpenseView: View {
             return String(format: "%.0f", value)
         }
         return String(format: "%g", value)
+    }
+
+    /// [v25.539] 帶回編輯欄的數字：整數不帶小數點，其他用最短又能原樣讀回的寫法（45.23 → "45.23"），不丟位數
+    private static func editableNumber(_ value: Double) -> String {
+        if value == value.rounded(), abs(value) < 1e15 {
+            return String(format: "%.0f", value)
+        }
+        return String(value)
     }
 
     private func formatWan(_ value: Double) -> String {
@@ -2539,10 +4744,22 @@ struct AddExpenseView: View {
         return 1
     }
 
+    /// [v2 小工具] 從小工具進來的新增：等 sheet 升起的動畫（約 0.45 秒）播完再把焦點給金額欄，
+    /// 數字鍵盤直接跳出（太早給焦點，sheet 還在動時鍵盤會被吃掉）。編輯舊資料不做
+    private func focusAmountIfRequested() {
+        guard focusAmountOnAppear, editingExpense == nil, !didAutoFocusAmount else { return }
+        didAutoFocusAmount = true
+        Task { @MainActor in
+            try? await Task.sleep(nanoseconds: 450_000_000)
+            amountFieldFocused = true
+        }
+    }
+
     private func applyPreset() {
         guard editingExpense == nil, let preset else { return }
         if let fc = preset.fixedCategory { selectedFixedCategory = fc }
         if let lsc = preset.loanSubCategory { selectedLoanSubCategory = lsc }
+        if let isc = preset.insuranceSubCategory { selectedInsuranceSubCategory = isc }
         if let vc = preset.variableCategory { selectedVariableCategory = vc }
         if let vec = preset.vehicleExpenseCategory { selectedVehicleExpenseCategory = vec }
         if let rec = preset.recurrence { selectedRecurrence = rec }
@@ -2560,6 +4777,93 @@ struct AddExpenseView: View {
         if let fal = preset.fixedAssetLink { selectedFixedAssetLink = fal }
         if let rle = preset.realEstateLinkExisting { realEstateLinkExisting = rle }
         if let mle = preset.mortgageLinkExisting { mortgageLinkExisting = mle }
+        // [v25.564] 財富頁、信用卡頁「刷這張卡記一筆」「補記差額」：先選好付款方式、金額、標題
+        if let cid = preset.paymentCardId,
+           let card = allCreditCardMilestones.first(where: { $0.id == cid }) {
+            selectedCreditCardMilestoneId = card.id
+            selectedBankMilestoneId = card.linkedBankMilestoneId
+            selectedBankCurrency = "NT$"
+        } else if let bid = preset.paymentBankId {
+            selectedBankMilestoneId = bid
+            selectedBankCurrency = "NT$"
+            selectedCreditCardMilestoneId = nil
+        }
+        if let a = preset.amount, a > 0 { amountText = String(format: "%.0f", a) }
+        if let t = preset.title, !t.isEmpty { title = t }
+        // [v25.475] 從旅遊行程頁的某一站進來：行程、站別、日期都已經知道了。
+        if let d = preset.date { date = d }
+        if let tripId = preset.linkedTripPlanId {
+            linkedTripPlanId = tripId
+            linkedTripStopId = preset.linkedTripStopId
+            // 關聯旅遊只在進階模式看得到。帶著行程進來卻看不到它掛在哪，
+            // 使用者會以為沒掛上——跟 loadEditing 遇到進階欄位時同樣的理由。
+            advancedMode = true
+            // 地點帶入走既有那條（它自己會判斷這個分類有沒有地點欄、
+            // 以及使用者是不是已經挑過地點了）
+            fillPlaceFromStop(linkedTripStopId)
+        }
+    }
+}
+
+// MARK: - [v25.564] 簡易模式的付款膠囊、記帳裡打開的財富小表單
+
+/// 「付款：CUBE ▾」膠囊（拆成小 View：記帳表單的 body 很長，坑 #7）
+struct PaymentCapsuleLabel: View {
+    let icon: String
+    let text: String
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: icon)
+                .font(.caption.weight(.semibold))
+            Text(text)
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+            Image(systemName: "chevron.down")
+                .font(.caption2.weight(.semibold))
+        }
+        .foregroundStyle(Color.orange)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 6)
+        .background(Color.orange.opacity(0.12), in: Capsule())
+        .accessibilityLabel(text)
+    }
+}
+
+/// 卡費提醒〔改成標已繳〕、對存摺提示〔再對一次〕
+enum AddExpenseWealthSheet: Identifiable {
+    case paid(UUID)
+    case anchor(UUID, String)
+
+    var id: String {
+        switch self {
+        case .paid(let c): return "paid-" + c.uuidString
+        case .anchor(let a, let code): return "anchor-" + a.uuidString + "-" + code
+        }
+    }
+}
+
+/// 一個 .sheet(item:)＋付費說明（拆成 modifier：記帳表單 body 已經掛很多，坑 #7）
+struct AddExpenseWealthSheetModifier: ViewModifier {
+    @Binding var sheet: AddExpenseWealthSheet?
+    @Binding var showPremium: Bool
+    let onClosed: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .sheet(item: $sheet, onDismiss: onClosed) { s in
+                sheetView(s).appStores()
+            }
+            .premiumLockAlert(isPresented: $showPremium)
+    }
+
+    private func sheetView(_ s: AddExpenseWealthSheet) -> AnyView {
+        switch s {
+        case .paid(let id):
+            return AnyView(WealthPaidSheet(cardId: id))
+        case .anchor(let id, let code):
+            return AnyView(WealthAnchorSheet(accountId: id, code: code))
+        }
     }
 }
 
@@ -2578,6 +4882,117 @@ struct AddExpensePreset {
     var fixedAssetLink: AddExpenseView.FixedAssetLinkType?
     var realEstateLinkExisting: Bool?
     var mortgageLinkExisting: Bool?
+    /// [v25.475] 從旅遊行程頁的某一站直接記帳時帶進來：行程、站別、日期
+    var linkedTripPlanId: UUID?
+    var linkedTripStopId: UUID?
+    var date: Date?
+    /// [v25.538] 從車子帶進來時直接顯示車輛區（度數、電量、里程錶），不用整個打開進階模式。
+    /// 以前從車輛頁「新增項目→電費」打開，度數那幾欄只在進階模式看得到，從車子本身反而記不到。
+    /// 放最後：memberwise init 照宣告順序，既有呼叫端都沒帶它（預設 nil）
+    var showVehicleSection: Bool?
+    /// [v25.539] 從車子記保險時帶「強制險」：不帶的話記帳頁停在預設的儲蓄險，存了會多一張儲蓄險保單、也連不到車。
+    /// 一樣放最後，既有呼叫端不用改
+    var insuranceSubCategory: InsuranceSubCategory?
+    /// [v25.564] 財富：「刷這張卡記一筆」先選好這張卡（扣款帳戶跟著卡）；放最後，既有呼叫端不用改
+    var paymentCardId: UUID?
+    /// [v25.564] 財富：從這個銀行帳戶記一筆（台幣）
+    var paymentBankId: UUID?
+    /// [v25.564] 財富：〔補記差額〕先填好金額、標題
+    var amount: Double?
+    var title: String?
+}
+
+// MARK: - 水電瓦斯類型判斷
+
+/// [v25.530] 從標題（和備註）猜水電瓦斯帳單是哪一種；記帳存檔和 AI 記帳（MainTabView）共用這一份。
+/// 以前只看標題有沒有「水」字，房子叫「水岸花園」，電費也被當成水費。
+/// 所以先把房子名稱、自動標題裡的「水電瓦斯」字樣拿掉（標題和備註都拿），再照「瓦斯 → 電 → 水」的順序找；
+/// 標題找不到才看備註；都沒有就用原本的預設（電費）。
+func guessUtilityType(title: String, note: String = "", estateName: String) -> UtilityType {
+    func match(_ text: String) -> UtilityType? {
+        let lower = text.lowercased()
+        let gasWords = ["瓦斯", "天然氣", "gas"]
+        let electricWords = ["電", "台電", "electric"]
+        let waterWords = ["水費", "自來水", "台水", "水", "water"]
+        if gasWords.contains(where: { lower.contains($0) }) { return .gas }
+        if electricWords.contains(where: { lower.contains($0) }) { return .electricity }
+        if waterWords.contains(where: { lower.contains($0) }) { return .water }
+        return nil
+    }
+    var cleaned = title
+    let name = estateName.trimmingCharacters(in: .whitespaces)
+    // 新增物件沒填名稱時，房子名稱就是拿標題當的；整段拿掉就什麼都不剩，這時不拿
+    if !name.isEmpty && name != title.trimmingCharacters(in: .whitespaces) {
+        cleaned = cleaned.replacingOccurrences(of: name, with: " ")
+    }
+    cleaned = cleaned.replacingOccurrences(of: RealEstateExpenseCategory.utility.rawValue, with: " ")
+    // 選既有物件時標題是自動的，備註才是真的資訊，常會打房子名稱（「水岸花園 9月」），所以備註也一樣清；
+    // 備註不會被拿去當房子名稱，不需要上面那個例外
+    var cleanedNote = note
+    if !name.isEmpty {
+        cleanedNote = cleanedNote.replacingOccurrences(of: name, with: " ")
+    }
+    cleanedNote = cleanedNote.replacingOccurrences(of: RealEstateExpenseCategory.utility.rawValue, with: " ")
+    return match(cleaned) ?? match(cleanedNote) ?? .electricity
+}
+
+// MARK: - [v25.563] 改金額問「從哪時候起」（D9；記帳表單的固定支出、收入表單共用）
+
+/// 確認框的字（每次問都是新的 id）
+struct AmountFromAsk: Identifiable {
+    let id = UUID()
+    /// 「中華電信從 NT$1,399 改成 NT$1,500」
+    let title: String
+    let message: String
+    /// 「從今天起（以前的照舊）」「從這個月起（10 月）」
+    let fromLabel: String
+    /// 「全部都改（以前的也算 NT$1,500）」
+    let allLabel: String
+}
+
+/// 〔從今天起／從這個月起〕〔全部都改〕〔取消〕；選了叫 onPick（true＝全部都改），取消什麼都不做（不存）
+struct AmountFromDialog: ViewModifier {
+    @Binding var ask: AmountFromAsk?
+    let onPick: (Bool) -> Void
+
+    func body(content: Content) -> some View {
+        content.confirmationDialog(ask?.title ?? "", isPresented: shown, titleVisibility: .visible,
+                                   presenting: ask) { a in
+            Button(a.fromLabel) { onPick(false) }
+            Button(a.allLabel) { onPick(true) }
+            Button("取消", role: .cancel) {}
+        } message: { a in
+            Text(a.message)
+        }
+    }
+
+    private var shown: Binding<Bool> {
+        Binding(get: { ask != nil }, set: { if !$0 { ask = nil } })
+    }
+}
+
+/// 改金額「從某天起」的金額歷史（一筆＝「從 date 那天起是 amount」；WealthSchedule.amount 照這個取每一期的金額）
+enum AmountHistoryChange {
+    /// cutoff 那天（含）起是 newAmount；cutoff 以前每一期照原本算出來的金額不變。
+    /// history／current／firstDate：原本的金額歷史、原本的金額、原本的第一期日子。
+    /// 原本最後一筆是「跟著現在的金額」的（表單直接改過、沒補紀錄）：把那一筆釘成原本的金額，以前的才不會跟著變
+    static func from(_ cutoff: Date, history: [AmountSnapshot], current: Double, firstDate: Date,
+                     newAmount: Double) -> [AmountSnapshot] {
+        let start = WealthCal.day(cutoff)
+        let sorted = history.sorted { $0.date < $1.date }
+        // cutoff 前一天那一期原本算的金額（跟 WealthSchedule.amount 同一條）
+        let before = WealthSchedule.amount(at: WealthCal.addDays(-1, to: start), current: current, sortedHistory: sorted)
+        var kept = sorted.filter { WealthCal.day($0.date) < start }
+        if let last = kept.last {
+            if Swift.abs(last.amount - before) > 0.004 {
+                kept[kept.count - 1] = AmountSnapshot(id: last.id, date: last.date, amount: before)
+            }
+        } else {
+            kept = [AmountSnapshot(date: firstDate, amount: before)]
+        }
+        kept.append(AmountSnapshot(date: cutoff, amount: newAmount))
+        return kept
+    }
 }
 
 // MARK: - 地點候選資料型別

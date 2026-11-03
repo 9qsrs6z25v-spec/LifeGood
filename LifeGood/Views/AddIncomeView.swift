@@ -1,8 +1,58 @@
 import SwiftUI
 
+// MARK: - 美化紀錄（AddIncomeView）
+// [2026-06 v1] 本次美化方向：
+//   1. amountPreviewCard：頂部金額預覽卡，即時顯示輸入金額（大字 + 分類色），
+//      數字用 .contentTransition(.numericText()) 動畫，空白時顯示提示文字
+//   2. categoryChipPicker：Picker 改為橫向 FilterChip 膠囊列（帶分類色圖示），
+//      對齊 VariableExpenseView.categoryFilter 設計規格
+//   3. calcPreviewRows：試算區加入圖示 + 分類顏色，
+//      正負值分別用綠/灰色強調，對齊 IncomeView.incomeRow 數字規格
+//   4. .tint(.green) 全局統一，Toggle/DatePicker 等系統元件配色一致
+//   5. errorBanner：錯誤訊息從純文字 Section 升級為橘色膠囊橫幅，更醒目但不突兀
+//
+// [2026-06 v2] 二次美化方向：
+//   6. sectionHeader：所有 Label(.caption) header 升級為「Capsule 側條 + .subheadline.semibold」
+//      與 IncomeView / FixedExpenseView 規格對齊，視覺層次更清晰
+//   7. calcPreviewRows / annualCalcRow：圖示圓從 30pt flat-fill 升級為 36pt
+//      LinearGradient([accent.opacity(0.20), accent.opacity(0.08)]) + stroke(opacity 0.20)
+//      對齊全 app 標準的 stat-context icon circle 規格
+//   8. smartCurrency：formatCurrency 支援「萬、億」量級顯示
+//      ≥1億 → "X.X 億"，≥1萬 → "X.X 萬"，其餘 → "NT$X"
+//      讓試算大金額在小型裝置上更易讀
+//
+// [2026-06 v3] 三次美化方向：
+//   9. amountPreviewCard 對齊 AddExpenseView v3 規格：
+//      - 圖示圓加 Circle().stroke(accent.opacity(0.22), lineWidth:1.2) 細邊框
+//      - shadow 移至 ZStack 層級（而非 Circle 本身），視覺更集中
+//      - 背景 ZStack 新增大散景圓（110pt, offset x:90 y:-15, blur 18）+ 玻璃光澤層
+//        (LinearGradient [white.opacity(0.16)→clear], .top→.center)
+//      - HStack 右側新增小散景裝飾圓（70pt, blur 12, offset x:10）
+//      - 金額大字加 .minimumScaleFactor(0.65) + .lineLimit(1) 防長數字溢出
+//      - 分類膠囊加 .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth:0.6))
+//
+// [2026-07 v4] 金額量級格式對齊全 App 規格：
+//  10. smartCurrency 原為手刻「%.1f 萬」/「%.1f 億」（單位前多一個空白、無 NT$ 字首、
+//      恆固定一位小數不會整數化、且未處理捨入至 10000 萬應進位為億的邊界），
+//      與全 App 共用的 Double.ntdWanString（「NT$1.2萬」無空白、整數不帶小數、
+//      億以上自動換算＋捨入邊界防呆）不一致，是本檔案唯一未接上共用金額量級格式的地方。
+//      改呼叫既有 ntdWanString，移除已無其他呼叫端的 formatCurrency／currencyFormatter 死碼。
+//      純顯示層調整，未變動月/年等效收入或年薪估計等既有試算邏輯。
+//
+// [2026-08 v5] 本次美化方向（儲存按鈕載入狀態，延續 v25.81/25.82 待辦清單）：
+//  11. 工具列「儲存／新增」按鈕：save() 自帶 isSaving 忙碌守衛（disabled(isSaving)）避免
+//      快速連點造成重複收入紀錄，但按鈕本身在存檔期間毫無視覺變化。補上
+//      ProgressView().scaleEffect(0.7).tint(.green)，isSaving 為 true 時顯示於按鈕左側，
+//      對齊 AddExpenseView／AddSavingsInsuranceView 儲存按鈕載入狀態規格。純視覺層補強，
+//      save() 內部守衛判斷與收入寫入邏輯完全未變動。同型 isSaving 守衛仍存在於
+//      AddStockView／AddVehicleView／AddRealEstateView，可作為下次美化比照補齊的清單。
+
 struct AddIncomeView: View {
     @EnvironmentObject var store: ExpenseStore
     @EnvironmentObject var lifeStore: LifeStore
+    // [v25.562] 配息、賣出獲利那筆收入：連到的股票自己有交割帳戶就不寫入帳（syncBankDeposit 要查股票）。
+    // 開這個畫面的地方都有 .appStores()（MainTabView、IncomeView、財富卡片、FinanceItemCard）
+    @EnvironmentObject var financeStore: FinanceStore
     @Environment(\.dismiss) private var dismiss
 
     var editing: Income?
@@ -13,11 +63,23 @@ struct AddIncomeView: View {
     @State private var category: IncomeCategory = .salary
     @State private var period: IncomePeriod = .monthly
     @State private var isFixedSalary = true
+    // 固定薪水結束日（換工作/離職/產假等）：開啟後結束月之後不再計入每月收入
+    @State private var hasEndDate = false
+    @State private var endDate = Date()
+    @State private var endReason: SalaryEndReason = .jobChange
     @State private var salaryLabel = ""
     @State private var note = ""
     @State private var showError = false
     @State private var selectedBankMilestoneId: UUID?
     @State private var selectedBankCurrency: String = "NT$"
+    @State private var cardAppeared = false
+    // 儲存為同步寫回 store 後立即 dismiss()，sheet 收合動畫期間按鈕仍可觸發，
+    // 快速連點會建立兩筆重複收入紀錄；補上忙碌守衛比照 AddRealEstateView 既有修法。
+    @State private var isSaving = false
+    /// [v25.563] 改了月薪（週期性收入）的金額：以前的月份要不要跟著改（D9）。nil＝還沒問；false＝從這個月起；true＝全部都改
+    @State private var amountChangeAll: Bool?
+    /// [v25.563] 正在問「從這個月起／全部都改」（AmountFromDialog，定義在 AddExpenseView.swift）
+    @State private var amountAsk: AmountFromAsk?
 
     private var isEditing: Bool { editing != nil }
     private var isSalary: Bool { category == .salary }
@@ -34,14 +96,8 @@ struct AddIncomeView: View {
         }
     }
 
-    private func bankCurrencies(for ms: LifeMilestone) -> [String] {
-        let codes = (ms.bankDeposits ?? [])
-            .filter { !$0.isWithdrawal }
-            .map(\.currencyCode)
-        var unique: [String] = []
-        for c in codes where !unique.contains(c) { unique.append(c) }
-        return unique.isEmpty ? ["NT$"] : unique
-    }
+    // [v25.563] 這個帳戶有哪些幣別、選單括號裡的數字改讀 lifeStore.wealthFacts（同一套數字，D18、D20、C2）：
+    // 以前這裡自己一份「帳戶有哪些幣別」只看存款紀錄，美金月薪入帳（展開、不寫紀錄）的玉山選不到美金
 
     private var bankPickerLabel: String {
         if let id = selectedBankMilestoneId,
@@ -52,9 +108,34 @@ struct AddIncomeView: View {
         return "未選擇"
     }
 
-    @ViewBuilder
+    // MARK: - 分類顏色
+
+    private func categoryAccent(_ cat: IncomeCategory) -> Color {
+        switch cat {
+        case .salary:     return Color(red: 0.16, green: 0.74, blue: 0.50)
+        case .bonus:      return Color(red: 1.00, green: 0.72, blue: 0.18)
+        case .gift:       return Color(red: 1.00, green: 0.35, blue: 0.55)
+        case .luck:       return Color(red: 0.68, green: 0.40, blue: 1.00)
+        case .investment: return Color(red: 0.27, green: 0.67, blue: 0.99)
+        }
+    }
+
+    private var currentAccent: Color { categoryAccent(category) }
+
+    // MARK: - 金額解析
+
+    private var parsedAmount: Double? {
+        guard let v = Double(amountText.trimmingCharacters(in: .whitespaces)), v > 0 else { return nil }
+        return v
+    }
+
+    // MARK: - bankPicker
+
+    /// [v25.563] 入帳銀行選單：「台新銀行（存摺 NT$12.8萬）」，數字讀 lifeStore.wealthFacts（快取，打字不重算；
+    /// 跟財富頁、記帳、股票、房屋水電選單同一個數）；收起來的、定存不列（facts.pickerBanks）
     private var bankPicker: some View {
-        HStack {
+        let banks = lifeStore.wealthFacts(expense: store, finance: financeStore).pickerBanks
+        return HStack {
             Text("入帳銀行").foregroundStyle(.secondary)
             Spacer()
             Menu {
@@ -62,24 +143,8 @@ struct AddIncomeView: View {
                     selectedBankMilestoneId = nil
                     selectedBankCurrency = "NT$"
                 }
-                ForEach(bankMilestones) { ms in
-                    let currencies = bankCurrencies(for: ms)
-                    let name = ms.bankName ?? ms.title
-                    if currencies.count > 1 {
-                        Menu(name) {
-                            ForEach(currencies, id: \.self) { code in
-                                Button(code) {
-                                    selectedBankMilestoneId = ms.id
-                                    selectedBankCurrency = code
-                                }
-                            }
-                        }
-                    } else {
-                        Button(name) {
-                            selectedBankMilestoneId = ms.id
-                            selectedBankCurrency = currencies.first ?? "NT$"
-                        }
-                    }
+                ForEach(banks) { acc in
+                    bankChoiceRow(acc)
                 }
             } label: {
                 HStack(spacing: 4) {
@@ -91,10 +156,80 @@ struct AddIncomeView: View {
         }
     }
 
+    /// 銀行一列：好幾個幣別是子選單「美金（存摺 美金 3,200）」；一個幣別直接一顆「台新銀行（存摺 NT$12.8萬）」
+    @ViewBuilder
+    private func bankChoiceRow(_ acc: WealthFacts.Account) -> some View {
+        let codes = acc.currencies
+        if codes.count > 1 {
+            Menu(acc.pickerLabel) {
+                ForEach(codes, id: \.self) { code in
+                    Button(acc.pickerLabel(code: code)) { pickBank(acc.id, code: code) }
+                }
+            }
+        } else {
+            Button(acc.pickerLabel) { pickBank(acc.id, code: codes.first ?? "NT$") }
+        }
+    }
+
+    private func pickBank(_ id: UUID, code: String) {
+        selectedBankMilestoneId = id
+        selectedBankCurrency = code
+    }
+
+    // MARK: - [v25.563] 改月薪問「從這個月起／全部都改」（D9）
+
+    /// 要不要問：編輯中的週期性收入、存檔也還是週期性、金額改了、第一期在這個月以前、還沒選過。
+    /// 要問回確認框的字；不用問回 nil。name：存檔用的名稱（finalTitle）
+    private func amountChangeAsk(amount: Double, finalPeriod: IncomePeriod, title name: String) -> AmountFromAsk? {
+        guard amountChangeAll == nil,
+              let e = editing,
+              e.period != .once, finalPeriod != .once,
+              Swift.abs(amount - e.amount) > 0.004 else { return nil }
+        let now = Date()
+        guard WealthCal.startOfMonth(e.date) < WealthCal.startOfMonth(now) else { return nil }
+        let oldText = WealthFormat.ntd(e.amount)
+        let newText = WealthFormat.ntd(amount)
+        return AmountFromAsk(
+            title: "\(name)從 \(oldText) 改成 \(newText)",
+            message: "要從哪個月起？財富頁的入帳照這個算。",
+            fromLabel: "從這個月起（\(WealthCal.month(now)) 月）",
+            allLabel: "全部都改（以前的月份也算 \(newText)）"
+        )
+    }
+
+    /// 確認框選了（all：全部都改）：記下來、再存一次（這次不會再問）
+    private func pickAmountFrom(_ all: Bool) {
+        amountChangeAll = all
+        save()
+    }
+
+    /// 存檔時的金額歷史：新增 → nil；沒問（金額沒改、單次收入）→ 照舊帶回（不要洗掉）；全部都改 → nil（每一期都是新金額）；
+    /// 從這個月起 → 這個月以前每一期照原本算出來的金額不變、這個月 1 號起是新金額
+    /// [v25.564] 原本的歷史以財富帳本為準（還沒更新的 iPad 記一筆帳會把 Income.amountHistory 洗掉，帳本那份還在）
+    private func savedAmountHistory(newAmount: Double) -> [AmountSnapshot]? {
+        guard let prev = editing else { return nil }
+        let prevHistory: [AmountSnapshot]? = lifeStore.wealthBook.incomeAmountHistory(prev.id) ?? prev.amountHistory
+        guard let all = amountChangeAll else { return prevHistory }
+        if all { return nil }
+        return AmountHistoryChange.from(WealthCal.startOfMonth(Date()), history: prevHistory ?? [],
+                                        current: prev.amount, firstDate: prev.date, newAmount: newAmount)
+    }
+
+    // MARK: - Body
+
     var body: some View {
         NavigationStack {
             Form {
-                Section("基本資訊") {
+                // ① 金額預覽卡（頂部，清透背景嵌入 Form）
+                Section {
+                    amountPreviewCard
+                        .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                }
+
+                // ② 基本資訊
+                Section {
                     if isSalary {
                         TextField("自訂文字（如公司名）", text: $salaryLabel)
                         HStack {
@@ -107,38 +242,104 @@ struct AddIncomeView: View {
                     }
 
                     HStack {
-                        Text("NT$").foregroundStyle(.secondary)
-                        TextField("金額", text: $amountText).keyboardType(.decimalPad)
+                        Text("NT$")
+                            .foregroundStyle(.secondary)
+                            .font(.subheadline.weight(.medium))
+                        TextField("金額", text: $amountText)
+                            .keyboardType(.decimalPad)
+                            .onChange(of: amountText) { _, _ in
+                                showError = false
+                            }
+                        // 計算機：先算再填，結果直接帶入金額
+                        CalcFieldButton(text: $amountText, accent: .green)
                     }
+
                     if !bankMilestones.isEmpty {
                         bankPicker
                     }
+
                     DatePicker("日期", selection: $date, displayedComponents: .date)
+                        // 結束日期 Picker 的 in: date... 只限制往後使用者能選的範圍，
+                        // 不會反過來修正已選定的舊 endDate；開始日往後調整超過既有結束日時
+                        // （例如提前設定下個月才開始的新工作）在這裡一併同步，避免存出
+                        // endDate 早於 date 的無效資料（IncomeView.totalIncomeAll 月數計算會出錯）。
+                        .onChange(of: date) { _, newDate in
+                            if hasEndDate && endDate < newDate {
+                                endDate = newDate
+                            }
+                        }
+                } header: {
+                    HStack(spacing: 10) {
+                        Capsule()
+                            .fill(LinearGradient(colors: [currentAccent, currentAccent.opacity(0.55)], startPoint: .top, endPoint: .bottom))
+                            .frame(width: 4, height: 16)
+                        Text("基本資訊")
+                            .font(.subheadline.weight(.semibold))
+                        Spacer()
+                    }
+                    .textCase(.none)
                 }
 
-                Section("分類") {
-                    Picker("類別", selection: $category) {
-                        ForEach(IncomeCategory.allCases) { cat in
-                            Label(cat.rawValue, systemImage: cat.icon).tag(cat)
-                        }
+                // ③ 分類：橫向 FilterChip 膠囊列
+                Section {
+                    categoryChipPicker
+                        .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                        .listRowBackground(Color.clear)
+                        .listRowSeparator(.hidden)
+                } header: {
+                    HStack(spacing: 10) {
+                        Capsule()
+                            .fill(LinearGradient(colors: [currentAccent, currentAccent.opacity(0.55)], startPoint: .top, endPoint: .bottom))
+                            .frame(width: 4, height: 16)
+                        Text("分類")
+                            .font(.subheadline.weight(.semibold))
+                        Spacer()
                     }
+                    .textCase(.none)
+                }
 
+                // ④ 週期 / 固定薪資設定
+                Section {
                     if isSalary {
                         Toggle("固定薪水", isOn: $isFixedSalary)
 
-                        if isFixedSalary {
-                            HStack {
-                                Image(systemName: "arrow.clockwise")
-                                    .foregroundStyle(.blue)
-                                Text("每月自動計入收入")
-                                    .font(.caption).foregroundStyle(.secondary)
+                        HStack(spacing: 8) {
+                            ZStack {
+                                Circle()
+                                    .fill(isFixedSalary ? Color.blue.opacity(0.12) : Color.orange.opacity(0.12))
+                                    .frame(width: 28, height: 28)
+                                Image(systemName: isFixedSalary ? "arrow.clockwise" : "1.circle")
+                                    .font(.system(size: 13, weight: .semibold))
+                                    .foregroundStyle(isFixedSalary ? .blue : .orange)
                             }
-                        } else {
-                            HStack {
-                                Image(systemName: "1.circle")
-                                    .foregroundStyle(.orange)
-                                Text("僅計入當月，不重複計算")
-                                    .font(.caption).foregroundStyle(.secondary)
+                            Text(isFixedSalary ? "每月自動計入收入" : "僅計入當月，不重複計算")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+
+                        if isFixedSalary {
+                            Divider()
+                            Toggle("設定收入結束日", isOn: $hasEndDate.animation(.spring(response: 0.3, dampingFraction: 0.85)))
+                            if hasEndDate {
+                                DatePicker("結束日期", selection: $endDate, in: date..., displayedComponents: .date)
+                                Picker("結束原因", selection: $endReason) {
+                                    ForEach(SalaryEndReason.allCases) { r in
+                                        Label(r.rawValue, systemImage: r.icon).tag(r)
+                                    }
+                                }
+                                HStack(spacing: 8) {
+                                    ZStack {
+                                        Circle()
+                                            .fill(Color.orange.opacity(0.12))
+                                            .frame(width: 28, height: 28)
+                                        Image(systemName: "calendar.badge.exclamationmark")
+                                            .font(.system(size: 13, weight: .semibold))
+                                            .foregroundStyle(.orange)
+                                    }
+                                    Text("結束月份（含）之後不再計入每月收入")
+                                        .font(.caption)
+                                        .foregroundStyle(.secondary)
+                                }
                             }
                         }
                     } else {
@@ -148,45 +349,78 @@ struct AddIncomeView: View {
                             }
                         }
                     }
+                } header: {
+                    HStack(spacing: 10) {
+                        Capsule()
+                            .fill(LinearGradient(colors: [currentAccent, currentAccent.opacity(0.55)], startPoint: .top, endPoint: .bottom))
+                            .frame(width: 4, height: 16)
+                        Text("週期設定")
+                            .font(.subheadline.weight(.semibold))
+                        Spacer()
+                    }
+                    .textCase(.none)
                 }
 
-                if !isSalary && period != .once {
-                    Section("試算") {
-                        if let amount = Double(amountText), amount > 0 {
-                            let monthly = period == .monthly ? amount : amount / 12
-                            HStack {
-                                Text("月等效收入"); Spacer()
-                                Text(formatCurrency(monthly)).foregroundStyle(.green)
-                            }
-                            HStack {
-                                Text("年等效收入"); Spacer()
-                                Text(formatCurrency(monthly * 12)).foregroundStyle(.green)
-                            }
+                // ⑤ 試算（有金額且非一次性時顯示）
+                let showCalc = parsedAmount != nil
+                if showCalc && (!isSalary && period != .once) {
+                    Section {
+                        calcPreviewRows
+                    } header: {
+                        HStack(spacing: 10) {
+                            Capsule()
+                                .fill(LinearGradient(colors: [currentAccent, currentAccent.opacity(0.55)], startPoint: .top, endPoint: .bottom))
+                                .frame(width: 4, height: 16)
+                            Text("試算")
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
                         }
+                        .textCase(.none)
                     }
                 }
 
-                if isSalary, isFixedSalary {
-                    Section("試算") {
-                        if let amount = Double(amountText), amount > 0 {
-                            HStack {
-                                Text("年薪估計"); Spacer()
-                                Text(formatCurrency(amount * 12)).foregroundStyle(.green)
-                            }
+                if showCalc && isSalary && isFixedSalary {
+                    Section {
+                        annualCalcRow
+                    } header: {
+                        HStack(spacing: 10) {
+                            Capsule()
+                                .fill(LinearGradient(colors: [currentAccent, currentAccent.opacity(0.55)], startPoint: .top, endPoint: .bottom))
+                                .frame(width: 4, height: 16)
+                            Text("試算")
+                                .font(.subheadline.weight(.semibold))
+                            Spacer()
                         }
+                        .textCase(.none)
                     }
                 }
 
-                Section("備註") {
+                // ⑥ 備註
+                Section {
                     TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
+                } header: {
+                    HStack(spacing: 10) {
+                        Capsule()
+                            .fill(LinearGradient(colors: [currentAccent, currentAccent.opacity(0.55)], startPoint: .top, endPoint: .bottom))
+                            .frame(width: 4, height: 16)
+                        Text("備註")
+                            .font(.subheadline.weight(.semibold))
+                        Spacer()
+                    }
+                    .textCase(.none)
                 }
 
+                // ⑦ 錯誤橫幅
                 if showError {
                     Section {
-                        Text("請輸入有效金額").foregroundStyle(.red).font(.caption)
+                        errorBanner
+                            .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
                     }
                 }
             }
+            .tint(.green)
             .navigationTitle(isEditing ? "編輯收入" : "新增收入")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
@@ -194,17 +428,276 @@ struct AddIncomeView: View {
                     Button("取消") { dismiss() }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button(isEditing ? "儲存" : "新增") { save() }
-                        .bold().foregroundStyle(.green)
+                    HStack(spacing: 6) {
+                        // [美化] 存檔中顯示同主題色 ProgressView，對齊 AddExpenseView／AddSavingsInsuranceView 儲存按鈕載入狀態規格
+                        if isSaving {
+                            ProgressView().scaleEffect(0.7).tint(.green)
+                        }
+                        Button(isEditing ? "儲存" : "新增") { save() }
+                            .bold()
+                            .foregroundStyle(.green)
+                            .disabled(isSaving)
+                    }
                 }
             }
-            .onAppear { loadEditing() }
+            .onAppear {
+                loadEditing()
+                withAnimation(.spring(response: 0.55, dampingFraction: 0.78).delay(0.05)) {
+                    cardAppeared = true
+                }
+            }
+            // [v25.563] 改月薪金額時問「從這個月起／全部都改」（D9）；選了才真的存
+            .modifier(AmountFromDialog(ask: $amountAsk, onPick: pickAmountFrom))
         }
     }
 
+    // MARK: - ① 金額預覽卡
+
+    private var amountPreviewCard: some View {
+        let accent = currentAccent
+        let amount = parsedAmount
+
+        return HStack(spacing: 16) {
+            // 分類圖示圓（v3：LinearGradient fill + stroke 細邊 + shadow 移至 ZStack 層）
+            ZStack {
+                Circle()
+                    .fill(
+                        LinearGradient(
+                            colors: [accent.opacity(0.22), accent.opacity(0.09)],
+                            startPoint: .topLeading,
+                            endPoint: .bottomTrailing
+                        )
+                    )
+                    .frame(width: 52, height: 52)
+                Circle()
+                    .stroke(accent.opacity(0.22), lineWidth: 1.2)
+                    .frame(width: 52, height: 52)
+                Image(systemName: category.icon)
+                    .font(.system(size: 22, weight: .semibold))
+                    .foregroundStyle(accent)
+            }
+            .shadow(color: accent.opacity(0.22), radius: 8, x: 0, y: 4)
+            .animation(.spring(response: 0.30, dampingFraction: 0.70), value: category)
+
+            VStack(alignment: .leading, spacing: 4) {
+                // 分類名膠囊（v3：加 stroke overlay 細邊框）
+                Text(category.rawValue)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundStyle(accent)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(accent.opacity(0.12))
+                    .clipShape(Capsule())
+                    .overlay(Capsule().stroke(accent.opacity(0.22), lineWidth: 0.6))
+                    .animation(.spring(response: 0.28, dampingFraction: 0.72), value: category)
+
+                // 金額大字（v3：minimumScaleFactor 防長數字溢出）
+                if let amt = amount {
+                    Text(smartCurrency(amt))
+                        .font(.system(size: 26, weight: .bold, design: .rounded))
+                        .foregroundStyle(.primary)
+                        .minimumScaleFactor(0.65)
+                        .lineLimit(1)
+                        .contentTransition(.numericText())
+                } else {
+                    Text("輸入金額")
+                        .font(.system(size: 22, weight: .medium, design: .rounded))
+                        .foregroundStyle(.secondary.opacity(0.50))
+                }
+            }
+
+            Spacer(minLength: 0)
+
+            // v3：右側小散景裝飾圓
+            Circle()
+                .fill(accent.opacity(0.06))
+                .frame(width: 70, height: 70)
+                .blur(radius: 12)
+                .offset(x: 10)
+        }
+        .padding(.horizontal, 20)
+        .padding(.vertical, 16)
+        .background(
+            ZStack {
+                Color(.systemBackground)
+                accent.opacity(0.04)
+                // v3：大散景圓（右上角深度感）
+                Circle()
+                    .fill(accent.opacity(0.07))
+                    .frame(width: 110, height: 110)
+                    .blur(radius: 18)
+                    .offset(x: 90, y: -15)
+                // v3：玻璃光澤層（頂部白光掃過）
+                LinearGradient(
+                    colors: [.white.opacity(0.16), .clear],
+                    startPoint: .top,
+                    endPoint: .center
+                )
+            }
+        )
+        .clipShape(RoundedRectangle(cornerRadius: 18))
+        .overlay(
+            RoundedRectangle(cornerRadius: 18)
+                .stroke(accent.opacity(0.14), lineWidth: 0.75)
+        )
+        .shadow(color: accent.opacity(0.12), radius: 12, x: 0, y: 5)
+        .shadow(color: .black.opacity(0.04), radius: 4, x: 0, y: 2)
+        .padding(.horizontal, 16)
+        .opacity(cardAppeared ? 1 : 0)
+        .offset(y: cardAppeared ? 0 : 14)
+        .animation(.spring(response: 0.50, dampingFraction: 0.80), value: parsedAmount == nil)
+    }
+
+    // MARK: - ③ 分類 FilterChip 列
+
+    private var categoryChipPicker: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 8) {
+                ForEach(IncomeCategory.allCases) { cat in
+                    let isSelected = category == cat
+                    let accent = categoryAccent(cat)
+                    Button {
+                        withAnimation(.spring(response: 0.28, dampingFraction: 0.72)) {
+                            category = cat
+                        }
+                    } label: {
+                        HStack(spacing: 5) {
+                            Image(systemName: cat.icon)
+                                .font(.caption)
+                                .foregroundStyle(isSelected ? .white : accent)
+                            Text(cat.rawValue)
+                                .font(.caption.weight(isSelected ? .semibold : .medium))
+                                .foregroundStyle(isSelected ? .white : .primary)
+                        }
+                        .padding(.horizontal, 13)
+                        .padding(.vertical, 8)
+                        .background(isSelected ? accent : Color(.secondarySystemFill))
+                        .clipShape(Capsule())
+                        .shadow(
+                            color: isSelected ? accent.opacity(0.32) : .clear,
+                            radius: 6, x: 0, y: 3
+                        )
+                        .scaleEffect(isSelected ? 1.04 : 1.0)
+                    }
+                    .buttonStyle(.plain)
+                    .animation(.spring(response: 0.26, dampingFraction: 0.72), value: isSelected)
+                }
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 8)
+        }
+    }
+
+    // MARK: - ⑤ 試算列
+
+    private var calcPreviewRows: some View {
+        let amount = parsedAmount ?? 0
+        let monthly = period == .monthly ? amount : amount / 12
+        let annual = monthly * 12
+        let accent = currentAccent
+
+        return Group {
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .fill(LinearGradient(colors: [accent.opacity(0.20), accent.opacity(0.08)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .frame(width: 36, height: 36)
+                    Circle()
+                        .stroke(accent.opacity(0.20), lineWidth: 1)
+                        .frame(width: 36, height: 36)
+                    Image(systemName: "calendar")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(accent)
+                }
+                Text("月等效收入")
+                Spacer()
+                Text(smartCurrency(monthly))
+                    .font(.subheadline.bold())
+                    .foregroundStyle(accent)
+                    .contentTransition(.numericText())
+            }
+
+            HStack(spacing: 10) {
+                ZStack {
+                    Circle()
+                        .fill(LinearGradient(colors: [accent.opacity(0.20), accent.opacity(0.08)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                        .frame(width: 36, height: 36)
+                    Circle()
+                        .stroke(accent.opacity(0.20), lineWidth: 1)
+                        .frame(width: 36, height: 36)
+                    Image(systemName: "chart.bar.fill")
+                        .font(.system(size: 15, weight: .semibold))
+                        .foregroundStyle(accent.opacity(0.85))
+                }
+                Text("年等效收入")
+                Spacer()
+                Text(smartCurrency(annual))
+                    .font(.subheadline.bold())
+                    .foregroundStyle(accent.opacity(0.85))
+                    .contentTransition(.numericText())
+            }
+        }
+    }
+
+    private var annualCalcRow: some View {
+        let amount = parsedAmount ?? 0
+        let annual = amount * 12
+        let accent = currentAccent
+
+        return HStack(spacing: 10) {
+            ZStack {
+                Circle()
+                    .fill(LinearGradient(colors: [accent.opacity(0.20), accent.opacity(0.08)], startPoint: .topLeading, endPoint: .bottomTrailing))
+                    .frame(width: 36, height: 36)
+                Circle()
+                    .stroke(accent.opacity(0.20), lineWidth: 1)
+                    .frame(width: 36, height: 36)
+                Image(systemName: "chart.bar.fill")
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(accent)
+            }
+            Text("年薪估計")
+            Spacer()
+            Text(smartCurrency(annual))
+                .font(.subheadline.bold())
+                .foregroundStyle(accent)
+                .contentTransition(.numericText())
+        }
+    }
+
+    // MARK: - ⑦ 錯誤橫幅
+
+    private var errorBanner: some View {
+        HStack(spacing: 10) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.orange)
+            Text("請輸入有效金額（大於零）")
+                .font(.subheadline)
+                .foregroundStyle(.primary)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 12)
+        .background(Color.orange.opacity(0.10))
+        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .overlay(
+            RoundedRectangle(cornerRadius: 12)
+                .stroke(Color.orange.opacity(0.28), lineWidth: 0.75)
+        )
+        .padding(.horizontal, 16)
+        .transition(.scale(scale: 0.95).combined(with: .opacity))
+    }
+
+    // MARK: - 儲存
+
     private func save() {
-        guard let amount = Double(amountText), amount > 0 else {
-            showError = true; return
+        guard !isSaving else { return }
+        guard let amount = parsedAmount else {
+            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                showError = true
+            }
+            return
         }
 
         let finalTitle: String
@@ -212,7 +705,10 @@ struct AddIncomeView: View {
             finalTitle = autoSalaryTitle
         } else {
             guard !title.trimmingCharacters(in: .whitespaces).isEmpty else {
-                showError = true; return
+                withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                    showError = true
+                }
+                return
             }
             finalTitle = title.trimmingCharacters(in: .whitespaces)
         }
@@ -223,6 +719,13 @@ struct AddIncomeView: View {
         } else {
             finalPeriod = period
         }
+
+        // [v25.563] 改了月薪（週期性收入）的金額：先問從哪個月起（D9）；選了 pickAmountFrom 再叫一次這裡
+        if let ask = amountChangeAsk(amount: amount, finalPeriod: finalPeriod, title: finalTitle) {
+            amountAsk = ask
+            return
+        }
+        isSaving = true
 
         let income = Income(
             id: editing?.id ?? UUID(),
@@ -235,24 +738,26 @@ struct AddIncomeView: View {
             note: note.trimmingCharacters(in: .whitespaces),
             linkedStockId: editing?.linkedStockId,
             linkedBankMilestoneId: selectedBankMilestoneId,
-            linkedBankCurrency: selectedBankMilestoneId != nil ? selectedBankCurrency : nil
+            linkedBankCurrency: selectedBankMilestoneId != nil ? selectedBankCurrency : nil,
+            endDate: (isSalary && isFixedSalary && hasEndDate) ? endDate : nil,
+            endReason: (isSalary && isFixedSalary && hasEndDate) ? endReason : nil,
+            // [v25.563] 金額歷史：改了金額而且選了「從這個月起／全部都改」照選的寫；沒改照舊帶回（不要洗掉）
+            amountHistory: savedAmountHistory(newAmount: amount)
         )
         if isEditing { store.update(income) } else { store.add(income) }
         syncBankDeposit(for: income, previous: editing)
+        // [v25.564] 金額歷史也寫進財富帳本（另一個同步鍵：還沒更新的 iPad 存記帳不會把它洗掉；WealthFacts 以帳本為準）
+        lifeStore.setIncomeAmountHistory(income.id, income.amountHistory)
         dismiss()
     }
 
     private func syncBankDeposit(for income: Income, previous: Income?) {
-        // 移除舊的連結記錄
         if let prevId = previous?.linkedBankMilestoneId,
            var oldMs = lifeStore.milestones.first(where: { $0.id == prevId }) {
             oldMs.bankDeposits?.removeAll { $0.linkedExpenseId == income.id }
             lifeStore.update(oldMs)
         }
-        // 週期性收入（月薪 / 年薪）不寫入單筆 BankDeposit；
-        // 顯示時會依 period 從建立日展開到今天，每期一筆虛擬條目。
         if income.period != .once {
-            // 同時清掉同一帳戶下舊版本可能殘留的單筆紀錄
             if let bankId = income.linkedBankMilestoneId,
                var ms = lifeStore.milestones.first(where: { $0.id == bankId }) {
                 ms.bankDeposits?.removeAll { $0.linkedExpenseId == income.id }
@@ -260,14 +765,28 @@ struct AddIncomeView: View {
             }
             return
         }
-        // 寫入新的存款記錄（收入是 isWithdrawal=false）
+        // [v25.562] 連到的股票自己有交割帳戶（股利、賣出獲利那筆收入）：銀行的錢只看股票自己寫的股利、交割紀錄，
+        // 這筆收入不再寫入帳（以前在收入頁改一次備註就多入帳一次）；跟財富頁算餘額的 WealthFacts.isReplaced 同一條。
+        // 只清掉目前這個帳戶裡以前寫的那筆。
+        if let sid = income.linkedStockId,
+           financeStore.stocks.first(where: { $0.id == sid })?.hasOwnSettlementAccount == true {
+            if let bankId = income.linkedBankMilestoneId,
+               var ms = lifeStore.milestones.first(where: { $0.id == bankId }) {
+                ms.bankDeposits?.removeAll { $0.linkedExpenseId == income.id }
+                lifeStore.update(ms)
+            }
+            return
+        }
         guard let bankId = income.linkedBankMilestoneId,
               var ms = lifeStore.milestones.first(where: { $0.id == bankId }) else { return }
         var list = ms.bankDeposits ?? []
         list.removeAll { $0.linkedExpenseId == income.id }
+        // [v25.562] 入外幣子帳戶要換匯：收入金額是台幣，以前直接寫成「美金 80,000」。
+        // 全 App 同一支 FinanceRates.accountAmount（台幣格照寫、有匯率就換、查不到寫這個帳戶的台幣格）
+        let deposit = FinanceRates(store).accountAmount(ntd: income.amount, into: income.linkedBankCurrency ?? "NT$")
         list.append(BankDeposit(
-            id: UUID(), date: income.date, amount: income.amount,
-            currencyCode: income.linkedBankCurrency ?? "NT$",
+            id: UUID(), date: income.date, amount: deposit.amount,
+            currencyCode: deposit.code,
             isWithdrawal: false, linkedExpenseId: income.id
         ))
         ms.bankDeposits = list
@@ -276,11 +795,14 @@ struct AddIncomeView: View {
 
     private func loadEditing() {
         guard let e = editing else { return }
-        amountText = String(format: "%.0f", e.amount)
+        // [v25.563] 帶回不丟位數（以前 %.0f：60,000.5 帶成「60000」，存一次就被改掉，也會被當成改了金額而跳「從哪個月起」）
+        amountText = Self.editableNumber(e.amount)
         date = e.date
         category = e.category
         period = e.period
         isFixedSalary = e.isFixedSalary
+        if let ed = e.endDate { hasEndDate = true; endDate = ed }
+        if let r = e.endReason { endReason = r }
         note = e.note
         selectedBankMilestoneId = e.linkedBankMilestoneId
         selectedBankCurrency = e.linkedBankCurrency ?? "NT$"
@@ -299,9 +821,16 @@ struct AddIncomeView: View {
         }
     }
 
-    private func formatCurrency(_ value: Double) -> String {
-        let f = NumberFormatter()
-        f.numberStyle = .currency; f.currencySymbol = "NT$"; f.maximumFractionDigits = 0
-        return f.string(from: NSNumber(value: value)) ?? "NT$0"
+    // 萬/億 量級顯示：改呼叫全 App 共用的 Double.ntdWanString（見 v4 美化紀錄）
+    private func smartCurrency(_ value: Double) -> String {
+        value.ntdWanString
+    }
+
+    /// [v25.563] 帶回編輯欄的數字：整數不帶小數點，其他用最短又能原樣讀回的寫法（同 AddExpenseView.editableNumber）
+    private static func editableNumber(_ value: Double) -> String {
+        if value == value.rounded(), Swift.abs(value) < 1e15 {
+            return String(format: "%.0f", value)
+        }
+        return String(value)
     }
 }
