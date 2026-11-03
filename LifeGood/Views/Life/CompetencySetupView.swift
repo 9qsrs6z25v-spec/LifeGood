@@ -220,6 +220,7 @@ struct CompetencySetupView: View {
         } label: {
             CompSetupListRow(title: it.displayName, detail: nil, trailing: trailing)
         }
+        .disabled(readOnly)
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             if !readOnly {
                 Button {
@@ -238,6 +239,7 @@ struct CompetencySetupView: View {
         } label: {
             CompSetupListRow(title: g.displayName, detail: axesLine(g.id), trailing: nil)
         }
+        .disabled(readOnly)
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             if !readOnly {
                 Button {

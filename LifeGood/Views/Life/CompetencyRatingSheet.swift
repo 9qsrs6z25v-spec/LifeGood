@@ -213,15 +213,20 @@ struct CompetencyRatingSheet: View {
         CompetencyMath.footerCounts(draft: effectiveDraft, sections: includedSections)
     }
 
-    /// 有評 1 格以上才能存；唯讀不能存
+    /// 有評 1 格以上才能存（數字欄打到一半也算：按儲存時先算數）；唯讀不能存
     private var canSave: Bool {
         guard loaded, !readOnly else { return false }
         let c: CompetencyFooterCounts = counts
-        return c.changed + c.carried > 0
+        return c.changed + c.carried > 0 || hasPendingInput
+    }
+
+    /// 數字欄有打字、還沒離開欄位
+    private var hasPendingInput: Bool {
+        inputText.values.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
     }
 
     private var hasChanges: Bool {
-        draft != initialDraft || note != initialNote
+        draft != initialDraft || note != initialNote || hasPendingInput
     }
 
     /// 「今天已經評過一次，這次會改那一張」「10/30 已經有一張，這次會改那一張」
@@ -326,7 +331,8 @@ struct CompetencyRatingSheet: View {
         if key > t || CompetencyMath.parseDay(key) == nil { key = t }
         today = t
         dayKey = key
-        if let d = compRatingDate(key) { date = d }
+        // 今天就用現在（中午 12 點在上午會晚於 DatePicker 的上限 ...Date()）；以前的日子用那天中午
+        if key != t, let d = compRatingDate(key) { date = d }
         openedTrait = lifeStore.competencySetup.traitRange
         openedSkill = lifeStore.competencySetup.skillRange
         let sessions: [CompetencySession] = lifeStore.competencySessions(of: request.subordinateId)
@@ -340,7 +346,7 @@ struct CompetencyRatingSheet: View {
         guard loaded else { return }
         let key: String = CompetencyMath.dayKey(d)
         guard key != dayKey else { return }
-        if let k = focusedKey { commitInput(k) }
+        commitAllInput()
         focusedKey = nil
         dayKey = key
         let sessions: [CompetencySession] = lifeStore.competencySessions(of: request.subordinateId)
@@ -357,6 +363,12 @@ struct CompetencyRatingSheet: View {
         let kept: [CompetencyCellKey: CompetencyDraftCell] = keepDraft ? keptDraft(for: plan) : [:]
         editing = e
         sections = plan
+        if e == nil {
+            // 新的一張：ratingPlan 用的是設定現在的範圍 → 存檔的範圍跟畫面上這一份一樣
+            // （一打開時就是打開時的範圍；只有換日子時別台剛好改了範圍才會不同）
+            openedTrait = lifeStore.competencySetup.traitRange
+            openedSkill = lifeStore.competencySetup.skillRange
+        }
         if keepDraft {
             included = included.intersection(ids).union(ids.subtracting(oldIds))
         } else {
@@ -389,7 +401,11 @@ struct CompetencyRatingSheet: View {
     /// 換到沒有評分的日子時留下來的格子：這一天的區裡有、分數在範圍內；照上次的格子跟新的「上一次」不一樣就變成這次評的
     private func keptDraft(for plan: [CompetencyRatingSection]) -> [CompetencyCellKey: CompetencyDraftCell] {
         var out: [CompetencyCellKey: CompetencyDraftCell] = [:]
+        var oldRanges: [UUID: CompetencyRange] = [:]
+        for old in sections { oldRanges[old.id] = old.range }
         for sec in plan {
+            // 範圍不一樣（例：從用 1–5 的舊那一張換到用 1–10 的新日子）：原始分數意思不同，不帶
+            if let r = oldRanges[sec.id], r != sec.range { continue }
             for ax in sec.axes {
                 let key = CompetencyCellKey(groupId: sec.id, itemId: ax.id)
                 guard var c = draft[key], c.isSet else { continue }
@@ -527,8 +543,14 @@ struct CompetencyRatingSheet: View {
         }
     }
 
+    /// 每一個打到一半的數字欄都算數
+    private func commitAllInput() {
+        let keys: [CompetencyCellKey] = Array(inputText.keys)
+        for k in keys { commitInput(k) }
+    }
+
     private func endEditing() {
-        if let k = focusedKey { commitInput(k) }
+        commitAllInput()
         focusedKey = nil
         noteFocused = false
     }
@@ -546,7 +568,7 @@ struct CompetencyRatingSheet: View {
 
     /// 沒有確認框；先 dismiss，下一個 runloop 再寫 store
     private func save() {
-        if let k = focusedKey { commitInput(k) }
+        commitAllInput()
         guard canSave else { return }
         guard subscription.isPremium else {
             showPremiumAlert = true

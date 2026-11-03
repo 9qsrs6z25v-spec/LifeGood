@@ -248,6 +248,7 @@ private struct CompetencyRadarRingLabelLayer: View {
                     .font(.caption2)
                     .foregroundStyle(.secondary)
                     .lineLimit(1)
+                    .minimumScaleFactor(0.6)
                     .frame(width: CompetencyRadarLayout.ringLabelWidth, alignment: .leading)
                     .position(lb.center)
             }
@@ -552,14 +553,18 @@ struct CompetencyRadarDots: Shape {
     }
 }
 
-/// 橫條：從左邊畫到 fraction（0…1）
+/// 橫條：從左邊畫到 fraction（0…1）。最低分（t＝0）至少畫成一個圓點（寬＝條高），
+/// 才不會跟「未評」一樣空著（judge §3.2：最低分不會縮成沒有）；圓角夾在寬高一半以內，寬 0 不畫。
 struct CompetencyRadarBarFill: Shape {
     let fraction: Double
 
     func path(in rect: CGRect) -> Path {
         let f: CGFloat = CGFloat(min(max(fraction, 0), 1))
-        let bar = CGRect(x: rect.minX, y: rect.minY, width: rect.width * f, height: rect.height)
-        return Path(roundedRect: bar, cornerRadius: rect.height / 2)
+        let w: CGFloat = min(max(rect.width * f, rect.height), rect.width)
+        guard w > 0, rect.height > 0 else { return Path() }
+        let bar = CGRect(x: rect.minX, y: rect.minY, width: w, height: rect.height)
+        let corner: CGFloat = min(w, rect.height) / 2
+        return Path(roundedRect: bar, cornerRadius: corner)
     }
 }
 
