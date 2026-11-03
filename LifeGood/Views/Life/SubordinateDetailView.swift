@@ -578,8 +578,11 @@ struct SubordinateDetailView: View {
     /// 改用可取消的 Task（比照 MainTabView.micEnterTask 既有寫法），切換時先取消前一個再排新的。
     @State private var tabSectionsAppearTask: Task<Void, Never>?
 
-    enum DetailTab: String, CaseIterable { case daily = "主動性"; case rating = "潛力性"; case duty = "執掌" }
+    // [v25.599 職能雷達 v1a-1] 多一顆〔職能〕（順序＝分頁順序：主動性｜潛力性｜職能｜執掌；judge §4.1）。要退回這一件：刪 case skill
+    enum DetailTab: String, CaseIterable { case daily = "主動性"; case rating = "潛力性"; case skill = "職能"; case duty = "執掌" }
     @State private var detailTab: DetailTab = .daily
+    /// [v25.599 職能雷達 v1a-1] 分頁列：iPad（regular）才放①四顆都有徽章那一種。要退回這一件：刪這一行
+    @Environment(\.horizontalSizeClass) private var horizontalSizeClass
     /// 兼任職務：檢視中的職務（點卡片開該職務的管理頁）
     @State private var viewingSideRole: LifeMilestone?
     /// 「加入兼任職務」挑選面板
@@ -623,60 +626,9 @@ struct SubordinateDetailView: View {
                     OrgMoveHintBars(personId: subordinateId, onOpen: openOrgMoveSheet)
 
                     // 自訂 Capsule Pill Tab 切換器（matchedGeometryEffect 讓指示器平滑滑動）
-                    // 日常→藍色 / 評分系統→橘色，對齊 RealEstateDetailView.tabPicker 規格
-                    HStack(spacing: 0) {
-                        ForEach(DetailTab.allCases, id: \.self) { tab in
-                            Button {
-                                withAnimation(.spring(response: 0.3, dampingFraction: 0.72)) {
-                                    detailTab = tab
-                                }
-                                // 切換 Tab 時重置進場動畫，讓新 Tab 區塊重新滑入
-                                tabSectionsAppeared = false
-                                tabSectionsAppearTask?.cancel()
-                                tabSectionsAppearTask = Task {
-                                    try? await Task.sleep(nanoseconds: 50_000_000)
-                                    guard !Task.isCancelled else { return }
-                                    withAnimation(.spring(response: 0.45, dampingFraction: 0.82)) {
-                                        tabSectionsAppeared = true
-                                    }
-                                }
-                            } label: {
-                                HStack(spacing: 5) {
-                                    Image(systemName: tabIcon(tab))
-                                        .font(.caption2)
-                                    Text(tab.rawValue)
-                                        .font(.subheadline.weight(.semibold))
-                                    Text("\(tabBadgeValue(tab, mentionedCount: mentionedItemsCache.count))")
-                                        .font(.caption.weight(.bold))
-                                }
-                                .padding(.horizontal, 16)
-                                .padding(.vertical, 9)
-                                .foregroundStyle(detailTab == tab ? .white : .secondary)
-                                .background {
-                                    if detailTab == tab {
-                                        Capsule()
-                                            .fill(tabTint(tab))
-                                            .matchedGeometryEffect(id: "subDetailTabIndicator", in: tabNamespace)
-                                    }
-                                }
-                            }
-                            .buttonStyle(.plain)
-                        }
-                    }
-                    .padding(4)
-                    .background(Color(.tertiarySystemFill))
-                    .clipShape(Capsule())
-                    .padding(.horizontal)
-                    .onAppear {
-                        withAnimation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.10)) {
-                            tabSectionsAppeared = true
-                        }
-                    }
-                    .onDisappear {
-                        // 畫面關閉時取消尚未觸發的 Tab 切換重播任務，避免 sheet 收合中途
-                        // 仍在 50ms 延遲內的 Task 補跑 withAnimation，在已消失的畫面上留下動畫殘留
-                        tabSectionsAppearTask?.cancel()
-                    }
+                    // [v25.599 職能雷達 v1a-1] 四顆放不下：整段搬到 tabBar（ViewThatFits 三種寬度，judge §4.2）。
+                    // 要退回這一件：把 tabBar／tabRow／tabButton／selectTab 的內容搬回這裡、刪這一行
+                    tabBar(mentionedCount: mentionedItemsCache.count)
 
                     if detailTab == .daily {
                         // [v25.590 轉組織 v1a-1] 「從王小明接手（4）・11/2」（還在交接中才有，judge §4.6）。要退回這一件：刪這一行
@@ -721,7 +673,8 @@ struct SubordinateDetailView: View {
                             .opacity(tabSectionsAppeared ? 1 : 0)
                             .offset(y: tabSectionsAppeared ? 0 : 14)
                             .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.05), value: tabSectionsAppeared)
-                    } else {
+                    } else if detailTab == .rating {
+                        // [v25.599 職能雷達 v1a-1] 原本是最後的 else（編譯器抓不到），改成明寫 .rating；內容一字不改
                         promotionSection
                             .opacity(tabSectionsAppeared ? 1 : 0)
                             .offset(y: tabSectionsAppeared ? 0 : 14)
@@ -746,6 +699,9 @@ struct SubordinateDetailView: View {
                             .opacity(tabSectionsAppeared ? 1 : 0)
                             .offset(y: tabSectionsAppeared ? 0 : 14)
                             .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.20), value: tabSectionsAppeared)
+                    } else {
+                        // [v25.599 職能雷達 v1a-1] 〔職能〕分頁（SubordinateCompetencyTab.swift）。要退回這一件：刪這一個 else 區塊
+                        competencyTabContent
                     }
                 }
                 .padding(.vertical)
@@ -2349,6 +2305,7 @@ struct SubordinateDetailView: View {
         switch tab {
         case .daily: return Color(red: 0.22, green: 0.53, blue: 0.98)   // 藍
         case .rating: return Color(red: 0.96, green: 0.55, blue: 0.18)  // 橘
+        case .skill: return CompetencyPalette.trait                      // [v25.599 職能雷達 v1a-1] 紫。要退回這一件：刪這一行
         case .duty: return Color(red: 0.18, green: 0.62, blue: 0.60)    // 藍綠
         }
     }
@@ -2357,17 +2314,138 @@ struct SubordinateDetailView: View {
         switch tab {
         case .daily: return "person.2.fill"
         case .rating: return "star.fill"
+        case .skill: return "graduationcap.fill"   // [v25.599 職能雷達 v1a-1] 要退回這一件：刪這一行
         case .duty: return "wrench.and.screwdriver.fill"
         }
     }
 
     /// Tab 徽章數字：主動性/潛力性顯示分數，執掌顯示設備台數
-    private func tabBadgeValue(_ tab: DetailTab, mentionedCount: Int) -> Int {
+    /// [v25.599 職能雷達 v1a-1] 改回傳 Int?：〔職能〕沒有徽章（nil）。要退回這一件：改回 Int、刪 .skill 那一行
+    private func tabBadgeValue(_ tab: DetailTab, mentionedCount: Int) -> Int? {
         switch tab {
         case .daily: return subordinate.proactivityScore(mentionedCount: mentionedCount, sideRoleDone: sideRoleStat.done, itemDone: itemCredit)
         case .rating: return subordinate.potentialScore
+        case .skill: return nil
         case .duty: return lifeStore.equipmentPool.filter { $0.ownerId == subordinateId }.count
         }
+    }
+
+    // MARK: - [v25.599 職能雷達 v1a-1] 分頁列四顆、三種寬度（judge §4.2、§1.4-3）
+    // 要退回這一件：刪這一段（TabBarMode 到 competencyTabContent），把 tabButton 的樣子搬回 body 的分頁列
+
+    /// ① full：四顆都有徽章、左右 16（只有 iPad）；② compact：只有選中那顆有徽章、左右 12（iPhone 從這裡開始）；
+    /// ③ iconOnly：選中那顆圖示＋字＋徽章、其他只剩圖示（SE、字放大）
+    private enum TabBarMode: String { case full, compact, iconOnly }
+
+    private func tabBar(mentionedCount: Int) -> some View {
+        ViewThatFits(in: .horizontal) {
+            if horizontalSizeClass == .regular {
+                tabRow(.full, mentionedCount: mentionedCount)
+            }
+            tabRow(.compact, mentionedCount: mentionedCount)
+            tabRow(.iconOnly, mentionedCount: mentionedCount)
+        }
+        .padding(4)
+        .background(Color(.tertiarySystemFill))
+        .clipShape(Capsule())
+        .padding(.horizontal)
+        .onAppear {
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.10)) {
+                tabSectionsAppeared = true
+            }
+        }
+        .onDisappear {
+            // 畫面關閉時取消尚未觸發的 Tab 切換重播任務，避免 sheet 收合中途
+            // 仍在 50ms 延遲內的 Task 補跑 withAnimation，在已消失的畫面上留下動畫殘留
+            tabSectionsAppearTask?.cancel()
+        }
+    }
+
+    private func tabRow(_ mode: TabBarMode, mentionedCount: Int) -> some View {
+        HStack(spacing: 0) {
+            ForEach(DetailTab.allCases, id: \.self) { tab in
+                tabButton(tab, mode: mode, badge: tabBadgeValue(tab, mentionedCount: mentionedCount))
+            }
+        }
+    }
+
+    private func tabButton(_ tab: DetailTab, mode: TabBarMode, badge: Int?) -> some View {
+        let selected: Bool = detailTab == tab
+        let showsText: Bool = mode != .iconOnly || selected
+        let shownBadge: Int? = (mode == .full || selected) ? badge : nil
+        let hPad: CGFloat = mode == .full ? 16 : 12
+        let minSide: CGFloat? = mode == .iconOnly ? 44 : nil
+        return Button {
+            selectTab(tab)
+        } label: {
+            tabButtonLabel(tab, showsText: showsText, badge: shownBadge)
+                .padding(.horizontal, hPad)
+                .padding(.vertical, 9)
+                .frame(minWidth: minSide, minHeight: minSide)
+                .foregroundStyle(selected ? Color.white : Color.secondary)
+                .background {
+                    if selected {
+                        Capsule()
+                            .fill(tabTint(tab))
+                            .matchedGeometryEffect(id: "subDetailTabIndicator-\(mode.rawValue)", in: tabNamespace)
+                    }
+                }
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(tabAccessibilityLabel(tab, badge: badge))
+        .accessibilityAddTraits(selected ? .isSelected : [])
+    }
+
+    private func tabButtonLabel(_ tab: DetailTab, showsText: Bool, badge: Int?) -> some View {
+        HStack(spacing: 5) {
+            Image(systemName: tabIcon(tab))
+                .font(showsText ? Font.caption2 : Font.subheadline)
+            if showsText {
+                Text(tab.rawValue)
+                    .font(.subheadline.weight(.semibold))
+                    .lineLimit(1)
+            }
+            if let b = badge {
+                Text("\(b)")
+                    .font(.caption.weight(.bold))
+                    .lineLimit(1)
+            }
+        }
+    }
+
+    /// 按下分頁（內容＝原本分頁列 Button 的動作，一字不改）
+    private func selectTab(_ tab: DetailTab) {
+        withAnimation(.spring(response: 0.3, dampingFraction: 0.72)) {
+            detailTab = tab
+        }
+        // 切換 Tab 時重置進場動畫，讓新 Tab 區塊重新滑入
+        tabSectionsAppeared = false
+        tabSectionsAppearTask?.cancel()
+        tabSectionsAppearTask = Task {
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            guard !Task.isCancelled else { return }
+            withAnimation(.spring(response: 0.45, dampingFraction: 0.82)) {
+                tabSectionsAppeared = true
+            }
+        }
+    }
+
+    /// VoiceOver：「主動性，195 分」「潛力性，98 分」「職能」「執掌，4」（只剩圖示那幾顆也念得出來）
+    private func tabAccessibilityLabel(_ tab: DetailTab, badge: Int?) -> String {
+        guard let b = badge else { return tab.rawValue }
+        switch tab {
+        case .daily, .rating: return tab.rawValue + "，\(b) 分"
+        case .skill, .duty: return tab.rawValue + "，\(b)"
+        }
+    }
+
+    /// 〔職能〕分頁（新檔 SubordinateCompetencyTab.swift）＋其他分頁一樣的進場動畫
+    private var competencyTabContent: some View {
+        SubordinateCompetencyTab(subordinateId: subordinateId)
+            .opacity(tabSectionsAppeared ? 1 : 0)
+            .offset(y: tabSectionsAppeared ? 0 : 14)
+            .animation(.spring(response: 0.45, dampingFraction: 0.82), value: tabSectionsAppeared)
     }
 
     // MARK: - 匯出圖片

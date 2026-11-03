@@ -2955,6 +2955,14 @@ struct AdvancedSettingsView: View {
                                 title: "評分權重",
                                 note: "部屬主動性／潛力的加減分與逾期扣分")
                 }
+                // [v25.599 職能雷達 v1a-1] 要退回這一件：刪這一個 NavigationLink
+                NavigationLink {
+                    CompetencySetupView()
+                } label: {
+                    advancedRow(icon: "graduationcap.fill", color: .purple,
+                                title: "職能項目",
+                                note: "人格特質、系統與學習項目、分數範圍")
+                }
             } header: {
                 Text("部屬評分")
             }
