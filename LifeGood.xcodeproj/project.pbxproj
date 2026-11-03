@@ -153,6 +153,8 @@
 		A01B000001001628 /* OrgMoveTemp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001628 /* OrgMoveTemp.swift */; };
 		A01B000001001630 /* OrgReorg.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001630 /* OrgReorg.swift */; };
 		A01B000001001631 /* OrgSelfMove.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001631 /* OrgSelfMove.swift */; };
+		A01B000001001634 /* Competency.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001634 /* Competency.swift */; };
+		A01B000001001635 /* CompetencyMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001635 /* CompetencyMath.swift */; };
 		A01B000001001625 /* TripPlanImport.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001625 /* TripPlanImport.swift */; };
 		A01B000001001626 /* TripPlanImportSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001626 /* TripPlanImportSheet.swift */; };
 		A01B000001001601 /* WealthTransferPlans.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001601 /* WealthTransferPlans.swift */; };
@@ -245,6 +247,10 @@
 		A01B000001001629 /* OrgMoveReceiveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001629 /* OrgMoveReceiveView.swift */; };
 		A01B000001001632 /* OrgReorgViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001632 /* OrgReorgViews.swift */; };
 		A01B000001001633 /* OrgSelfMoveView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001633 /* OrgSelfMoveView.swift */; };
+		A01B000001001636 /* CompetencyRadar.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001636 /* CompetencyRadar.swift */; };
+		A01B000001001637 /* SubordinateCompetencyTab.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001637 /* SubordinateCompetencyTab.swift */; };
+		A01B000001001638 /* CompetencyRatingSheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001638 /* CompetencyRatingSheet.swift */; };
+		A01B000001001639 /* CompetencySetupView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001639 /* CompetencySetupView.swift */; };
 		A01B000001001619 /* OrgMoveCardParts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001619 /* OrgMoveCardParts.swift */; };
 		A01B000001001621 /* OrgMoveWizardRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001621 /* OrgMoveWizardRows.swift */; };
 		A01B000001001623 /* OrgMoveDueViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001623 /* OrgMoveDueViews.swift */; };
@@ -535,6 +541,8 @@
 		A01A000001001628 /* OrgMoveTemp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveTemp.swift; sourceTree = "<group>"; };
 		A01A000001001630 /* OrgReorg.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgReorg.swift; sourceTree = "<group>"; };
 		A01A000001001631 /* OrgSelfMove.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgSelfMove.swift; sourceTree = "<group>"; };
+		A01A000001001634 /* Competency.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = Competency.swift; sourceTree = "<group>"; };
+		A01A000001001635 /* CompetencyMath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompetencyMath.swift; sourceTree = "<group>"; };
 		A01A000001001625 /* TripPlanImport.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripPlanImport.swift; sourceTree = "<group>"; };
 		A01A000001001626 /* TripPlanImportSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TripPlanImportSheet.swift; sourceTree = "<group>"; };
 		A01A000001001601 /* WealthTransferPlans.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WealthTransferPlans.swift; sourceTree = "<group>"; };
@@ -622,6 +630,10 @@
 		A01A000001001629 /* OrgMoveReceiveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveReceiveView.swift; sourceTree = "<group>"; };
 		A01A000001001632 /* OrgReorgViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgReorgViews.swift; sourceTree = "<group>"; };
 		A01A000001001633 /* OrgSelfMoveView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgSelfMoveView.swift; sourceTree = "<group>"; };
+		A01A000001001636 /* CompetencyRadar.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompetencyRadar.swift; sourceTree = "<group>"; };
+		A01A000001001637 /* SubordinateCompetencyTab.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = SubordinateCompetencyTab.swift; sourceTree = "<group>"; };
+		A01A000001001638 /* CompetencyRatingSheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompetencyRatingSheet.swift; sourceTree = "<group>"; };
+		A01A000001001639 /* CompetencySetupView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CompetencySetupView.swift; sourceTree = "<group>"; };
 		A01A000001001619 /* OrgMoveCardParts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveCardParts.swift; sourceTree = "<group>"; };
 		A01A000001001621 /* OrgMoveWizardRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveWizardRows.swift; sourceTree = "<group>"; };
 		A01A000001001623 /* OrgMoveDueViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveDueViews.swift; sourceTree = "<group>"; };
@@ -966,6 +978,8 @@
 				A01A000001001628 /* OrgMoveTemp.swift */,
 				A01A000001001630 /* OrgReorg.swift */,
 				A01A000001001631 /* OrgSelfMove.swift */,
+				A01A000001001634 /* Competency.swift */,
+				A01A000001001635 /* CompetencyMath.swift */,
 				A01A000001001625 /* TripPlanImport.swift */,
 				A01A000001001601 /* WealthTransferPlans.swift */,
 				A01A000001001603 /* WealthTransferNotices.swift */,
@@ -1198,6 +1212,10 @@
 				A01A000001001629 /* OrgMoveReceiveView.swift */,
 				A01A000001001632 /* OrgReorgViews.swift */,
 				A01A000001001633 /* OrgSelfMoveView.swift */,
+				A01A000001001636 /* CompetencyRadar.swift */,
+				A01A000001001637 /* SubordinateCompetencyTab.swift */,
+				A01A000001001638 /* CompetencyRatingSheet.swift */,
+				A01A000001001639 /* CompetencySetupView.swift */,
 				A01A000001001619 /* OrgMoveCardParts.swift */,
 				A01A000001001621 /* OrgMoveWizardRows.swift */,
 				A01A000001001623 /* OrgMoveDueViews.swift */,
@@ -1540,6 +1558,8 @@
 				A01B000001001628 /* OrgMoveTemp.swift in Sources */,
 				A01B000001001630 /* OrgReorg.swift in Sources */,
 				A01B000001001631 /* OrgSelfMove.swift in Sources */,
+				A01B000001001634 /* Competency.swift in Sources */,
+				A01B000001001635 /* CompetencyMath.swift in Sources */,
 				A01B000001001625 /* TripPlanImport.swift in Sources */,
 				A01B000001001626 /* TripPlanImportSheet.swift in Sources */,
 				A01B000001001601 /* WealthTransferPlans.swift in Sources */,
@@ -1627,6 +1647,10 @@
 				A01B000001001629 /* OrgMoveReceiveView.swift in Sources */,
 				A01B000001001632 /* OrgReorgViews.swift in Sources */,
 				A01B000001001633 /* OrgSelfMoveView.swift in Sources */,
+				A01B000001001636 /* CompetencyRadar.swift in Sources */,
+				A01B000001001637 /* SubordinateCompetencyTab.swift in Sources */,
+				A01B000001001638 /* CompetencyRatingSheet.swift in Sources */,
+				A01B000001001639 /* CompetencySetupView.swift in Sources */,
 				A01B000001001619 /* OrgMoveCardParts.swift in Sources */,
 				A01B000001001621 /* OrgMoveWizardRows.swift in Sources */,
 				A01B000001001623 /* OrgMoveDueViews.swift in Sources */,

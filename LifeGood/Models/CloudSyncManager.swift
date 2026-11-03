@@ -66,6 +66,10 @@ final class CloudSyncManager: ObservableObject {
         // [v25.598] 轉組織 v5：組織重整（部門改名、合併、拆成兩個）、我自己調動（OrgReorgBook；單獨一個鍵：還沒更新的 iPad 不認得、不會碰。
         // 「已併入」不加在部門上。兩台各做各的：收到增量更新時 LifeStore.reloadFromCloud 照 id 各取後改的，不整包換掉）
         "life_org_reorgs_v1",
+        // [v25.599] 職能雷達 v1a-1：職能項目設定（CompetencySetupBook）、評分（CompetencyRatingBook）。單獨兩個鍵：還沒更新的 iPad 不認得、不會碰；
+        // 部屬身上一個欄位都沒加。收到增量更新時 LifeStore.reloadFromCloud 照 id 合併（評分同一張逐格），第一次同步〔合併〕見 resolveInitialSync
+        "life_competency_setup_v1",
+        "life_competency_ratings_v1",
         // [v25.568] 給網頁版的財富數字（WealthWebFacts：App 算好寫的，網頁版照讀；App 自己不讀。只有合計、暱稱、後 4 碼，沒有完整號碼、有效期限）
         "life_wealth_facts_v1",
         // 股票每週市值快照（英雄卡背景折線）：同步安全性依賴「先拉後推」順序——
@@ -382,9 +386,16 @@ final class CloudSyncManager: ObservableObject {
             let localWins = (choice == .mergeLocalWins)
             let keys = Set(Self.syncKeys).union(cloudBlobs.keys)
             for key in keys {
-                if let merged = Self.mergeBlob(local: defaults.data(forKey: key),
-                                               cloud: cloudBlobs[key],
-                                               localWins: localWins) {
+                // [v25.599 職能雷達 v1a-1] 這兩個鍵最上層是物件（Book），mergeBlob 會整包留勝方、另一邊的評分不見：
+                // 解成 Book 逐筆（評分逐格）合併；解不開、或有一邊格式比這台新才退回原本的 mergeBlob（judge §2.4 第 7 處）。
+                // 要退回這一件：刪這個 if 與 else 那一層
+                if CompetencySync.handles(key),
+                   let merged = CompetencySync.mergeInitialBlob(key: key, local: defaults.data(forKey: key),
+                                                                cloud: cloudBlobs[key], localWins: localWins) {
+                    defaults.set(merged, forKey: key)
+                } else if let merged = Self.mergeBlob(local: defaults.data(forKey: key),
+                                                      cloud: cloudBlobs[key],
+                                                      localWins: localWins) {
                     defaults.set(merged, forKey: key)
                 }
             }

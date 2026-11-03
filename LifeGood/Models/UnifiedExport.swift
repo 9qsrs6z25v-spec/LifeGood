@@ -148,6 +148,10 @@ struct UnifiedExport: Codable {
         var orgMoves: OrgMoveBook?
         /// [v25.598] 轉組織 v5：組織重整、我自己調動（OrgReorgBook）。舊備份沒有，所以是 Optional；跟部屬一起走（完整備份、「職涯」）
         var orgReorgs: OrgReorgBook?
+        /// [v25.599] 職能雷達 v1a-1：職能項目設定、評分（CompetencySetupBook、CompetencyRatingBook）。舊備份沒有，所以是 Optional；
+        /// 跟部屬一起走（完整備份、「職涯」）
+        var competencySetup: CompetencySetupBook?
+        var competencyRatings: CompetencyRatingBook?
     }
 
     static func build(expense: ExpenseStore, finance: FinanceStore, life: LifeStore,
@@ -229,7 +233,10 @@ struct UnifiedExport: Codable {
                 // [v25.590] 轉組織 v1a-1：交接單跟部屬一起走（完整備份、「職涯」）
                 orgMoves: scope.carriesCareer ? life.orgMoves : nil,
                 // [v25.598] 轉組織 v5：組織重整、我自己調動跟部屬一起走（完整備份、「職涯」）
-                orgReorgs: scope.carriesCareer ? life.orgReorgs : nil
+                orgReorgs: scope.carriesCareer ? life.orgReorgs : nil,
+                // [v25.599] 職能雷達 v1a-1：職能項目設定、評分跟部屬一起走（完整備份、「職涯」）
+                competencySetup: scope.carriesCareer ? life.competencySetup : nil,
+                competencyRatings: scope.carriesCareer ? life.competencyRatings : nil
             ),
             scope: scope.rawValue
         )
@@ -1004,6 +1011,13 @@ enum UnifiedImporter {
                 if scope.carriesCareer, let rb = payload.life.orgReorgs {
                     life.orgReorgs = rb
                 }
+                // [v25.599] 職能雷達 v1a-1：職能項目設定、評分：舊備份沒有（nil）就不動本機的
+                if scope.carriesCareer, let cs = payload.life.competencySetup {
+                    life.competencySetup = cs
+                }
+                if scope.carriesCareer, let cr = payload.life.competencyRatings {
+                    life.competencyRatings = cr
+                }
             }
 
             result.expenses = payload.expense.expenses.count
@@ -1238,6 +1252,15 @@ enum UnifiedImporter {
                 if let rb = payload.life.orgReorgs {
                     let merged = life.orgReorgs.merged(with: rb)
                     if merged != life.orgReorgs { life.orgReorgs = merged }
+                }
+                // [v25.599] 職能雷達 v1a-1：設定照 id 各取後改的、評分同一張逐格合併（同 iCloud；一樣新留本機的）
+                if let cs = payload.life.competencySetup {
+                    let merged = life.competencySetup.merged(with: cs)
+                    if merged != life.competencySetup { life.competencySetup = merged }
+                }
+                if let cr = payload.life.competencyRatings {
+                    let merged = life.competencyRatings.merged(with: cr)
+                    if merged != life.competencyRatings { life.competencyRatings = merged }
                 }
                 // 舊格式備份的機台上面 appendNewByID 進了部屬的 equipments——搬進機台池
                 life.migrateLegacyEquipmentsToPool()

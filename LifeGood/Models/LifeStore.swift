@@ -61,6 +61,14 @@ class LifeStore: ObservableObject {
     /// 一改就重建 OrgReorgIndex（挑部門的清單不列已併入的、互評票兩課同職等接成一組、交接單屬於哪一份全組交接單查這張表）。
     /// 要退回這一件：刪這個屬性與 ownedKeys、reloadFromCloud、save、load、清除全部資料裡標 [v25.598] 的那幾行
     @Published var orgReorgs: OrgReorgBook = OrgReorgBook() { didSet { OrgReorgIndex.rebuild(orgReorgs); if !isLoading { save() } } }
+    /// [v25.599 職能雷達 v1a-1] 職能項目設定（Competency.swift CompetencySetupBook；鍵 life_competency_setup_v1，跟 iCloud 同步、
+    /// 進完整備份與「職涯」匯出）與評分（CompetencyRatingBook；鍵 life_competency_ratings_v1，同上）。題目跟答案分兩個鍵：
+    /// 一台改設定、一台在評分不會整包互蓋。部屬、部門、職等、組織人員一個欄位都沒加：還沒更新的 iPad 存一次部屬洗不到評分。
+    /// 評分一改就重建 CompetencyIndex（〔職能〕分頁查這張表）。
+    /// 要退回這一件：刪這兩個屬性與 ownedKeys、reloadFromCloud、save、load、isEmpty、清除全部資料裡標 [v25.599] 的那幾行，
+    /// 以及檔尾「職能雷達」那一段 extension
+    @Published var competencySetup: CompetencySetupBook = CompetencySetupBook() { didSet { if !isLoading { save() } } }
+    @Published var competencyRatings: CompetencyRatingBook = CompetencyRatingBook() { didSet { CompetencyIndex.rebuild(competencyRatings); if !isLoading { save() } } }
     /// [v25.357] 公司廠區據點：與重大決議的「廠區」欄位對應，長成每個廠的歷史年線
     @Published var companySites: [CompanySite] = [] { didSet { if !isLoading { save() } } }
     /// [v25.399] 旅遊規劃（要去的行程；與旅遊地圖「去過的地點」是兩回事）
@@ -113,7 +121,9 @@ class LifeStore: ObservableObject {
         // [v25.590] 轉組織 v1a-1：交接單（OrgMoveBook.syncKey）
         "life_org_moves_v1",
         // [v25.598] 轉組織 v5：組織重整、我自己調動（OrgReorgBook.syncKey）
-        "life_org_reorgs_v1"
+        "life_org_reorgs_v1",
+        // [v25.599] 職能雷達 v1a-1：職能項目設定、評分（CompetencySetupBook.syncKey、CompetencyRatingBook.syncKey）
+        "life_competency_setup_v1", "life_competency_ratings_v1"
     ]
 
     init() {
@@ -177,6 +187,11 @@ class LifeStore: ObservableObject {
         // [v25.598] 轉組織 v5：組織重整、我自己調動照 id 各取後改的（兩台各做各的重整，兩筆都要留得住）
         let reorgsKeyTouched = (note.userInfo?["keys"] as? [String])?.contains(OrgReorgBook.syncKey) ?? false
         let reorgsBefore = orgReorgs
+        // [v25.599] 職能雷達 v1a-1：設定照 id 各取後改的；評分逐張、逐格合併（iPhone 評王小明、iPad 改設定，兩邊都要留得住）
+        let compSetupKeyTouched = (note.userInfo?["keys"] as? [String])?.contains(CompetencySetupBook.syncKey) ?? false
+        let compSetupBefore = competencySetup
+        let compRatingsKeyTouched = (note.userInfo?["keys"] as? [String])?.contains(CompetencyRatingBook.syncKey) ?? false
+        let compRatingsBefore = competencyRatings
         // [v25.593 轉組織 v2 驗證] 拉下來之後「誰是已轉出」變了（另一台套用、復原、回到我的部屬）就照在職的重排會議通知：
         // load()／合併都在 isLoading 裡，orgMoves 的 didSet 不會排（brief §1-11「iCloud 合併」那一條原本走不到）。
         // 要退回這一件：刪這一行與檔尾那個 if
@@ -229,9 +244,26 @@ class LifeStore: ObservableObject {
                 didReorgs = true
             }
         }
+        // [v25.599] 職能雷達 v1a-1：雲端那份併上本機剛才那份（設定照 id 取新的；評分同一張逐格）；合出來不一樣就存回去、推上去。
+        // 這台的 App 比較舊（雲端那份 formatVersion 比較新）就不併、不寫回（唯讀）
+        var didCompetency = false
+        if compSetupKeyTouched && !competencySetup.isReadOnlyHere {
+            let merged = competencySetup.merged(with: compSetupBefore)
+            if merged != competencySetup {
+                competencySetup = merged
+                didCompetency = true
+            }
+        }
+        if compRatingsKeyTouched && !competencyRatings.isReadOnlyHere {
+            let merged = competencyRatings.merged(with: compRatingsBefore)
+            if merged != competencyRatings {
+                competencyRatings = merged
+                didCompetency = true
+            }
+        }
         // 若 backfill 新建了 OrgPerson/BusinessCard 或修復了成員連結，立即持久化避免重啟後消失
         let didGrades = autoRelinkMissingGradeTitles()   // [v25.594] 別台加回刪掉的職等：這台也接回去
-        if didBackfill || didRepair || didMigrateEq || didSerial || didVault || didTransfers || didHandoffs || didMoves || didReorgs || didGrades { save() }
+        if didBackfill || didRepair || didMigrateEq || didSerial || didVault || didTransfers || didHandoffs || didMoves || didReorgs || didCompetency || didGrades { save() }
         // [v25.593 轉組織 v2 驗證] 已轉出的人變了：會議通知照在職的重排（rebuildAll 裡再濾一次；通知字一個都沒加）
         if OrgMoveIndex.archived != archivedBefore { rebuildMeetingReminders() }
         // [v25.454] 比對拉取前後的旅遊規劃，把別台裝置新增的行程／景點／攜帶物品／
@@ -3606,6 +3638,12 @@ class LifeStore: ObservableObject {
                 if !fromNames.contains(shown) { fromNames.append(shown) }
             }
             message += "\n其中 \(receivedFrom.count) 項是從\(fromNames.joined(separator: "、"))接手的，交接單照樣留著。"
+        }
+        // [v25.599 職能雷達 v1a-1] 職能評分不跟著刪（judge §1.4-8：找不到人的評分不顯示、不刪；人被別台舊存檔帶回來時評分也回來）。
+        // 字跟 orgmove/build/v0a/sim_v0a.py 的 delete_confirm 一字不差。要退回這一件：刪這四行
+        let competencyCount = competencyRatings.liveSessionCount(of: item.id)
+        if competencyCount > 0 {
+            message += "\n職能評分 \(competencyCount) 次會先留著，不會一起刪。"
         }
         return (title: "刪掉\(who)？", message: message)
     }
@@ -8791,7 +8829,9 @@ class LifeStore: ObservableObject {
             wealthTransfers: wealthTransfers,
             orgHandoffs: orgHandoffs,
             orgMoves: orgMoves,
-            orgReorgs: orgReorgs   // [v25.598] 轉組織 v5
+            orgReorgs: orgReorgs,   // [v25.598] 轉組織 v5
+            competencySetup: competencySetup,       // [v25.599] 職能雷達 v1a-1
+            competencyRatings: competencyRatings    // [v25.599] 職能雷達 v1a-1
         )
         saveQueue.async {
             let encoder = JSONEncoder()
@@ -8825,6 +8865,8 @@ class LifeStore: ObservableObject {
             if let d = try? encoder.encode(snap.orgHandoffs)    { ud.set(d, forKey: OrgHandoffBook.syncKey) }
             if let d = try? encoder.encode(snap.orgMoves)       { ud.set(d, forKey: OrgMoveBook.syncKey) }
             if let d = try? encoder.encode(snap.orgReorgs)      { ud.set(d, forKey: OrgReorgBook.syncKey) }   // [v25.598] 轉組織 v5
+            if let d = try? encoder.encode(snap.competencySetup)   { ud.set(d, forKey: CompetencySetupBook.syncKey) }    // [v25.599] 職能雷達 v1a-1
+            if let d = try? encoder.encode(snap.competencyRatings) { ud.set(d, forKey: CompetencyRatingBook.syncKey) }   // [v25.599] 職能雷達 v1a-1
             CloudSyncManager.shared.pushAll()
         }
     }
@@ -8910,6 +8952,15 @@ class LifeStore: ObservableObject {
            let rb = try? decoder.decode(OrgReorgBook.self, from: data) {
             orgReorgs = rb
         }
+        // [v25.599] 職能雷達 v1a-1：職能項目設定、評分
+        if let data = rawDataIfChanged(CompetencySetupBook.syncKey),
+           let cs = try? decoder.decode(CompetencySetupBook.self, from: data) {
+            competencySetup = cs
+        }
+        if let data = rawDataIfChanged(CompetencyRatingBook.syncKey),
+           let cr = try? decoder.decode(CompetencyRatingBook.self, from: data) {
+            competencyRatings = cr
+        }
     }
 
     /// 讀取 key 目前在 UserDefaults 的原始 Data；若與上次成功套用的內容完全相同則回傳 nil，
@@ -8953,7 +9004,8 @@ class LifeStore: ObservableObject {
         pets.isEmpty && schedules.isEmpty && subordinates.isEmpty &&
         departments.isEmpty && gradeTitles.isEmpty && businessCards.isEmpty &&
         personalEvents.isEmpty && orgPeople.isEmpty && healthProfile.isEmpty &&
-        workouts.isEmpty
+        workouts.isEmpty &&
+        competencySetup.isEmpty && competencyRatings.isEmpty   // [v25.599] 職能雷達 v1a-1：只有職能評分時也算有資料
     }
 
     func clearAll() {
@@ -8994,6 +9046,8 @@ class LifeStore: ObservableObject {
         orgHandoffs = OrgHandoffBook()   // [v25.589] 轉組織 v0b
         orgMoves = OrgMoveBook()         // [v25.590] 轉組織 v1a-1（「清除全部資料」例外：交接單平常不給刪）
         orgReorgs = OrgReorgBook()       // [v25.598] 轉組織 v5
+        competencySetup = CompetencySetupBook()     // [v25.599] 職能雷達 v1a-1
+        competencyRatings = CompetencyRatingBook()  // [v25.599] 職能雷達 v1a-1
         OrgMoveReminderLater.clearAll()  // [v25.596] 轉組織 v3：自動套用時沒動的提醒事項（只在這台）
         companySites.removeAll()
         // 行程的照片檔也要一起清，不然會留下沒人指向的孤兒檔被雲端一直重傳
@@ -9225,4 +9279,228 @@ struct WealthPolicyPremiumDraft {
     var bankId: UUID?
     var bankCode: String?
     var cardId: UUID?
+}
+
+// MARK: - [v25.599 職能雷達 v1a-1] 職能項目設定與評分（radar/judge.md §3、§4.4、§4.5、§13；radar/build/v1a-1/brief.md §2-3）
+//
+// 寫入只走這幾支；每支都是一個 batched（只存一次、推一次；judge §7.1-12，照 promoteSubordinate），不再用 isLoading = true 的舊寫法。
+// 這台的 App 比較舊（formatVersion 比這台認得的新）時一支都不寫（唯讀）。訂閱由畫面擋（看不擋、動手才擋；judge §6）。
+// 刪除部屬時這裡一筆都不動（judge §1.4-8）。sim：radar/build/v1a-1/sim_v1a-1.py（sample、ensure、add_item、reorder、save_session…）。
+
+extension LifeStore {
+    /// 這兩個鍵這台能不能寫（formatVersion 比這台認得的新 → 唯讀：看得到、不能改）
+    var competencyReadOnly: Bool { competencySetup.isReadOnlyHere || competencyRatings.isReadOnlyHere }
+
+    /// 這位同仁我評的、沒刪的評分（照日子排；查 CompetencyIndex）
+    func competencySessions(of subordinateId: UUID) -> [CompetencySession] {
+        CompetencyIndex.sessions(of: subordinateId)
+    }
+
+    /// 設定的共用寫法：複製一份改、蓋格式、不一樣才寫回（一次存檔）
+    private func mutateCompetencySetup(_ body: (inout CompetencySetupBook, Date) -> Void) {
+        guard !competencySetup.isReadOnlyHere else { return }
+        batched {
+            var b = competencySetup
+            body(&b, Date())
+            b.stampFormat()
+            if b != competencySetup { competencySetup = b }
+        }
+    }
+
+    private func mutateCompetencyRatings(_ body: (inout CompetencyRatingBook, Date) -> Void) {
+        guard !competencyRatings.isReadOnlyHere else { return }
+        batched {
+            var b = competencyRatings
+            body(&b, Date())
+            b.stampFormat()
+            if b != competencyRatings { competencyRatings = b }
+        }
+    }
+
+    // MARK: 範例、自己設定
+
+    /// 〔用範例開始〕：固定代號（兩台各按一次合併後只有一份）；已經有的不動。§13：每一分不帶名字
+    func applyCompetencySample() {
+        mutateCompetencySetup { b, now in
+            b = b.addingSample(now: now)
+        }
+    }
+
+    /// 〔自己設定〕：只建人格特質那一組（固定代號）與兩份 1–5 的等級表
+    func startCompetencyBlankSetup() {
+        mutateCompetencySetup { b, now in
+            b = b.ensuringBasics(now: now)
+        }
+    }
+
+    // MARK: 範圍
+
+    /// 改「幾分到幾分」（scaleId＝"trait"／"skill"）。0 ≤ low < high ≤ 100（§13）；不合理回 false、不寫。
+    /// 原始分數一個字都不動（畫圖時才換算；judge §3.3）
+    @discardableResult
+    func setCompetencyRange(scaleId: String, low: Int, high: Int) -> Bool {
+        guard CompetencyRange.isValid(low: low, high: high),
+              scaleId == CompetencySetupBook.traitScaleId || scaleId == CompetencySetupBook.skillScaleId else { return false }
+        mutateCompetencySetup { b, now in
+            var sc = b.scale(scaleId) ?? CompetencyScale(id: scaleId)
+            guard sc.low != low || sc.high != high else { return }
+            sc.low = low
+            sc.high = high
+            sc.updatedAt = now
+            b.upsertScale(sc)
+        }
+        return true
+    }
+
+    // MARK: 項目（人格特質的、共用學習項目、某個系統自己的）
+
+    /// 新增一個項目：groupId＝traitGroupId（人格特質）、nil（共用學習項目，三個系統都會有）、某個系統（v1a-2 系統頁）。
+    /// 排在那一份清單最後。名字空的不建，回 nil
+    @discardableResult
+    func addCompetencyItem(name: String, groupId: UUID?) -> UUID? {
+        let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !n.isEmpty, !competencySetup.isReadOnlyHere else { return nil }
+        let newId = UUID()
+        mutateCompetencySetup { b, now in
+            if groupId == CompetencySetupBook.traitGroupId { b = b.ensuringBasics(now: now) }
+            let siblings: [CompetencyItem] = b.allItems.filter { $0.isLive && $0.groupId == groupId }
+            let maxOrder: Double = siblings.compactMap { $0.order }.max() ?? -1
+            b.upsertItem(CompetencyItem(id: newId, groupId: groupId, name: n, order: maxOrder + 1,
+                                        createdAt: now, updatedAt: now))
+        }
+        return newId
+    }
+
+    /// 改名（同一個代號：以前的分數跟著新名字）。空的不改
+    func renameCompetencyItem(_ id: UUID, to name: String) {
+        let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !n.isEmpty else { return }
+        mutateCompetencySetup { b, now in
+            guard var it = b.item(id), it.isLive, it.name != n else { return }
+            it.name = n
+            it.updatedAt = now
+            b.upsertItem(it)
+        }
+    }
+
+    /// 排序：ids 是新的順序（同一份清單：人格特質的、或共用的）。只動順序有變的那幾筆
+    func reorderCompetencyItems(_ ids: [UUID]) {
+        mutateCompetencySetup { b, now in
+            for (i, id) in ids.enumerated() {
+                guard var it = b.item(id), it.order != Double(i) else { continue }
+                it.order = Double(i)
+                it.updatedAt = now
+                b.upsertItem(it)
+            }
+        }
+    }
+
+    /// 停用（不畫、不評、分數留著）／恢復
+    func setCompetencyItemArchived(_ id: UUID, archived: Bool) {
+        mutateCompetencySetup { b, now in
+            guard var it = b.item(id), it.isLive else { return }
+            if archived && it.archivedAt == nil {
+                it.archivedAt = now
+            } else if !archived && it.archivedAt != nil {
+                it.archivedAt = nil
+            } else {
+                return
+            }
+            it.updatedAt = now
+            b.upsertItem(it)
+        }
+    }
+
+    // MARK: 系統
+
+    /// 新增系統（預設套用全部共用學習項目）。名字空的不建，回 nil
+    @discardableResult
+    func addCompetencySystem(name: String) -> UUID? {
+        let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !n.isEmpty, !competencySetup.isReadOnlyHere else { return nil }
+        let newId = UUID()
+        mutateCompetencySetup { b, now in
+            b = b.ensuringBasics(now: now)
+            let maxOrder: Double = b.allGroups.filter { $0.isLive && !$0.isTrait }.compactMap { $0.order }.max() ?? 0
+            b.upsertGroup(CompetencyGroup(id: newId, kind: CompetencyGroup.kindSystem, name: n, order: maxOrder + 1,
+                                          createdAt: now, updatedAt: now))
+        }
+        return newId
+    }
+
+    /// 系統改名（同一個代號）
+    func renameCompetencyGroup(_ id: UUID, to name: String) {
+        let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !n.isEmpty else { return }
+        mutateCompetencySetup { b, now in
+            guard var g = b.group(id), g.isLive, g.name != n else { return }
+            g.name = n
+            g.updatedAt = now
+            b.upsertGroup(g)
+        }
+    }
+
+    /// 系統排序：ids 是新的順序（人格特質永遠在最前面，order 0；系統從 1 起）
+    func reorderCompetencySystems(_ ids: [UUID]) {
+        mutateCompetencySetup { b, now in
+            for (i, id) in ids.enumerated() where id != CompetencySetupBook.traitGroupId {
+                guard var g = b.group(id), g.order != Double(i + 1) else { continue }
+                g.order = Double(i + 1)
+                g.updatedAt = now
+                b.upsertGroup(g)
+            }
+        }
+    }
+
+    /// 系統停用（卡片不再出現、分數全部留著）／恢復。人格特質那一組不能停用
+    func setCompetencyGroupArchived(_ id: UUID, archived: Bool) {
+        guard id != CompetencySetupBook.traitGroupId else { return }
+        mutateCompetencySetup { b, now in
+            guard var g = b.group(id), g.isLive else { return }
+            if archived && g.archivedAt == nil {
+                g.archivedAt = now
+            } else if !archived && g.archivedAt != nil {
+                g.archivedAt = nil
+            } else {
+                return
+            }
+            g.updatedAt = now
+            b.upsertGroup(g)
+        }
+    }
+
+    // MARK: 不用學的系統
+
+    /// 這位同仁不用學的系統（勾掉＝那張雷達不出現、分數留著；勾回來分數都在）。一位一筆（id＝部屬 id）
+    func setCompetencySkippedSystems(_ subordinateId: UUID, skipped: Set<UUID>) {
+        mutateCompetencySetup { b, now in
+            let current: Set<UUID> = b.skippedGroupIds(subordinateId)
+            guard current != skipped else { return }
+            var a = b.allAssignments.first(where: { $0.id == subordinateId }) ?? CompetencyAssignment(id: subordinateId)
+            let order: [UUID] = b.allGroups.map { $0.id }
+            a.skippedGroupIds = order.filter { skipped.contains($0) }
+            a.deletedAt = nil
+            a.updatedAt = now
+            b.upsertAssignment(a)
+        }
+    }
+
+    // MARK: 評分
+
+    /// 存一張評分（新的一張或同一天那一張；CompetencyMath.buildSession 組好的）
+    func saveCompetencySession(_ s: CompetencySession) {
+        mutateCompetencyRatings { b, _ in
+            b.upsertSession(s)
+        }
+    }
+
+    /// 刪一張評分（整張墓碑；v1a-2 的評分紀錄才有按鈕）
+    func deleteCompetencySession(_ id: UUID) {
+        mutateCompetencyRatings { b, now in
+            guard var s = b.session(id), s.deletedAt == nil else { return }
+            s.deletedAt = now
+            s.updatedAt = now
+            b.upsertSession(s)
+        }
+    }
 }
