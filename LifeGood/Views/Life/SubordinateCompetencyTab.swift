@@ -16,6 +16,15 @@ import SwiftUI
 // • iPad（.regular）雷達卡兩欄（LazyVGrid、每張最寬 360）；iPhone 照舊一欄。
 // • 最下面「評分紀錄」白卡 → 點一列打開那一天的明細（CompetencyRecordDetailView；看不擋、改刪在明細頁擋）。
 // • §13：每一格的評語不做——這裡一個字的評語都不顯示。
+//
+// [v25.601 職能雷達 v1b] 這一版加的（radar/build/v1b/brief.md §4 G1-A；要退回這一件：照 92b02fe 的這個檔）：
+// • 照職等疊目標：tabModel 多傳 grades（competencyGradeContext）、mode（摘要卡〔目標 E2 ▾〕，這台記住 competency.targetMode）。
+// • 摘要卡「E2 達標 10／12」「離 E2 還差 2 格（差 2 級）」「未評 2 格」；沒設職等一行＋〔設定職等〕（打開既有的部屬編輯表單
+//   AddSubordinateView(editing:)，跟明細頁〔編輯〕一樣要訂閱）；職等被刪、這個職等還沒訂目標各一行橘字。
+// • 「疊：」那一排多〔目標 E2 ▾〕選單（目前職等／下一個職等／不疊；只是看，不擋訂閱）；一排放不下換兩行（ViewThatFits）。
+// • 摘要卡下面「離 E2 目標的差距」白卡（由大到小，最多 6 列＋看全部）→ 點一列打開那一格的歷史（看不擋）。
+// • 評分紀錄那一列：那一張的職等跟現在不一樣多一行「那時 E2 工程師」。
+// • 通知、小工具、手錶、鎖定畫面一個字都不加（目標、達標也是）。
 
 struct SubordinateCompetencyTab: View {
     let subordinateId: UUID
@@ -25,6 +34,10 @@ struct SubordinateCompetencyTab: View {
 
     /// 摘要卡「疊：上一次」（這台記住；個人方便用）
     @AppStorage("competency.showPrevious") private var showPrevious = true
+    // [v25.601 職能雷達 v1b] 摘要卡〔目標 E2 ▾〕：目前職等／下一個職等／不疊（這台記住；只是看）。要退回這一件：刪這兩行與 targetMode
+    @AppStorage("competency.targetMode") private var targetModeRaw: String = CompetencyTargetMode.current.rawValue
+    /// [v25.601 v1b] 〔設定職等〕打開的部屬編輯表單（sheet(item:)）。要退回這一件：刪這一行
+    @State private var gradeEdit: CompTabGradeEditRequest?
     @State private var ratingRequest: CompetencyRatingRequest?
     @State private var setupRequest: CompTabSetupRequest?
     @State private var skipRequest: CompTabSkipRequest?
@@ -39,13 +52,21 @@ struct SubordinateCompetencyTab: View {
 
     private var isArchived: Bool { OrgMoveIndex.isArchived(subordinateId) }
 
+    /// [v25.601 v1b] 存的字對不到（舊版、打錯）就當「目前職等」
+    private var targetMode: CompetencyTargetMode {
+        CompetencyTargetMode(rawValue: targetModeRaw) ?? .current
+    }
+
+    /// [v25.601 v1b] 多傳職等與對照（grades 空、mode .off＝跟 v1a-2 一模一樣）。要退回這一件：拿掉最後兩個參數
     private var model: CompetencyTabModel {
         CompetencyMath.tabModel(setup: lifeStore.competencySetup,
                                 ratings: lifeStore.competencyRatings,
                                 subordinateId: subordinateId,
                                 archivedPerson: isArchived,
                                 sessions: lifeStore.competencySessions(of: subordinateId),
-                                today: CompetencyMath.dayKey(Date()))
+                                today: CompetencyMath.dayKey(Date()),
+                                grades: lifeStore.competencyGradeContext(for: subordinateId),
+                                mode: targetMode)
     }
 
     var body: some View {
@@ -77,6 +98,8 @@ struct SubordinateCompetencyTab: View {
         }
         // [v25.600 職能雷達 v1a-2] 明細、點一格的兩個 sheet 包在一個 modifier 裡（body 的修飾器鏈不再拉長）。要退回這一件：刪這一行
         .modifier(CompTabHistorySheets(recordRequest: $recordRequest, historyRequest: $historyRequest))
+        // [v25.601 職能雷達 v1b] 〔設定職等〕＝既有的部屬編輯表單（不另外寫職等）。要退回這一件：刪這一行
+        .modifier(CompTabGradeSheet(request: $gradeEdit))
         .premiumLockAlert(isPresented: $showPremiumAlert)
         .onDisappear { toastTask?.cancel() }
     }
@@ -96,7 +119,15 @@ struct SubordinateCompetencyTab: View {
                            showPrevious: $showPrevious,
                            onRate: startRating,
                            onSkip: openSkipSheet,
-                           onSetup: openSetup)
+                           onSetup: openSetup,
+                           targets: m.targets,
+                           onPickMode: pickTargetMode,
+                           onSetGrade: openGradeEdit,
+                           canSetGrade: canRate)
+        // [v25.601 職能雷達 v1b] 離目標的差距（由大到小；沒評的不列）。要退回這一件：刪這個 if
+        if let t = m.targets, !t.gapRows.isEmpty {
+            CompTabGapCard(title: CompTabGapCard.headerTitle(for: t), rows: t.gapRows, onOpen: openHistory)
+        }
         cardsBlock(m)
         if hasSystems {
             CompTabSkippedLine(text: m.skippedLineText,
@@ -176,6 +207,18 @@ struct SubordinateCompetencyTab: View {
     /// [v25.600 職能雷達 v1a-2] 評分紀錄一列 → 那一天的明細（看不擋；〔改分數〕〔改日期〕〔刪除〕在明細頁擋）
     private func openRecord(_ dayKey: String) {
         recordRequest = CompetencyRecordRequest(subordinateId: subordinateId, dayKey: dayKey)
+    }
+
+    /// [v25.601 v1b] 〔目標 E2 ▾〕選單（只是看，不擋訂閱）
+    private func pickTargetMode(_ mode: CompetencyTargetMode) {
+        targetModeRaw = mode.rawValue
+    }
+
+    /// [v25.601 v1b] 〔設定職等〕：打開既有的部屬編輯表單（跟明細頁〔編輯〕同一個表單、同一個訂閱規矩）
+    private func openGradeEdit() {
+        guard subscription.isPremium else { showPremiumAlert = true; return }
+        guard let s = lifeStore.subordinates.first(where: { $0.id == subordinateId }) else { return }
+        gradeEdit = CompTabGradeEditRequest(subordinate: s)
     }
 
     private func showToast(_ text: String) {
@@ -403,6 +446,12 @@ private struct CompTabSummaryCard: View {
     let onRate: () -> Void
     let onSkip: () -> Void
     let onSetup: () -> Void
+    // [v25.601 職能雷達 v1b] 職等目標（nil＝整個設定一個目標都沒有：什麼都不畫）。要退回這一件：刪這四行與 targetLines、targetMenu
+    let targets: CompetencyTargetSummary?
+    let onPickMode: (CompetencyTargetMode) -> Void
+    let onSetGrade: () -> Void
+    /// 〔設定職等〕（已轉出、唯讀不出現；跟〔評分〕同條件）
+    let canSetGrade: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -413,6 +462,7 @@ private struct CompTabSummaryCard: View {
                 .font(.footnote)
                 .foregroundStyle(summary.stale ? Color.orange : Color.secondary)
             tiles
+            targetLines
             bottomRow
             previousDayLine
         }
@@ -467,14 +517,76 @@ private struct CompTabSummaryCard: View {
         summary.skillLowCoverage ? Color.secondary : CompTabTile.deltaColor(summary.skillDeltaText)
     }
 
+    /// [v25.601 v1b] 「E2 達標 10／12」等幾行（targets nil 什麼都不畫）
+    @ViewBuilder
+    private var targetLines: some View {
+        if let t = targets {
+            CompTabTargetLines(targets: t, canSetGrade: canSetGrade, onSetGrade: onSetGrade)
+        }
+    }
+
+    /// [v25.601 v1b] 「疊：〔上一次〕〔目標 E2 ▾〕〔評分〕」：一排放不下換兩行，再放不下一顆一行。
+    /// 要退回這一件：換回 HStack { 上一次; Spacer; 評分 }
     private var bottomRow: some View {
-        HStack(spacing: 8) {
-            if showsOverlayToggle {
-                CompTabOverlayToggle(label: overlayLabel, isOn: $showPrevious)
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: 8) {
+                overlayChips
+                Spacer(minLength: 8)
+                rateButton
             }
-            Spacer(minLength: 8)
-            if canRate {
-                CompTabRateButton(title: neverRated ? "開始第一次評分" : "評分", action: onRate)
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    overlayChips
+                }
+                rateRow
+            }
+            VStack(alignment: .leading, spacing: 8) {
+                previousChip
+                targetMenu
+                rateRow
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var overlayChips: some View {
+        previousChip
+        targetMenu
+    }
+
+    @ViewBuilder
+    private var previousChip: some View {
+        if showsOverlayToggle {
+            CompTabOverlayToggle(label: overlayLabel, isOn: $showPrevious)
+        }
+    }
+
+    /// 〔目標 E2 ▾〕（chipTitle 有才有：沒設職等、職等被刪沒有）；前面沒有〔上一次〕時自己寫「疊：」
+    @ViewBuilder
+    private var targetMenu: some View {
+        if let t = targets, let chip = t.chipTitle {
+            CompTabTargetMenu(chipTitle: chip,
+                              mode: t.mode,
+                              currentTitle: t.currentOptionTitle,
+                              nextTitle: t.nextOptionTitle,
+                              showsLabel: !showsOverlayToggle,
+                              onPick: onPickMode)
+        }
+    }
+
+    @ViewBuilder
+    private var rateButton: some View {
+        if canRate {
+            CompTabRateButton(title: neverRated ? "開始第一次評分" : "評分", action: onRate)
+        }
+    }
+
+    @ViewBuilder
+    private var rateRow: some View {
+        if canRate {
+            HStack(spacing: 0) {
+                Spacer(minLength: 0)
+                rateButton
             }
         }
     }
@@ -686,8 +798,14 @@ private struct CompTabRecordButton: View {
         }
         .buttonStyle(.plain)
         // Button 本身就是一個 VoiceOver 元素（念 label、可以按）；這裡只換念的字（不用 .accessibilityElement(children: .ignore)，那會蓋掉按的動作）
-        .accessibilityLabel(row.accessibilityText)
+        .accessibilityLabel(spoken)
         .accessibilityHint("打開那一次的雷達")
+    }
+
+    /// [v25.601 v1b] 後面接「那時 E2 工程師」。要退回這一件：accessibilityLabel 換回 row.accessibilityText
+    private var spoken: String {
+        guard let g = row.gradeNote else { return row.accessibilityText }
+        return row.accessibilityText + "，" + g
     }
 }
 
@@ -709,6 +827,13 @@ private struct CompTabRecordTexts: View {
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
+            // [v25.601 職能雷達 v1b] 那一張的職等跟現在不一樣：「那時 E2 工程師」。要退回這一件：刪這個 if
+            if let g = row.gradeNote {
+                Text(g)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 }
@@ -825,5 +950,302 @@ private struct CompTabSkipSheet: View {
         DispatchQueue.main.async {
             store.setCompetencySkippedSystems(sid, skipped: result)
         }
+    }
+}
+
+// MARK: - [v25.601 職能雷達 v1b] 職等目標：摘要卡幾行、〔目標 E2 ▾〕、差距清單、〔設定職等〕（要退回這一件：刪到檔尾）
+
+/// 〔設定職等〕打開既有的部屬編輯表單（sheet(item:) 用）
+private struct CompTabGradeEditRequest: Identifiable {
+    let id = UUID()
+    let subordinate: Subordinate
+}
+
+/// 〔設定職等〕＝AddSubordinateView(editing:)（跟明細頁〔編輯〕同一個表單；職等改了有組織人員、名片、互評連動，只走原本那條路）
+private struct CompTabGradeSheet: ViewModifier {
+    @Binding var request: CompTabGradeEditRequest?
+
+    func body(content: Content) -> some View {
+        content
+            .sheet(item: $request) { r in
+                AddSubordinateView(editing: r.subordinate)
+                    .appStores()
+            }
+    }
+}
+
+/// 摘要卡：「E2 達標 10／12」＋「離 E2 還差 2 格（差 2 級）・未評 2 格」；沒設職等一行＋〔設定職等〕；職等被刪、沒訂目標各一行橘字
+private struct CompTabTargetLines: View {
+    let targets: CompetencyTargetSummary
+    let canSetGrade: Bool
+    let onSetGrade: () -> Void
+
+    /// 「離 E2 還差 2 格（差 2 級）・未評 2 格」（都沒有 nil）
+    private var subLine: String? {
+        let parts: [String] = [targets.gapCountText, targets.unratedText].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: "・")
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            if let a = targets.achievedText {
+                CompTabAchievedLine(achieved: a, sub: subLine)
+            }
+            if let n = targets.noGradeLine {
+                CompTabNoGradeRow(text: n, canSetGrade: canSetGrade, onSetGrade: onSetGrade)
+            }
+            if let d = targets.deletedGradeLine {
+                CompTabTargetNote(text: d)
+            }
+            if let n = targets.noTargetLine {
+                CompTabTargetNote(text: n)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+}
+
+/// 「E2 達標 10／12」右邊（放不下就下一行）「離 E2 還差 2 格（差 2 級）・未評 2 格」
+private struct CompTabAchievedLine: View {
+    let achieved: String
+    let sub: String?
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                achievedText
+                subText
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                achievedText
+                subText
+            }
+        }
+        .accessibilityElement(children: .combine)
+    }
+
+    private var achievedText: some View {
+        Text(achieved)
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(CompetencyPalette.trait)
+            .fixedSize(horizontal: false, vertical: true)
+    }
+
+    @ViewBuilder
+    private var subText: some View {
+        if let t = sub {
+            Text(t)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+}
+
+/// 「設定職等後才有目標」〔設定職等〕
+private struct CompTabNoGradeRow: View {
+    let text: String
+    let canSetGrade: Bool
+    let onSetGrade: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(text)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            if canSetGrade {
+                Button(action: onSetGrade) {
+                    Text("設定職等")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(CompetencyPalette.trait)
+                        .frame(minWidth: 44, minHeight: 44)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .accessibilityHint("打開這位同仁的資料，選職等")
+            }
+        }
+    }
+}
+
+/// 職等被刪、這個職等還沒訂目標（橘字一行）
+private struct CompTabTargetNote: View {
+    let text: String
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.caption2)
+                .foregroundStyle(Color.orange)
+                .accessibilityHidden(true)
+            Text(text)
+                .font(.footnote)
+                .foregroundStyle(Color.orange)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        .accessibilityElement(children: .combine)
+    }
+}
+
+/// 〔目標 E2 ▾〕：目前職等／下一個職等（有才列）／不疊目標；打勾的那一項用 Label，其他用純字（不傳空的圖示名）
+private struct CompTabTargetMenu: View {
+    let chipTitle: String
+    let mode: CompetencyTargetMode
+    let currentTitle: String?
+    let nextTitle: String?
+    /// 前面沒有〔上一次〕時自己寫「疊：」
+    let showsLabel: Bool
+    let onPick: (CompetencyTargetMode) -> Void
+
+    /// 選了「下一個職等」但沒有下一個：照目前職等算（CompetencyMath 也是），勾也打在目前職等
+    private var shownMode: CompetencyTargetMode {
+        if mode == .next && nextTitle == nil { return .current }
+        return mode
+    }
+
+    private var isOn: Bool { shownMode != .off }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            if showsLabel {
+                Text("疊：")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Menu {
+                if let t = currentTitle {
+                    item(t, .current)
+                }
+                if let t = nextTitle {
+                    item(t, .next)
+                }
+                item("不疊目標", .off)
+            } label: {
+                chip
+            }
+            .accessibilityLabel("疊目標，" + chipTitle)
+            .accessibilityValue(isOn ? "疊著" : "沒有疊")
+        }
+    }
+
+    @ViewBuilder
+    private func item(_ title: String, _ m: CompetencyTargetMode) -> some View {
+        if shownMode == m {
+            Button {
+                onPick(m)
+            } label: {
+                Label(title, systemImage: "checkmark")
+            }
+        } else {
+            Button(title) {
+                onPick(m)
+            }
+        }
+    }
+
+    /// 膠囊樣子照〔上一次〕：開＝紫字紫底、關＝灰
+    private var chip: some View {
+        HStack(spacing: 4) {
+            Text(chipTitle)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+            Image(systemName: "chevron.down")
+                .font(.caption2.weight(.bold))
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .foregroundStyle(isOn ? CompetencyPalette.trait : Color.secondary)
+        .background(isOn ? CompetencyPalette.trait.opacity(0.12) : Color(.tertiarySystemFill), in: Capsule())
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
+    }
+}
+
+/// 「離 E2 目標的差距」白卡：每列「Chemical System・緊急應變　2 → 3（差 1）」，點了打開那一格的歷史（看不擋）
+private struct CompTabGapCard: View {
+    let title: String
+    let rows: [CompetencyGapRow]
+    let onOpen: (UUID, UUID) -> Void
+
+    @State private var showAll = false
+
+    private static let firstCount: Int = 6
+
+    /// 「離 E2 目標的差距」
+    static func headerTitle(for t: CompetencyTargetSummary) -> String {
+        guard let g = t.grade else { return "離目標的差距" }
+        return "離 " + g.short + " 目標的差距"
+    }
+
+    private var visible: [CompetencyGapRow] {
+        showAll ? rows : Array(rows.prefix(Self.firstCount))
+    }
+
+    private var hasMore: Bool { !showAll && rows.count > Self.firstCount }
+
+    var body: some View {
+        let list: [CompetencyGapRow] = visible
+        let lastId: String? = list.last?.id
+        let more: Bool = hasMore
+        return VStack(alignment: .leading, spacing: 6) {
+            CompTabHeader(title: title, icon: "scope", color: Color.orange) {
+                EmptyView()
+            }
+            .padding(.bottom, 4)
+            ForEach(list) { row in
+                CompTabGapRowButton(row: row, onOpen: onOpen)
+                if row.id != lastId || more {
+                    Divider()
+                }
+            }
+            if more {
+                CompTabShowAllButton(count: rows.count) { showAll = true }
+            }
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .modifier(CompTabCardStyle())
+    }
+}
+
+private struct CompTabGapRowButton: View {
+    let row: CompetencyGapRow
+    let onOpen: (UUID, UUID) -> Void
+
+    /// 「Chemical System・緊急應變，2 → 3，差 1」
+    private var spoken: String {
+        let d: String = row.detail
+            .replacingOccurrences(of: "（", with: "，")
+            .replacingOccurrences(of: "）", with: "")
+        return row.title + "，" + d
+    }
+
+    var body: some View {
+        Button {
+            onOpen(row.groupId, row.itemId)
+        } label: {
+            HStack(spacing: 10) {
+                Text(row.title)
+                    .font(.subheadline)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                Text(row.detail)
+                    .font(.subheadline.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(Color.orange)
+                    .multilineTextAlignment(.trailing)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(spoken)
+        .accessibilityHint("打開這一格的歷史")
     }
 }

@@ -1,4 +1,6 @@
 import SwiftUI
+// [v25.601 職能雷達 v1b] 點一格的小折線（LineMark／PointMark／RuleMark，iOS 16 起就有）。只有這個檔 import Charts。要退回這一件：刪這一行與 CompHistTrend…
+import Charts
 
 // MARK: - [v25.600 職能雷達 v1a-2] 評分紀錄明細、點一格的歷史（G1 負責；radar/judge.md §4.3④「點雷達頂點、軸名或橫條那一列」、
 //  §3.4 停用的項目在舊紀錄裡、§3.7-10 評分紀錄可以點開看、改、刪、§6、§13；radar/build/v1a-2/brief.md §4 G1）
@@ -8,6 +10,13 @@ import SwiftUI
 // • 看不擋；〔改分數〕〔改日期〕〔刪除〕要訂閱（isPremium／premiumLockAlert）、唯讀時不出現。已轉出的同仁舊紀錄照樣能改。
 // • sheet 一律 sheet(item:)＋.appStores()；dismiss 後寫 store 放下一個 runloop。
 // 骨架（主控）：型別名與 init 參數是跨組契約，不准改；body 由 G1 換成真的。自己加的型別一律 CompHist… 前綴、private。
+//
+// [v25.601 職能雷達 v1b] 這一版加的（radar/build/v1b/brief.md §4 G1-B；要退回這一件：照 92b02fe 的這個檔）：
+// • 評分紀錄明細上面多 segmented〔那一次｜跟現在比〕：跟現在比＝現在的卡片、灰虛線＝那一天（含）之前每一格最後一筆
+//   （CompetencyMath.compareCards；不疊目標，最多三條線）。〔改分數〕〔改日期〕〔刪除〕兩種都在。看不擋。
+// • 點一格改用 v1b 的 cellHistory（多傳這位現在的職等）：每一分多一句說明（項目自己的蓋過通用的）、「E2 目標 3（差 1）」、
+//   評過三次以上一節「走勢」小折線（舊範圍的點換算後空心、目標 RuleMark 點線；只在 App 裡）。§13：照樣沒有評語。
+// • 改日期的 DatePicker 起點改叫 CompetencyMath.noonDate（日子轉換統一一支；台北、洛杉磯 sim 對過）。
 
 /// 打開一天的評分紀錄明細（sheet(item:) 用）
 struct CompetencyRecordRequest: Identifiable {
@@ -45,6 +54,8 @@ struct CompetencyRecordDetailView: View {
     @State private var showPremiumAlert = false
     /// 頁內一行結果（「已改成 10/31」綠字；改不成紅字）
     @State private var resultLine: CompHistResultLine?
+    /// [v25.601 v1b] 〔那一次｜跟現在比〕（只是看）。要退回這一件：刪這一行與 compareModels、CompHistModeBlock、CompHistCompareBlock
+    @State private var compareNow = false
 
     init(subordinateId: UUID, dayKey: String) {
         self.subordinateId = subordinateId
@@ -65,6 +76,15 @@ struct CompetencyRecordDetailView: View {
     }
 
     private var canEdit: Bool { !lifeStore.competencyReadOnly }
+
+    /// [v25.601 v1b] 〔跟現在比〕：現在的卡片、灰虛線＝這一天（含）之前每一格最後一筆
+    private var compareModels: [CompetencyChartModel] {
+        CompetencyMath.compareCards(setup: lifeStore.competencySetup,
+                                    subordinateId: subordinateId,
+                                    archivedPerson: OrgMoveIndex.isArchived(subordinateId),
+                                    sessions: lifeStore.competencySessions(of: subordinateId),
+                                    compareDay: day)
+    }
 
     var body: some View {
         NavigationStack {
@@ -102,11 +122,18 @@ struct CompetencyRecordDetailView: View {
             if let r = resultLine {
                 CompHistResultView(line: r)
             }
-            if list.count > 1, let cur = current(in: list) {
-                CompHistPickerBlock(list: list, selected: cur.id, onPick: { pickId = $0 })
-            }
             if let d = current(in: list) {
-                CompHistDetailBlock(detail: d, regular: horizontalSizeClass == .regular)
+                // [v25.601 職能雷達 v1b] 〔那一次｜跟現在比〕；跟現在比時不畫當時的雷達。要退回這一件：換回 92b02fe 那三段
+                // [v1b 審查] 「第幾張」兩種都留著：下面〔改分數〕〔改日期〕〔刪除〕動的是選的那一張，藏起來會不知道刪的是哪張
+                CompHistModeBlock(compareNow: $compareNow)
+                if list.count > 1 {
+                    CompHistPickerBlock(list: list, selected: d.id, onPick: { pickId = $0 })
+                }
+                if compareNow {
+                    CompHistCompareBlock(dayKey: day, cards: compareModels, regular: horizontalSizeClass == .regular)
+                } else {
+                    CompHistDetailBlock(detail: d, regular: horizontalSizeClass == .regular)
+                }
                 if canEdit {
                     CompHistActions(onRate: { startRate(d) }, onMove: { startMove(d) }, onDelete: { askDelete(d) })
                 }
@@ -158,7 +185,7 @@ struct CompetencyRecordDetailView: View {
     }
 }
 
-/// 點一格的歷史（.medium）：現在、每一分的名字（有才有）、歷史、在其他系統
+/// 點一格的歷史（.medium）：現在（＋目標）、每一分（名字、說明；有才有）、走勢（三次以上）、歷史、在其他系統
 struct CompetencyCellHistorySheet: View {
     let subordinateId: UUID
     let groupId: UUID
@@ -167,11 +194,13 @@ struct CompetencyCellHistorySheet: View {
     @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.dismiss) private var dismiss
 
+    /// [v25.601 v1b] 改用 v1b 版：多傳這位現在的職等（目標照「目前職等」，不跟摘要卡的選單走）。要退回這一件：拿掉 grade 參數
     private var model: CompetencyCellHistoryModel {
         CompetencyMath.cellHistory(groupId: groupId, itemId: itemId,
                                    setup: lifeStore.competencySetup,
                                    subordinateId: subordinateId,
-                                   sessions: lifeStore.competencySessions(of: subordinateId))
+                                   sessions: lifeStore.competencySessions(of: subordinateId),
+                                   grade: lifeStore.competencyCurrentGrade(for: subordinateId))
     }
 
     private var tint: Color {
@@ -350,6 +379,8 @@ private struct CompHistNoteCard: View {
 private struct CompHistGrid: View {
     let cards: [CompetencyChartModel]
     let regular: Bool
+    /// [v25.601 v1b] 〔跟現在比〕時疊灰虛線（那一天）；當時的雷達不疊。要退回這一件：刪這一行、兩處換回 false
+    var showPrevious: Bool = false
 
     /// [v1a-2 裁定] 固定兩欄（跟〔職能〕分頁 CompTabGrid 一樣；原本 .adaptive(minimum: 320) 寬度不同會變 1 或 3～4 欄）
     private static let columns: [GridItem] = [
@@ -361,7 +392,7 @@ private struct CompHistGrid: View {
         if regular {
             LazyVGrid(columns: Self.columns, alignment: .center, spacing: 16) {
                 ForEach(cards) { c in
-                    CompetencyChartCard(model: c, showPrevious: false, onTapAxis: nil)
+                    CompetencyChartCard(model: c, showPrevious: showPrevious, onTapAxis: nil)
                         .frame(maxWidth: 360)
                 }
             }
@@ -369,7 +400,7 @@ private struct CompHistGrid: View {
         } else {
             VStack(spacing: 14) {
                 ForEach(cards) { c in
-                    CompetencyChartCard(model: c, showPrevious: false, onTapAxis: nil)
+                    CompetencyChartCard(model: c, showPrevious: showPrevious, onTapAxis: nil)
                         .padding(.horizontal)
                 }
             }
@@ -448,18 +479,6 @@ private struct CompHistGoneView: View {
 
 // MARK: - 〔改日期〕小表單
 
-/// 「2026-10-30」→ 那一天中午（DatePicker 用；中午避開日光節約換日）。
-/// [v25.600 v1a-2] 跟評分畫面的 compRatingDate 一樣（那支是 fileprivate）；下一版主控再搬進 CompetencyMath。
-fileprivate func compHistNoonDate(_ key: String) -> Date? {
-    guard let p = CompetencyMath.parseDay(key) else { return nil }
-    var c = DateComponents()
-    c.year = p.y
-    c.month = p.m
-    c.day = p.d
-    c.hour = 12
-    return Calendar.current.date(from: c)
-}
-
 /// 只改這一張算在哪一天（分數不動）。那天已經有一張、晚於今天：表單裡紅字、不關。
 private struct CompHistMoveSheet: View {
     let subordinateId: UUID
@@ -481,7 +500,8 @@ private struct CompHistMoveSheet: View {
         // 今天就用現在（中午 12 點在上午會晚於 DatePicker 的上限 ...Date()）；以前的日子用那天中午
         //（那一張的日子在這台時區晚於今天——別的時區評的——也用現在：DatePicker 不能超過 ...Date()；照評分畫面 key < t）
         let today: String = CompetencyMath.dayKey(Date())
-        let start: Date = request.dayKey < today ? (compHistNoonDate(request.dayKey) ?? Date()) : Date()
+        // [v25.601 v1b] 「2026-10-30」→ 那一天中午：改叫 CompetencyMath.noonDate（v1a-2 這個檔自己的那一支刪掉）
+        let start: Date = request.dayKey < today ? (CompetencyMath.noonDate(request.dayKey) ?? Date()) : Date()
         self.startKey = CompetencyMath.dayKey(start)
         _date = State(initialValue: start)
     }
@@ -558,17 +578,30 @@ private struct CompHistCellList: View {
             Section {
                 Text(model.nowLine)
                     .font(.headline)
+                // [v25.601 職能雷達 v1b] 「E2 目標 3（差 1）」。要退回這一件：刪這個 if
+                if let t = model.targetLine {
+                    Text(t)
+                        .font(.subheadline)
+                        .foregroundStyle(targetColor)
+                }
                 if let a = model.archivedNote {
                     Text(a)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
                 }
             }
+            // [v25.601 v1b] 節頭「每一分的名字」→「每一分」（名字、說明）
             if !model.levels.isEmpty {
-                Section("每一分的名字") {
+                Section("每一分") {
                     ForEach(model.levels) { lv in
                         CompHistLevelRowView(level: lv, tint: tint)
                     }
+                }
+            }
+            // [v25.601 職能雷達 v1b] 評過三次以上：小折線（只在 App 裡）。要退回這一件：刪這個 if
+            if let tr = model.trend {
+                Section("走勢") {
+                    CompHistTrendBlock(trend: tr, tint: tint)
                 }
             }
             Section("歷史") {
@@ -583,20 +616,30 @@ private struct CompHistCellList: View {
             }
         }
     }
+
+    /// [v25.601 v1b] 目標那一行：有 ✓ 綠、有「差」橘、其他（未評）灰
+    private var targetColor: Color {
+        guard let t = model.targetLine else { return Color.secondary }
+        if t.contains("✓") { return Color.green }
+        if t.contains("差") { return Color.orange }
+        return Color.secondary
+    }
 }
 
-/// 「●4　能教人」（現在這一分主題色、實心點；其他空心）
+/// 「●4　能教人」＋下一行說明（現在這一分主題色、實心點；其他空心）
 private struct CompHistLevelRowView: View {
     let level: CompetencyLevelRow
     let tint: Color
 
+    /// [v25.601 v1b] 後面接說明（有才有）
     private var spoken: String {
-        let base: String = level.name.isEmpty ? "\(level.id) 分" : "\(level.id) 分 \(level.name)"
+        var base: String = level.name.isEmpty ? "\(level.id) 分" : "\(level.id) 分 \(level.name)"
+        if let d = level.detail { base += "，" + d }
         return level.isCurrent ? base + "，現在" : base
     }
 
     var body: some View {
-        HStack(spacing: 10) {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
             Image(systemName: level.isCurrent ? "circle.fill" : "circle")
                 .font(.caption)
                 .foregroundStyle(level.isCurrent ? tint : Color.secondary)
@@ -604,10 +647,7 @@ private struct CompHistLevelRowView: View {
                 .font(.subheadline.weight(level.isCurrent ? .bold : .regular))
                 .monospacedDigit()
                 .frame(minWidth: 28, alignment: .leading)
-            if !level.name.isEmpty {
-                Text(level.name)
-                    .font(.subheadline)
-            }
+            CompHistLevelTexts(name: level.name, detail: level.detail)
             Spacer(minLength: 0)
         }
         .foregroundStyle(level.isCurrent ? tint : Color.primary)
@@ -660,5 +700,163 @@ private struct CompHistRowView: View {
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(spoken)
+    }
+}
+
+// MARK: - [v25.601 職能雷達 v1b] 每一分的說明、走勢小折線、〔跟現在比〕（要退回這一件：刪到檔尾）
+
+/// 名字（空的不畫）＋下一行說明（.caption 灰、可換行；名字空、只有說明也畫）
+private struct CompHistLevelTexts: View {
+    let name: String
+    let detail: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            if !name.isEmpty {
+                Text(name)
+                    .font(.subheadline)
+            }
+            if let d = detail {
+                Text(d)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+}
+
+/// 「走勢」一節：小折線＋下面一行「4/30 … 11/30」＋（有換算過的點）一行說明
+private struct CompHistTrendBlock: View {
+    let trend: CompetencyTrendModel
+    let tint: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            CompHistTrendChart(trend: trend, tint: tint)
+            HStack {
+                Text(trend.firstDayText)
+                Spacer(minLength: 8)
+                Text(trend.lastDayText)
+            }
+            .font(.caption2)
+            .foregroundStyle(.secondary)
+            .accessibilityHidden(true)
+            if trend.hasConverted {
+                Text("空心的點是以前別的範圍評的，換算過")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.vertical, 4)
+    }
+}
+
+/// 小折線（Swift Charts）：線＋實心點；舊範圍換算過的點在實心點上再疊一個底色小點＝空心；目標畫點線 RuleMark
+private struct CompHistTrendChart: View {
+    let trend: CompetencyTrendModel
+    let tint: Color
+
+    /// 換算過的點（空心）
+    private var hollow: [CompetencyTrendPoint] {
+        trend.points.filter { !$0.sameRange }
+    }
+
+    /// 縱軸只標最低、最高兩個數
+    private var yTicks: [Double] {
+        [trend.low, trend.high]
+    }
+
+    /// 橫軸＝日子的整數（很大的數）：自己給範圍，不讓圖表從 0 開始；同一天的點左右各留 1 天
+    private var xDomain: ClosedRange<Double> {
+        let xs: [Double] = trend.points.map { $0.x }
+        let lo: Double = xs.min() ?? 0
+        let hi: Double = xs.max() ?? 0
+        if hi - lo < 1 { return (lo - 1)...(hi + 1) }
+        let pad: Double = (hi - lo) * 0.04
+        return (lo - pad)...(hi + pad)
+    }
+
+    private var yDomain: ClosedRange<Double> {
+        if trend.high > trend.low { return trend.low...trend.high }
+        return (trend.low - 1)...(trend.low + 1)
+    }
+
+    /// List 一列的底色（insetGrouped），空心點的「洞」用它
+    private var holeColor: Color {
+        Color(.secondarySystemGroupedBackground)
+    }
+
+    var body: some View {
+        Chart {
+            ForEach(trend.points) { p in
+                LineMark(x: .value("日", p.x), y: .value("分", p.y))
+                    .foregroundStyle(tint)
+                    .lineStyle(StrokeStyle(lineWidth: 2))
+            }
+            ForEach(trend.points) { p in
+                PointMark(x: .value("日", p.x), y: .value("分", p.y))
+                    .foregroundStyle(tint)
+                    .symbolSize(44)
+            }
+            ForEach(hollow) { p in
+                PointMark(x: .value("日", p.x), y: .value("分", p.y))
+                    .foregroundStyle(holeColor)
+                    .symbolSize(14)
+            }
+            if let ty = trend.targetY {
+                RuleMark(y: .value("目標", ty))
+                    .foregroundStyle(Color.primary.opacity(0.6))
+                    .lineStyle(StrokeStyle(lineWidth: 1.5, lineCap: .round, dash: [1, 3]))
+            }
+        }
+        .chartXAxis(.hidden)
+        .chartXScale(domain: xDomain)
+        .chartYScale(domain: yDomain)
+        .chartYAxis {
+            AxisMarks(position: .leading, values: yTicks)
+        }
+        .frame(height: 120)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(trend.accessibilityText)
+    }
+}
+
+/// 〔那一次｜跟現在比〕
+private struct CompHistModeBlock: View {
+    @Binding var compareNow: Bool
+
+    var body: some View {
+        Picker("看哪一種", selection: $compareNow) {
+            Text("那一次").tag(false)
+            Text("跟現在比").tag(true)
+        }
+        .pickerStyle(.segmented)
+        .padding(.horizontal, 20)
+    }
+}
+
+/// 〔跟現在比〕：一行說明＋現在的每一張卡（灰虛線＝那一天；iPad 兩欄）
+private struct CompHistCompareBlock: View {
+    let dayKey: String
+    let cards: [CompetencyChartModel]
+    let regular: Bool
+
+    /// 「實線是現在，灰色虛線是 4/30 那一天」
+    private var explain: String {
+        "實線是現在，灰色虛線是 " + CompetencyMath.shortDay(dayKey) + " 那一天"
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            Text(explain)
+                .font(.footnote)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.horizontal, 20)
+            CompHistGrid(cards: cards, regular: regular, showPrevious: true)
+        }
     }
 }

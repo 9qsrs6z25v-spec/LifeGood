@@ -22,6 +22,16 @@ import SwiftUI
 //   §13 每一格的評語不做：畫面上沒有評語；別台寫的評語原樣存回去（draft 帶著 comment）。
 // • 改舊紀錄：現在已停用的系統、項目照樣列出來，標頭／列名後面灰字「已停用」；「這次評」膠囊寫短名（chipTitle）。
 // 要退回這一版：還原這個檔到 69f6fa6（request.sessionId 那兩行是主控加的，要留）。
+//
+// [v25.601 職能雷達 v1b]（radar/build/v1b/brief.md §1-4～6、§1-11、§4 G2 7–11；judge §4.5、§13）
+// • 目標：openSession 時算 targetMarks（CompetencyMath.ratingTargetMarks，照這位現在的職等；沒職等、沒目標＝空），
+//   每一格下面「E2 目標 3 ✓」「E2 目標 3・差 1」「E2 目標 3」（ratingTargetRowText），底部多一行「E2 達標 10／12」
+//  （ratingTargetLine；算哪幾區跟 counts 同一條：新的一張只算勾了的區、改已經有的那一張算全部）。
+// • 每一分的說明（§13 出廠空、使用者自己打）：選中那一分有說明才在按鈕下面寫「能教人：…」／「4 分：…」
+//  （levelDetail＋levelDetailLine；超過 11 級、範圍跟等級表不一樣不寫）。VoiceOver 的值也接目標與說明。
+// • 日子轉換：fileprivate compRatingDate 刪掉，改叫 CompetencyMath.noonDate（sim 台北、洛杉磯對過）。
+// 要退回這一件：刪 targetMarks 與它在 openSession／footer 的兩行、CompRatingRowModel 的 targetText／detailLine、
+// CompRatingRowCaption 那兩段、CompRatingFooter.targetLine；noonDate 那一行可以留。
 
 /// 打開評分畫面的請求（sheet(item:) 用）
 struct CompetencyRatingRequest: Identifiable {
@@ -72,6 +82,8 @@ struct CompetencyRatingSheet: View {
     @State private var scrollTarget: CompetencyCellKey? = nil
     @State private var showPremiumAlert = false
     @State private var showDiscard = false
+    /// [v25.601 v1b] 每一格的目標（openSession 算；照這位現在的職等，沒職等、沒目標＝空）
+    @State private var targetMarks: [CompetencyCellKey: CompetencyTargetMark] = [:]
     @FocusState private var focusedKey: CompetencyCellKey?
     @FocusState private var noteFocused: Bool
 
@@ -194,8 +206,17 @@ struct CompetencyRatingSheet: View {
     private var footer: some View {
         let c: CompetencyFooterCounts = counts
         return CompRatingFooter(text: CompetencyMath.footerText(c),
+                                targetLine: targetLine,
                                 canSave: canSave,
                                 onSave: { save() })
+    }
+
+    /// [v25.601 v1b] 底部「E2 達標 10／12」：算哪幾區跟 counts 同一條（新的一張只算勾了的區；改已經有的那一張算全部，
+    /// 沒勾的區 effectiveDraft 原樣放回去）。沒職等、沒目標 nil
+    private var targetLine: String? {
+        guard !targetMarks.isEmpty else { return nil }
+        let secs: [CompetencyRatingSection] = editing == nil ? includedSections : sections
+        return CompetencyMath.ratingTargetLine(marks: targetMarks, sections: secs, draft: effectiveDraft)
     }
 
     // MARK: 算好給畫面的
@@ -367,19 +388,39 @@ struct CompetencyRatingSheet: View {
             let spoken: String = compRatingSpokenValue(cell: cell, level: level, carried: carried,
                                                        previous: ax.previous, range: sec.range)
             let invalid: String? = invalidNote(key, value: value, range: sec.range)
+            // [v25.601 v1b] 目標「E2 目標 3 ✓」、選中那一分的說明「能教人：…」（照上次的淡框也寫）
+            let target: String? = targetMarks[key].map {
+                CompetencyMath.ratingTargetRowText($0, value: value, na: na, range: sec.range)
+            }
+            var detail: String? = nil
+            if namesOK, !na, let v = value {
+                detail = detailLine(scale: scale, itemId: ax.id, value: v, level: level, range: sec.range)
+            }
             // VoiceOver 也念紅字（整列是 children: .ignore，只念 a11yValue）
             var spokenAll: String = spoken
             if let w = invalid { spokenAll += "，" + w }
+            // [v25.601 v1b 審查修] VoiceOver 不念「✓」的符號名稱：念「E2 目標 3，達標」（跟雷達那一句一樣）
+            if let tx = target { spokenAll += "，" + tx.replacingOccurrences(of: " ✓", with: "，達標") }
+            if let dl = detail { spokenAll += "，" + dl }
             let row = CompRatingRowModel(id: key, name: ax.name, sectionTitle: sec.title, isNew: ax.isNew,
                                          archived: ax.archived,
                                          range: sec.range, tint: tint, value: value, na: na,
                                          faint: carried && !isConfirmed, carriedConfirmed: carried && isConfirmed,
                                          levelName: level, previousText: ax.previousText,
                                          previousNearest: ax.previousNearest, clampNote: clampNotes[key],
-                                         invalidNote: invalid, a11yValue: spokenAll)
+                                         invalidNote: invalid, a11yValue: spokenAll,
+                                         targetText: target, detailLine: detail)
             out.append(row)
         }
         return out
+    }
+
+    /// [v25.601 v1b] 選中那一分的說明一行（項目自己的蓋過等級表的；§13 沒寫說明 nil）
+    private func detailLine(scale: CompetencyScale?, itemId: UUID, value v: Int, level: String?,
+                            range: CompetencyRange) -> String? {
+        let item: CompetencyItem? = lifeStore.competencySetup.item(itemId)
+        guard let d = CompetencyMath.levelDetail(scale: scale, item: item, value: v, range: range) else { return nil }
+        return CompetencyMath.levelDetailLine(value: v, name: level, detail: d)
     }
 
     /// [v25.600 v1a-2] 數字欄打了不是數字：那一格下面紅字「請打 0～100 的整數」（打一樣的、會改的、空白都沒有）
@@ -404,7 +445,8 @@ struct CompetencyRatingSheet: View {
         dayKey = key
         // 今天就用現在（中午 12 點在上午會晚於 DatePicker 的上限 ...Date()）；以前的日子用那天中午
         //（那一張的日子在這台時區晚於今天時也用現在：DatePicker 不能超過 ...Date()）
-        if key < t, let d = compRatingDate(key) { date = d }
+        // [v25.601 v1b] compRatingDate 搬進 CompetencyMath.noonDate（sim 台北、洛杉磯對過）
+        if key < t, let d = CompetencyMath.noonDate(key) { date = d }
         openedTrait = lifeStore.competencySetup.traitRange
         openedSkill = lifeStore.competencySetup.skillRange
         let e: CompetencySession? = target ?? CompetencyMath.sessionOn(key, sessions: sessions)
@@ -442,6 +484,10 @@ struct CompetencyRatingSheet: View {
         let kept: [CompetencyCellKey: CompetencyDraftCell] = keepDraft ? keptDraft(for: plan) : [:]
         editing = e
         sections = plan
+        // [v25.601 v1b] 每一格的目標（換到這一張的範圍；照這位現在的職等）。要退回這一件：刪這一行
+        targetMarks = CompetencyMath.ratingTargetMarks(setup: lifeStore.competencySetup,
+                                                       grade: lifeStore.competencyCurrentGrade(for: request.subordinateId),
+                                                       sections: plan)
         if e == nil {
             // 新的一張：ratingPlan 用的是設定現在的範圍 → 存檔的範圍跟畫面上這一份一樣
             // （一打開時就是打開時的範圍；只有換日子時別台剛好改了範圍才會不同）
@@ -703,17 +749,7 @@ struct CompetencyRatingSheet: View {
 }
 
 // MARK: - 小函式（純；下一版主控再搬進 CompetencyMath＋sim）
-
-/// 「2026-10-30」→ 那一天中午（DatePicker 用；中午避開日光節約換日）
-fileprivate func compRatingDate(_ key: String) -> Date? {
-    guard let p = CompetencyMath.parseDay(key) else { return nil }
-    var c = DateComponents()
-    c.year = p.y
-    c.month = p.m
-    c.day = p.d
-    c.hour = 12
-    return Calendar.current.date(from: c)
-}
+// [v25.601 v1b] 「2026-10-30」→ 那一天中午的那一支已經搬進 CompetencyMath.noonDate
 
 /// VoiceOver 的值：「4 分，上次 2 分」「4 分，照上次」「未評，上次 2 分」「不適用」
 fileprivate func compRatingSpokenValue(cell: CompetencyDraftCell?, level: String?, carried: Bool,
@@ -762,8 +798,19 @@ private struct CompRatingRowModel: Identifiable {
     /// [v25.600 v1a-2] 數字欄打了不是數字：「請打 0～100 的整數」（紅字）
     let invalidNote: String?
     let a11yValue: String
+    /// [v25.601 v1b]「E2 目標 3 ✓」「E2 目標 3・差 1」「E2 目標 3」（沒職等、沒目標 nil）
+    let targetText: String?
+    /// [v25.601 v1b] 選中那一分的說明「能教人：…」「4 分：…」（§13 沒寫說明 nil）
+    let detailLine: String?
 
     var usesButtons: Bool { range.usesButtons }
+    /// [v25.601 v1b] 目標那一行的顏色：達標（結尾 ✓）綠、有差橘、沒評灰
+    var targetColor: Color {
+        guard let t = targetText else { return Color.secondary }
+        if t.hasSuffix("✓") { return Color.green }
+        if t.contains("差") { return Color.orange }
+        return Color.secondary
+    }
     var buttonRows: [[Int]] { CompetencyMath.buttonRows(range) }
     var isSet: Bool { value != nil || na }
     /// 「Gas System，緊急應變」
@@ -1157,6 +1204,13 @@ private struct CompRatingRowCaption: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
+            // [v25.601 v1b] 選中那一分的說明（有寫才有）
+            if let dl = model.detailLine {
+                Text(dl)
+                    .font(.caption)
+                    .foregroundStyle(model.tint)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if model.na {
                 Text("不適用（點一個分數就改成評分）")
                     .font(.caption2)
@@ -1166,6 +1220,12 @@ private struct CompRatingRowCaption: View {
                 Text(p)
                     .font(.caption2)
                     .foregroundStyle(.secondary)
+            }
+            // [v25.601 v1b]「E2 目標 3 ✓」「E2 目標 3・差 1」
+            if let tx = model.targetText {
+                Text(tx)
+                    .font(.caption2)
+                    .foregroundStyle(model.targetColor)
             }
             if let c = model.clampNote {
                 Text(c)
@@ -1383,6 +1443,8 @@ private struct CompRatingSliderStatus: View {
 
 private struct CompRatingFooter: View {
     let text: String
+    /// [v25.601 v1b]「E2 達標 10／12」（沒有 nil）
+    let targetLine: String?
     let canSave: Bool
     let onSave: () -> Void
 
@@ -1390,11 +1452,20 @@ private struct CompRatingFooter: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Text(text)
-                .font(.footnote.weight(.medium))
-                .foregroundStyle(.secondary)
-                .lineLimit(2)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(text)
+                    .font(.footnote.weight(.medium))
+                    .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                if let t = targetLine {
+                    Text(t)
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(CompetencyPalette.trait)
+                        .lineLimit(1)
+                        .minimumScaleFactor(0.8)
+                }
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
             Button(action: onSave) {
                 Text("儲存")
                     .font(.subheadline.weight(.semibold))

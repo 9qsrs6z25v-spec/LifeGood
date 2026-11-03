@@ -102,6 +102,17 @@ struct CompetencyAxisModel: Equatable, Identifiable {
     let carriedFrom: String?
     /// 項目已停用（已轉出的卡片才會出現）
     let archived: Bool
+    // [v25.601 職能雷達 v1b] 目標（照職等；judge §3.8 達標、§3.2 目標點線）。沒有目標全部 nil。要退回這一件：刪這五行
+    /// 目標的比例（畫點線、橫條刻線）
+    var targetT: Double? = nil
+    /// 目標換到現在範圍「3」「≈5.5」
+    var targetValueText: String? = nil
+    /// 橫條下面「目標 3 ✓」「目標 3・差 1」「目標 3・未評」（不適用 nil）
+    var targetText: String? = nil
+    /// 達標了沒（沒評 false；不適用 nil）
+    var targetMet: Bool? = nil
+    /// 差幾級（現在範圍；達標 0；沒評、不適用 nil）
+    var targetGap: Double? = nil
 }
 
 /// 格線一圈
@@ -158,6 +169,17 @@ struct CompetencyChartModel: Equatable, Identifiable {
     let latestDay: String?
     /// [v25.600 v1a-2] 這張卡自己的上一次「上一次 4/30」「上一次 12/15 之前」（沒有上一次 nil）
     let previousDayText: String?
+    // [v25.601 職能雷達 v1b] 目標、指定日期。要退回這一件：刪這幾行
+    /// 有任何一軸有目標（畫點線）
+    var hasTarget: Bool = false
+    /// 圖例「目標 E2」
+    var legendTarget: String? = nil
+    /// 這張卡有目標、不是不適用的格子；其中達標的；其中沒評的
+    var targetTotal: Int = 0
+    var targetAchieved: Int = 0
+    var targetUnrated: Int = 0
+    /// 疊指定日期（評分紀錄明細〔跟現在比〕）：灰虛線＝那一天的樣子（previousT 就是那一天的）
+    var compareDay: String? = nil
 }
 
 /// 摘要卡（judge §4.3①；不寫 0–100）
@@ -202,6 +224,8 @@ struct CompetencyTabModel: Equatable {
     let skippedLineText: String
     /// 評分紀錄（新的在前；同一天合成一列）
     let records: [CompetencyRecordRow]
+    /// [v25.601 職能雷達 v1b] 職等目標（整個設定一個目標都沒有 nil：什麼都不出現）。要退回這一件：刪這一行
+    var targets: CompetencyTargetSummary? = nil
 }
 
 /// 評分畫面一格的草稿
@@ -671,9 +695,12 @@ enum CompetencyMath {
     /// ↔ card：axes＝這張卡的軸（照順序）；archivedIds＝其中已停用的項目（已轉出的卡片、評分紀錄的唯讀雷達才會帶）。
     /// [v25.600 v1a-2] scale＝這一組現在的等級表（每一分的名字；沒有就 nil）；snapshotDay 有值＝評分紀錄的唯讀雷達
     ///（sessions 只放那一張、range＝那一張的範圍：畫當時的樣子，不疊上一次、名字用那一張存的）
+    /// [v25.601 v1b] targets 有值＝疊這個職等的目標（點線、橫條刻線、達標）；compareDay 有值＝灰虛線改成「那一天的樣子」
+    ///（評分紀錄明細〔跟現在比〕；不疊上一次）。兩個都是 nil＝跟 v1a-2 一模一樣
     static func chartModel(group: CompetencyGroup, axes: [CompetencyItem], archivedIds: Set<UUID>,
                            sessions: [CompetencySession], range: CompetencyRange,
-                           scale: CompetencyScale? = nil, snapshotDay: String? = nil) -> CompetencyChartModel {
+                           scale: CompetencyScale? = nil, snapshotDay: String? = nil,
+                           targets: CompetencyChartTargets? = nil, compareDay: String? = nil) -> CompetencyChartModel {
         let gid: UUID = group.id
         let n: Int = axes.count
         let style: CompetencyChartStyle = chartStyle(axisCount: n)
@@ -681,7 +708,12 @@ enum CompetencyMath {
         let curCells: [CompetencyCellValue?] = axes.map { now[CompetencyCellKey(groupId: gid, itemId: $0.id)] }
         let latest: String? = curCells.compactMap { $0?.dayKey }.max()
         var prevCells: [CompetencyCellValue?] = Array(repeating: nil, count: n)
-        if let d = latest, snapshotDay == nil {
+        let compare: String? = snapshotDay == nil ? compareDay : nil
+        if let cd = compare {
+            // [v25.601 v1b] 跟指定日期比：那一天（含）之前每一格最後一筆
+            let asOf = latestCells(sessions, through: cd)
+            prevCells = axes.map { asOf[CompetencyCellKey(groupId: gid, itemId: $0.id)] }
+        } else if let d = latest, snapshotDay == nil {
             let before = latestCells(sessions, before: d)
             prevCells = axes.map { before[CompetencyCellKey(groupId: gid, itemId: $0.id)] }
         }
@@ -713,10 +745,15 @@ enum CompetencyMath {
                     lText = snapshotLevelText(cell)
                 }
             }
-            let model = CompetencyAxisModel(id: item.id, name: item.displayName, label: label, state: state,
+            var model = CompetencyAxisModel(id: item.id, name: item.displayName, label: label, state: state,
                                             t: c?.ratio, valueText: vText, originalText: oText, levelText: lText,
                                             previousT: p?.ratio, previousText: pText, deltaText: dText,
                                             carriedFrom: carriedFrom, archived: isArchived)
+            // [v25.601 v1b] 這一格的目標（那一格 → 那個系統 → 這一區每項；已停用的軸不疊）
+            if let tg = targets, !isArchived,
+               let rt = resolveTarget(tg.table, gradeId: tg.grade.id, groupId: gid, itemId: item.id, fallback: range) {
+                applyTarget(&model, rt, cell: c, range: range)
+            }
             axisModels.append(model)
         }
 
@@ -729,6 +766,8 @@ enum CompetencyMath {
         let dateLine: String
         if let snap = snapshotDay {
             dateLine = shortDay(snap)
+        } else if let cd = compare {
+            dateLine = latest.map { shortDay($0) + " 比 " + shortDay(cd) } ?? "還沒評過"
         } else if let d = latest {
             if !hasPrev {
                 dateLine = "第一次評分"
@@ -741,7 +780,9 @@ enum CompetencyMath {
             dateLine = "還沒評過"
         }
         let legendPrev: String?
-        if let d = latest, hasPrev {
+        if let cd = compare {
+            legendPrev = hasPrev ? shortDay(cd) : nil
+        } else if let d = latest, hasPrev {
             legendPrev = prevDays.count == 1 ? shortDay(prevDays[0]) : shortDay(d) + " 之前"
         } else {
             legendPrev = nil
@@ -756,21 +797,37 @@ enum CompetencyMath {
 
         var avgText: String? = nil
         if let a = avg { avgText = "平均 " + oneDecimalText(round1(value(atRatio: a, range))) }
-        let a11y: String = accessibilityText(title: title, axes: axisModels, average: avg, range: range)
+        var a11y: String = accessibilityText(title: title, axes: axisModels, average: avg, range: range)
+        // [v25.601 v1b] 目標：數幾格達標（不適用、已停用不算）
+        let tAxes: [CompetencyAxisModel] = axisModels.filter { $0.targetT != nil && $0.state != .na && !$0.archived }
+        let tAchieved: Int = tAxes.filter { $0.targetMet == true }.count
+        let tUnrated: Int = tAxes.filter { $0.state == .unrated }.count
+        let hasTarget: Bool = axisModels.contains { $0.targetT != nil }
+        let legendTarget: String? = (hasTarget && targets != nil) ? "目標 " + (targets?.grade.short ?? "") : nil
+        if let lt = legendTarget, !tAxes.isEmpty {
+            a11y += lt + "：達標 \(tAchieved)／\(tAxes.count)。"
+        }
         let headline: String = title + "・" + dateLine
         let ringList: [CompetencyRing] = rings(range)
         let isRadar: Bool = style == .radar || style == .radarShort
         let draws: Bool = rated >= 3 && isRadar
         let legendNow: String? = latest.map { shortDay($0) }
         let carriedLine: String? = carried.isEmpty ? nil : carried.joined(separator: "、")
-        let prevDayText: String? = legendPrev.map { "上一次 " + $0 }
-        return CompetencyChartModel(
+        let prevDayText: String? = legendPrev.map { (compare == nil ? "上一次 " : "比 ") + $0 }
+        var out = CompetencyChartModel(
             id: gid, isTrait: group.isTrait, title: title, dateLine: dateLine, headline: headline,
             averageText: avgText, style: style, axes: axisModels, rings: ringList, range: range,
             ratedCount: rated, drawsPolygon: draws, hasPrevious: hasPrev, legendCurrent: legendNow,
             legendPrevious: legendPrev, note: note, carriedNote: carriedLine, accessibilityText: a11y,
             neverRated: latest == nil, averageRatio: avg, previousAverageRatio: prevAvg,
             filledCount: filled, axisCount: n, latestDay: latest, previousDayText: prevDayText)
+        out.hasTarget = hasTarget
+        out.legendTarget = legendTarget
+        out.targetTotal = tAxes.count
+        out.targetAchieved = tAchieved
+        out.targetUnrated = tUnrated
+        out.compareDay = compare
+        return out
     }
 
     /// ↔ a11y：「Gas System，3 項，平均 4 分。P&ID 4 分，跟上次一樣；緊急應變 4 分，上次 2 分；值班技能 4 分，上次 3 分。」
@@ -792,6 +849,16 @@ enum CompetencyMath {
                 if let pt = ax.previousText {
                     let same: Bool = pt == (ax.valueText ?? "")
                     p += same ? "，跟上次一樣" : ("，上次 " + pt + " 分")
+                }
+            }
+            // [v25.601 v1b] 目標差（VoiceOver 一句話；不用 accessibilityChartDescriptor，brief 寫明）
+            if ax.state != .na, let tv = ax.targetValueText {
+                if ax.targetMet == true {
+                    p += "，目標 " + tv + "，達標"
+                } else if let g = ax.targetGap {
+                    p += "，目標 " + tv + "，差 " + numberText(g)
+                } else {
+                    p += "，目標 " + tv
                 }
             }
             parts.append(p)
@@ -837,27 +904,49 @@ enum CompetencyMath {
     /// ↔ tab：〔職能〕分頁整頁
     static func tabModel(setup: CompetencySetupBook, ratings: CompetencyRatingBook, subordinateId: UUID,
                          archivedPerson: Bool, sessions: [CompetencySession], today: String) -> CompetencyTabModel {
+        tabModel(setup: setup, ratings: ratings, subordinateId: subordinateId, archivedPerson: archivedPerson,
+                 sessions: sessions, today: today, grades: CompetencyGradeContext.empty, mode: .off)
+    }
+
+    /// ↔ tab（v1b）：[v25.601 v1b] grades＝職等表＋這位現在的職等；mode＝疊目前職等／下一個職等／不疊（摘要卡的選單，這台記住）。
+    /// grades 空、mode .off＝跟 v1a-2 一模一樣（targets nil）
+    static func tabModel(setup: CompetencySetupBook, ratings: CompetencyRatingBook, subordinateId: UUID,
+                         archivedPerson: Bool, sessions: [CompetencySession], today: String,
+                         grades: CompetencyGradeContext, mode: CompetencyTargetMode) -> CompetencyTabModel {
         let groups: [CompetencyGroup] = visibleGroups(setup: setup, subordinateId: subordinateId,
                                                       archivedPerson: archivedPerson, sessions: sessions)
+        let table: [CompetencyTargetKey: CompetencyTarget] = targetTable(setup)
+        let pick: CompetencyGradeRef? = targetGrade(grades, mode: mode, table: table)
+        let chartTargets: CompetencyChartTargets? = pick.map { CompetencyChartTargets(grade: $0, table: table) }
         var cards: [CompetencyChartModel] = []
         for g in groups {
             let ax = cardAxes(group: g, setup: setup, archivedPerson: archivedPerson, sessions: sessions)
             cards.append(chartModel(group: g, axes: ax.axes, archivedIds: ax.archived, sessions: sessions,
-                                    range: setup.range(forGroup: g.id), scale: setup.scaleFor(group: g.id)))
+                                    range: setup.range(forGroup: g.id), scale: setup.scaleFor(group: g.id),
+                                    targets: chartTargets))
         }
         let skipped: Set<UUID> = setup.skippedGroupIds(subordinateId)
         let skippedNames: [String] = setup.activeSystems.filter { skipped.contains($0.id) }.map { $0.displayName }
         let lastDay: String? = sessions.filter { $0.isLive && !$0.liveScores.isEmpty }.map { $0.dayKey }.max()
         let summary = summaryModel(cards: cards, setup: setup, lastDay: lastDay, today: today)
-        return CompetencyTabModel(configured: setup.isConfigured,
-                                  readOnly: setup.isReadOnlyHere || ratings.isReadOnlyHere,
-                                  summary: summary, cards: cards, skippedNames: skippedNames,
-                                  neverRated: lastDay == nil,
-                                  hasAnyPrevious: hasAnyPrevious(cards),
-                                  overlayLabel: overlayLabel(cards),
-                                  previousDayText: previousDayText(cards),
-                                  skippedLineText: skippedLineText(skippedNames),
-                                  records: recordRows(sessions: sessions, setup: setup))
+        let hasContext: Bool = !grades.grades.isEmpty || grades.currentId != nil
+        let records: [CompetencyRecordRow] = hasContext
+            ? recordRows(sessions: sessions, setup: setup, currentGradeId: grades.currentId)
+            : recordRows(sessions: sessions, setup: setup)
+        var m = CompetencyTabModel(configured: setup.isConfigured,
+                                   readOnly: setup.isReadOnlyHere || ratings.isReadOnlyHere,
+                                   summary: summary, cards: cards, skippedNames: skippedNames,
+                                   neverRated: lastDay == nil,
+                                   hasAnyPrevious: hasAnyPrevious(cards),
+                                   overlayLabel: overlayLabel(cards),
+                                   previousDayText: previousDayText(cards),
+                                   skippedLineText: skippedLineText(skippedNames),
+                                   records: records)
+        if hasContext {
+            m.targets = targetSummary(cards: cards, table: table, grades: grades, mode: mode, pick: pick,
+                                      setup: setup, sessions: sessions)
+        }
+        return m
     }
 
     /// ↔ summary：人格特質＝人格那張卡的平均；本職學能＝要學的、啟用的、至少評過一格的系統，每個系統一樣重；覆蓋率一定配著
@@ -1208,6 +1297,8 @@ struct CompetencyRecordRow: Equatable, Identifiable {
     let sessionIds: [UUID]
     /// VoiceOver 一句
     let accessibilityText: String
+    /// [v25.601 v1b] 那一張的職等跟現在不一樣：「那時 E2 工程師」（一樣、沒有 nil）
+    var gradeNote: String? = nil
 }
 
 /// 一次評分的明細（唯讀雷達畫當時的樣子）
@@ -1249,6 +1340,8 @@ struct CompetencyLevelRow: Equatable, Identifiable {
     let name: String
     /// 現在是這一分
     let isCurrent: Bool
+    /// [v25.601 v1b] 這一分的說明（項目自己的蓋過等級表的；沒有 nil）
+    var detail: String? = nil
 }
 
 /// 點一格的歷史 sheet（.medium；§13：沒有評語）
@@ -1265,6 +1358,11 @@ struct CompetencyCellHistoryModel: Equatable {
     let otherLine: String?
     /// 「這一項已停用（分數留著）」「這個系統拿掉了這一項（分數留著）」
     let archivedNote: String?
+    // [v25.601 v1b] 要退回這一件：刪這兩行
+    /// 「E2 目標 3（差 1）」「E2 目標 3 ✓」（沒設職等、沒目標 nil）
+    var targetLine: String? = nil
+    /// 三次以上才有：小折線（Swift Charts LineMark；舊範圍的點換算後空心）
+    var trend: CompetencyTrendModel? = nil
 }
 
 /// 每一分的名字範本（〔套用範本 ▾〕；§13：出廠不套，使用者自己選）
@@ -1273,6 +1371,8 @@ struct CompetencyLevelTemplate: Equatable, Identifiable {
     /// 「OJT 五級」
     let title: String
     let names: [String]
+    /// [v25.601 v1b] 每一分的說明（〔套用範本〕才填；§13 出廠空）
+    var details: [String] = []
 
     /// 選單上的字「OJT 五級（看過…專家）」
     var menuTitle: String {
@@ -1656,9 +1756,14 @@ extension CompetencyMath {
 
     /// ↔ templates
     static let levelTemplates: [CompetencyLevelTemplate] = [
-        CompetencyLevelTemplate(id: "ojt", title: "OJT 五級", names: ["看過", "指導下做", "能獨立", "能教人", "專家"]),
-        CompetencyLevelTemplate(id: "trait5", title: "人格五級", names: ["很少", "偶爾", "穩定", "主動", "帶動"]),
-        CompetencyLevelTemplate(id: "iluo", title: "ILUO 四級", names: ["在訓練", "能獨立", "能帶人", "訂標準"])
+        CompetencyLevelTemplate(id: "ojt", title: "OJT 五級", names: ["看過", "指導下做", "能獨立", "能教人", "專家"],
+                                details: ["看過別人做，知道在做什麼", "有人在旁邊指導可以做", "自己做得來，常見狀況會處理",
+                                          "能帶新人演練、當帶訓者", "能處理異常、訂標準"]),
+        CompetencyLevelTemplate(id: "trait5", title: "人格五級", names: ["很少", "偶爾", "穩定", "主動", "帶動"],
+                                details: ["很少表現出來", "偶爾表現出來", "大多時候做得到", "會主動做、不用提醒",
+                                          "能帶動身邊的人一起做"]),
+        CompetencyLevelTemplate(id: "iluo", title: "ILUO 四級", names: ["在訓練", "能獨立", "能帶人", "訂標準"],
+                                details: ["還在學，要有人帶", "可以自己做", "會處理異常、能教別人", "能訂標準、改流程"])
     ]
 
     /// ↔ names_allowed：≤ 11 級才設每一分的名字（0–100 這種只用數字）
@@ -1741,13 +1846,21 @@ extension CompetencyMath {
     }
 
     /// ↔ should_ask_names：改範圍按〔改〕之後要不要接著問「每一分的名字要重新設嗎？」（舊範圍裡已經有名字、新範圍 ≤ 11 級才問）
+    /// [v25.601 v1b 裁定修] 只寫了說明、沒有名字也要問（不然 1–5 的說明原樣套在 1–10 的同一個數字上）。
+    /// 要退回這一件：拿掉 `|| hasLevelDetails(scale, in: old)`
     static func shouldAskNames(scale: CompetencyScale?, from old: CompetencyRange, to new: CompetencyRange) -> Bool {
-        old != new && hasLevelNames(scale, in: old) && namesAllowed(new)
+        old != new && (hasLevelNames(scale, in: old) || hasLevelDetails(scale, in: old)) && namesAllowed(new)
     }
 
-    /// ↔ names_question
-    static func namesQuestionText(from old: CompetencyRange, to new: CompetencyRange) -> String {
-        "每一分的名字是照 " + old.text + " 設的。改成 " + new.text + " 後要重新設嗎？"
+    /// ↔ has_level_details：[v25.601 v1b 裁定修] 等級表在這個範圍裡有沒有任何一分寫了說明（> 11 級一律沒有）
+    static func hasLevelDetails(_ scale: CompetencyScale?, in r: CompetencyRange) -> Bool {
+        !currentLevelDetails(scale?.levels, range: r).isEmpty
+    }
+
+    /// ↔ names_question（[v25.601 v1b 裁定修] withDetails＝舊範圍有說明時寫「名字、說明」；預設跟 v1a-2 一樣）
+    static func namesQuestionText(from old: CompetencyRange, to new: CompetencyRange, withDetails: Bool = false) -> String {
+        let what: String = withDetails ? "每一分的名字、說明" : "每一分的名字"
+        return what + "是照 " + old.text + " 設的。改成 " + new.text + " 後要重新設嗎？"
     }
 
     // MARK: 系統頁（judge §3.5、§4.4）
@@ -1935,5 +2048,1243 @@ extension CompetencyMath {
         if invalidInput { return false }
         if c.editing { return c.changed + c.carried + c.removed > 0 || noteChanged || pendingChange }
         return c.changed + c.carried > 0 || pendingChange
+    }
+}
+
+// MARK: - [v25.601 職能雷達 v1b] 職等目標、每一分的說明、走勢、跟指定日期比、重名合併、日子轉 Date
+//（radar/judge.md §7 分版表 v1b、§3.3 目標換算、§3.6 目標照職等、§3.8 達標與差距、§4.4 職等目標與重名偵測、§4.5、§4.6、§5、§13；
+//  radar/build/v1b/brief.md §2；sim_v1b.py 一個函式一個函式對照，↔ 後面是 sim 的名字）
+// • 目標掛 GradeTitle.id（使用者自己的職等）；App 不自動寫目標（更新後兩台各寫一份會互蓋）：只有使用者按〔用建議值〕、Stepper 才寫。
+// • 一格的目標：那一格 → 那個系統 → 這一區每項（人格特質沒有「系統」那一層，照樣查得到）。同一層兩筆（兩台各訂一次）取後改的。
+// • 目標存「設目標當時的範圍」；改範圍後照比例換算顯示（≈5.5），使用者選了才換成新範圍的整數。原始分數一個字都不動。
+// • 職等沒設：不畫目標，一行〔設定職等〕；職等被刪（人身上還是舊 id）：顯示快照字、不套用。
+// • 每一分的說明：項目自己的（levelDetails）蓋過等級表的；跟名字一樣只在 ≤ 11 級、範圍跟等級表一樣時才有（§13）。
+// • 沒有新的同步鍵、Competency.swift 一行都沒動。通知、小工具、手錶、鎖定畫面一個字都不碰。
+
+/// 職等（照職等表順序：職等字數字感知排序，跟 GradeTitleView 一樣；同字再照職稱、代號）
+struct CompetencyGradeRef: Equatable, Identifiable {
+    let id: UUID
+    /// 「E2」（職等字空的時候＝label）
+    let short: String
+    /// 「E2 工程師」
+    let label: String
+    /// 職等字（比對 E2／E3 用；沒有空字串）
+    let grade: String
+}
+
+/// 一位同仁的職等（目標用）
+struct CompetencyGradeContext: Equatable {
+    /// 職等表（照順序）
+    let grades: [CompetencyGradeRef]
+    /// 這位現在的職等（nil＝沒設；可能是已經刪掉的 id——刪職等時 id 照舊留在人身上）
+    let currentId: UUID?
+
+    static let empty = CompetencyGradeContext(grades: [], currentId: nil)
+}
+
+/// 摘要卡「疊：目標」的選單（這台記住：@AppStorage("competency.targetMode")）
+enum CompetencyTargetMode: String, Equatable {
+    /// 目前職等
+    case current
+    /// 下一個職等（升等前看差距）
+    case next
+    /// 不疊
+    case off
+}
+
+/// 目標的一層（職等 × 區 × 組 × 項目）：組、項目都 nil＝這一區每項；只有組＝那個系統每項；都有＝那一格
+struct CompetencyTargetKey: Hashable {
+    let gradeId: UUID
+    /// "trait"／"skill"
+    let scope: String
+    let groupId: UUID?
+    let itemId: UUID?
+}
+
+/// 一格查到的目標
+struct CompetencyResolvedTarget: Equatable {
+    let target: CompetencyTarget
+    /// 目標分（照設目標當時的範圍）
+    let level: Int
+    /// 設目標當時的範圍
+    let range: CompetencyRange
+    /// "cell"／"group"／"area"
+    let layer: String
+
+    var ratio: Double { CompetencyMath.ratio(level, range) }
+}
+
+/// 一張卡要疊的目標（chartModel 用）
+struct CompetencyChartTargets: Equatable {
+    let grade: CompetencyGradeRef
+    let table: [CompetencyTargetKey: CompetencyTarget]
+}
+
+/// 差距清單一列（由大到小）
+struct CompetencyGapRow: Equatable, Identifiable {
+    /// 「組 id|項目 id」
+    let id: String
+    let groupId: UUID
+    let itemId: UUID
+    /// 「Chemical System・緊急應變」
+    let title: String
+    /// 「2 → 3（差 1）」
+    let detail: String
+    /// 差幾級（現在範圍）
+    let gap: Double
+}
+
+/// 〔職能〕分頁的職等目標（摘要卡、差距清單）
+struct CompetencyTargetSummary: Equatable {
+    let mode: CompetencyTargetMode
+    /// 這次對照的職等（沒有職等、職等被刪 nil）
+    let grade: CompetencyGradeRef?
+    /// 疊的膠囊「目標 E2」（沒有職等、職等被刪 nil：膠囊不出現）
+    let chipTitle: String?
+    /// 選單兩項「目前職等 E2」「下一個職等 E3」（沒有下一個 nil）
+    let currentOptionTitle: String?
+    let nextOptionTitle: String?
+    /// 「E2 達標 10／12」（不疊、這個職等沒訂目標 nil）
+    let achievedText: String?
+    /// 「離 E3 還差 7 格（差 8 級）」「E2 全部達標」
+    let gapCountText: String?
+    /// 「未評 2 格」
+    let unratedText: String?
+    /// 差距清單（由大到小；沒評的不列）
+    let gapRows: [CompetencyGapRow]
+    /// 沒設職等：「設定職等後才有目標」（畫面配〔設定職等〕）
+    let noGradeLine: String?
+    /// 職等被刪：「職等「E2 工程師」已經刪掉，目標不套用」
+    let deletedGradeLine: String?
+    /// 這個職等還沒訂目標：「E3 還沒訂目標（設定 → 職能項目 → 職等目標）」
+    let noTargetLine: String?
+}
+
+/// 評分畫面一格的目標（換到這一張的範圍）
+struct CompetencyTargetMark: Equatable {
+    /// 最接近的那一級（按鈕下面標小三角形用）
+    let level: Int
+    /// 換到這一張範圍的目標（可能是小數）
+    let value: Double
+    let ratio: Double
+    /// 「E2」
+    let gradeShort: String
+    /// 「E2 目標 3」
+    let text: String
+}
+
+/// 〔用建議值〕一個職等（照範圍換算：1–5 的 E2＝3、E3＝4）
+struct CompetencySuggestedTarget: Equatable, Identifiable {
+    /// 職等 id
+    let id: UUID
+    let label: String
+    let short: String
+    let traitLevel: Int
+    let skillLevel: Int
+}
+
+/// 設定「職等目標」一節的一列
+struct CompetencyGradeTargetRow: Equatable, Identifiable {
+    /// 職等 id
+    let id: UUID
+    /// 「E2 工程師」；已刪除「E2 工程師（已刪除）」
+    let title: String
+    /// 「人格 3｜本職 3」「人格 3｜本職 3・另外 1 項不同」「還沒訂目標」
+    let summary: String
+    /// 職等表裡已經沒有（只顯示、不套用；可以〔刪掉這組目標〕）
+    let deleted: Bool
+    let hasTargets: Bool
+}
+
+/// 職等目標編輯頁的一列
+struct CompetencyTargetEditRow: Equatable, Identifiable {
+    /// 「scope|組|項目」
+    let id: String
+    let scope: String
+    let groupId: UUID?
+    let itemId: UUID?
+    /// 「每項」「Gas System 每項」「緊急應變」
+    let title: String
+    /// 這一層自己訂的（換到現在範圍、四捨五入；nil＝跟上一層）
+    let ownLevel: Int?
+    /// 現在套用的「3」「≈5.5」「—」（沒有任何一層 —）
+    let effectiveText: String
+    /// 跟上一層不同（藍字）
+    let overridden: Bool
+    /// Stepper 從哪裡開始（現在套用的那一級；都沒有＝範圍中間）
+    let startLevel: Int
+    /// 現在的範圍
+    let range: CompetencyRange
+    /// 0＝這一區、1＝系統、2＝項目
+    let depth: Int
+}
+
+/// 職等目標編輯頁的一節
+struct CompetencyTargetEditSection: Equatable, Identifiable {
+    /// "trait"／"skill"／系統 id
+    let id: String
+    let title: String
+    let rows: [CompetencyTargetEditRow]
+}
+
+/// 改範圍時「目標要一起換嗎」的一個選項
+struct CompetencyRetargetChoice: Equatable, Identifiable {
+    /// "up"／"down"／"exact"／"keep"
+    let id: String
+    /// 「改，目標換成 6、8（進位）」
+    let title: String
+    /// 目標 id → 新範圍的整數（keep 空）
+    let levels: [UUID: Int]
+}
+
+/// 改範圍時有目標才有
+struct CompetencyRetargetPlan: Equatable {
+    /// 「目標：E2 3 → ≈5.5、E3 4 → ≈7.8」
+    let message: String
+    let choices: [CompetencyRetargetChoice]
+}
+
+/// 點一格的小折線一點
+struct CompetencyTrendPoint: Equatable, Identifiable {
+    /// 評分 id
+    let id: UUID
+    let dayKey: String
+    /// 日子的整數（橫軸）
+    let x: Double
+    /// 換到現在範圍的分數（縱軸）
+    let y: Double
+    /// 那一張的範圍跟現在一樣（實心）；不一樣＝換算過（空心）
+    let sameRange: Bool
+}
+
+/// 點一格的小折線（三次以上才有；只在 App 裡）
+struct CompetencyTrendModel: Equatable {
+    /// 舊的在前
+    let points: [CompetencyTrendPoint]
+    let low: Double
+    let high: Double
+    /// 目標（換到現在範圍；沒有 nil）
+    let targetY: Double?
+    /// 「4/30」「11/30」
+    let firstDayText: String
+    let lastDayText: String
+    /// 有換算過的點：圖下一行「空心＝舊範圍換算」
+    let hasConverted: Bool
+    /// 「走勢：4/30 2 分、10/30 4 分、11/30 5 分」
+    let accessibilityText: String
+}
+
+/// 重名偵測（兩台各自加的同名系統或同名項目；judge §4.4）
+struct CompetencyDuplicate: Equatable, Identifiable {
+    /// 「system|gas system」「shared|sop」「own|<系統 id>|研磨液濃度」
+    let id: String
+    /// "system"／"trait"／"shared"／"own"
+    let kind: String
+    /// own：哪個系統
+    let groupId: UUID?
+    let name: String
+    /// 留下的（建得最早的；一樣早照代號）：兩台各按〔合併〕留的是同一個
+    let keeperId: UUID
+    let otherIds: [UUID]
+    /// 「有兩個 Gas System」
+    let text: String
+    /// 「合併兩個「Gas System」？」
+    let confirmTitle: String
+    let confirmMessage: String
+}
+
+extension CompetencyMath {
+
+    // MARK: 日子 → Date（DatePicker 用；v1a-2 兩個檔各一份的 compRatingDate／compHistNoonDate 搬來這裡）
+
+    /// ↔ noon_date：「2026-10-30」→ 那一天中午 12 點（避開日光節約換日；這台的時區）
+    static func noonDate(_ key: String, calendar: Calendar = .current) -> Date? {
+        guard let p = parseDay(key) else { return nil }
+        var c = DateComponents()
+        c.year = p.y
+        c.month = p.m
+        c.day = p.d
+        c.hour = 12
+        return calendar.date(from: c)
+    }
+
+    // MARK: 指定日期（評分紀錄明細〔跟現在比〕）
+
+    /// ↔ cur_through：那一天（含）之前每一格最後一筆
+    static func latestCells(_ sessions: [CompetencySession], through day: String) -> [CompetencyCellKey: CompetencyCellValue] {
+        latestCells(sessions.filter { $0.dayKey <= day })
+    }
+
+    /// ↔ compare_cards：現在的卡片、灰虛線＝那一天的樣子（「10/30 比 4/30」、圖例「┅ 4/30」）
+    static func compareCards(setup: CompetencySetupBook, subordinateId: UUID, archivedPerson: Bool,
+                             sessions: [CompetencySession], compareDay: String) -> [CompetencyChartModel] {
+        let groups: [CompetencyGroup] = visibleGroups(setup: setup, subordinateId: subordinateId,
+                                                      archivedPerson: archivedPerson, sessions: sessions)
+        var out: [CompetencyChartModel] = []
+        for g in groups {
+            let ax = cardAxes(group: g, setup: setup, archivedPerson: archivedPerson, sessions: sessions)
+            out.append(chartModel(group: g, axes: ax.axes, archivedIds: ax.archived, sessions: sessions,
+                                  range: setup.range(forGroup: g.id), scale: setup.scaleFor(group: g.id),
+                                  compareDay: compareDay))
+        }
+        return out
+    }
+
+    // MARK: 職等
+
+    static let traitScope: String = "trait"
+    static let skillScope: String = "skill"
+    /// 〔用建議值〕：E2＝範圍中間（1–5 的 3）、E3＝四分之三（1–5 的 4）
+    static let suggestE2Ratio: Double = 0.5
+    static let suggestE3Ratio: Double = 0.75
+
+    /// ↔ norm_grade：去空白、全形英數換半形、大寫（「ｅ２」→「E2」）
+    static func normalizedGrade(_ s: String) -> String {
+        var out = ""
+        for u in s.trimmingCharacters(in: .whitespacesAndNewlines).unicodeScalars {
+            if u.value >= 0xFF01 && u.value <= 0xFF5E, let h = Unicode.Scalar(u.value - 0xFEE0) {
+                out.unicodeScalars.append(h)
+            } else {
+                out.unicodeScalars.append(u)
+            }
+        }
+        return out.uppercased()
+    }
+
+    /// ↔ grade_refs：職等表順序（職等字數字感知排序，跟 GradeTitleView 一樣）
+    static func gradeRefs(_ titles: [GradeTitle]) -> [CompetencyGradeRef] {
+        let sorted: [GradeTitle] = titles.sorted { a, b in
+            let c: ComparisonResult = a.grade.localizedStandardCompare(b.grade)
+            if c != .orderedSame { return c == .orderedAscending }
+            let d: ComparisonResult = a.title.localizedStandardCompare(b.title)
+            if d != .orderedSame { return d == .orderedAscending }
+            return a.id.uuidString < b.id.uuidString
+        }
+        return sorted.map { g in
+            let grade: String = g.grade.trimmingCharacters(in: .whitespacesAndNewlines)
+            let raw: String = g.displayLabel.trimmingCharacters(in: .whitespacesAndNewlines)
+            let label: String = raw.isEmpty ? "未命名職等" : raw
+            return CompetencyGradeRef(id: g.id, short: grade.isEmpty ? label : grade, label: label, grade: grade)
+        }
+    }
+
+    /// ↔ target_grade：這次對照哪個職等（不疊、沒設、被刪 nil；下一個沒有時用目前的）
+    static func targetGrade(_ ctx: CompetencyGradeContext, mode: CompetencyTargetMode,
+                            table: [CompetencyTargetKey: CompetencyTarget]) -> CompetencyGradeRef? {
+        guard mode != .off, let cid = ctx.currentId,
+              let i = ctx.grades.firstIndex(where: { $0.id == cid }) else { return nil }
+        var pick: CompetencyGradeRef = ctx.grades[i]
+        if mode == .next && i + 1 < ctx.grades.count { pick = ctx.grades[i + 1] }
+        let has: Bool = table.keys.contains { $0.gradeId == pick.id }
+        return has ? pick : nil
+    }
+
+    /// ↔ deleted_grade_label：職等表裡已經沒有的那個職等叫什麼（目標的快照、評分的快照；都沒有「這個職等」）
+    static func deletedGradeLabel(_ id: UUID, setup: CompetencySetupBook, sessions: [CompetencySession]) -> String {
+        for t in setup.allTargets where t.gradeTitleId == id {
+            let s: String = (t.gradeLabel ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !s.isEmpty { return s }
+        }
+        let byDay: [CompetencySession] = sessions.sorted { a, b in a.dayKey > b.dayKey }
+        for s in byDay where s.gradeTitleId == id {
+            let l: String = (s.gradeLabel ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !l.isEmpty { return l }
+        }
+        return "這個職等"
+    }
+
+    // MARK: 目標表（judge §3.6：那一格 → 那個系統 → 這一區每項）
+
+    /// ↔ scope_of
+    static func targetScope(groupId: UUID?) -> String {
+        groupId == CompetencySetupBook.traitGroupId ? traitScope : skillScope
+    }
+
+    /// ↔ target_key：沒有職等的不算；有組的照組判斷人格／本職；沒有組的照 scope（不是 "trait" 都當本職）
+    static func targetKey(_ t: CompetencyTarget) -> CompetencyTargetKey? {
+        guard let g = t.gradeTitleId else { return nil }
+        let scope: String
+        if let gid = t.groupId {
+            scope = targetScope(groupId: gid)
+        } else {
+            scope = t.scope == traitScope ? traitScope : skillScope
+        }
+        let itemId: UUID? = t.groupId == nil ? nil : t.itemId
+        return CompetencyTargetKey(gradeId: g, scope: scope, groupId: t.groupId, itemId: itemId)
+    }
+
+    /// ↔ target_table：沒刪、有目標分的；同一層兩筆（兩台各訂一次）取後改的，一樣新照代號大的
+    static func targetTable(_ setup: CompetencySetupBook) -> [CompetencyTargetKey: CompetencyTarget] {
+        var out: [CompetencyTargetKey: CompetencyTarget] = [:]
+        for t in setup.allTargets where t.deletedAt == nil && t.level != nil {
+            guard let k = targetKey(t) else { continue }
+            if let old = out[k] {
+                if old.stamp > t.stamp { continue }
+                if old.stamp == t.stamp && old.id.uuidString > t.id.uuidString { continue }
+            }
+            out[k] = t
+        }
+        return out
+    }
+
+    /// ↔ target_range：設目標當時的範圍（沒存、壞掉＝fallback）
+    static func targetRange(_ t: CompetencyTarget, fallback: CompetencyRange) -> CompetencyRange {
+        guard let lo = t.low, let hi = t.high, CompetencyRange.isValid(low: lo, high: hi) else { return fallback }
+        return CompetencyRange(low: lo, high: hi)
+    }
+
+    /// ↔ resolve_target：一格的目標（那一格 → 那個系統 → 這一區每項）
+    static func resolveTarget(_ table: [CompetencyTargetKey: CompetencyTarget], gradeId: UUID, groupId: UUID,
+                              itemId: UUID, fallback: CompetencyRange) -> CompetencyResolvedTarget? {
+        let scope: String = targetScope(groupId: groupId)
+        let cell = CompetencyTargetKey(gradeId: gradeId, scope: scope, groupId: groupId, itemId: itemId)
+        let group = CompetencyTargetKey(gradeId: gradeId, scope: scope, groupId: groupId, itemId: nil)
+        let area = CompetencyTargetKey(gradeId: gradeId, scope: scope, groupId: nil, itemId: nil)
+        let order: [(key: CompetencyTargetKey, layer: String)] = [(cell, "cell"), (group, "group"), (area, "area")]
+        for step in order {
+            guard let t = table[step.key], let lv = t.level else { continue }
+            let r: CompetencyRange = targetRange(t, fallback: fallback)
+            return CompetencyResolvedTarget(target: t, level: r.clamp(lv), range: r, layer: step.layer)
+        }
+        return nil
+    }
+
+    /// ↔ target_value：目標換到現在範圍（可能是小數）
+    static func targetValue(_ rt: CompetencyResolvedTarget, in range: CompetencyRange) -> Double {
+        if rt.range == range { return Double(rt.level) }
+        return value(atRatio: rt.ratio, range)
+    }
+
+    /// ↔ target_value_text：「3」「≈5.5」
+    static func targetValueText(_ rt: CompetencyResolvedTarget, in range: CompetencyRange) -> String {
+        if rt.range == range { return "\(rt.level)" }
+        return numberText(targetValue(rt, in: range))
+    }
+
+    /// ↔ apply_target：一軸的目標字（達標 ✓、差幾級、沒評；不適用只畫點線不寫字、不算）
+    static func applyTarget(_ m: inout CompetencyAxisModel, _ rt: CompetencyResolvedTarget, cell c: CompetencyCellValue?,
+                            range: CompetencyRange) {
+        let tt: Double = rt.ratio
+        let tText: String = targetValueText(rt, in: range)
+        m.targetT = tt
+        m.targetValueText = tText
+        if let n = c, n.na { return }
+        guard let cell = c, let tc = cell.ratio else {
+            m.targetMet = false
+            m.targetText = "目標 " + tText + "・未評"
+            return
+        }
+        if tc >= tt - 1e-9 {
+            m.targetMet = true
+            m.targetGap = 0
+            m.targetText = "目標 " + tText + " ✓"
+        } else {
+            let gap: Double = (tt - tc) * Double(range.high - range.low)
+            m.targetMet = false
+            m.targetGap = gap
+            m.targetText = "目標 " + tText + "・差 " + numberText(gap)
+        }
+    }
+
+    // MARK: 〔職能〕分頁的目標摘要（judge §3.8 達標、差距由大到小；§5 職等沒設／升等／被刪）
+
+    /// ↔ target_summary：整個設定一個目標都沒有 → nil（什麼都不出現）
+    static func targetSummary(cards: [CompetencyChartModel], table: [CompetencyTargetKey: CompetencyTarget],
+                              grades: CompetencyGradeContext, mode: CompetencyTargetMode, pick: CompetencyGradeRef?,
+                              setup: CompetencySetupBook, sessions: [CompetencySession]) -> CompetencyTargetSummary? {
+        guard !table.isEmpty else { return nil }
+        guard let cid = grades.currentId else {
+            return CompetencyTargetSummary(mode: mode, grade: nil, chipTitle: nil, currentOptionTitle: nil,
+                                           nextOptionTitle: nil, achievedText: nil, gapCountText: nil, unratedText: nil,
+                                           gapRows: [], noGradeLine: "設定職等後才有目標", deletedGradeLine: nil,
+                                           noTargetLine: nil)
+        }
+        guard let i = grades.grades.firstIndex(where: { $0.id == cid }) else {
+            let label: String = deletedGradeLabel(cid, setup: setup, sessions: sessions)
+            return CompetencyTargetSummary(mode: mode, grade: nil, chipTitle: nil, currentOptionTitle: nil,
+                                           nextOptionTitle: nil, achievedText: nil, gapCountText: nil, unratedText: nil,
+                                           gapRows: [],
+                                           noGradeLine: nil,
+                                           deletedGradeLine: "職等「" + label + "」已經刪掉，目標不套用",
+                                           noTargetLine: nil)
+        }
+        let cur: CompetencyGradeRef = grades.grades[i]
+        let next: CompetencyGradeRef? = i + 1 < grades.grades.count ? grades.grades[i + 1] : nil
+        let wanted: CompetencyGradeRef = (mode == .next ? next : nil) ?? cur
+        let curTitle: String = "目前職等 " + cur.short
+        let nextTitle: String? = next.map { "下一個職等 " + $0.short }
+        let chip: String = "目標 " + wanted.short
+        guard mode != .off else {
+            return CompetencyTargetSummary(mode: mode, grade: wanted, chipTitle: chip, currentOptionTitle: curTitle,
+                                           nextOptionTitle: nextTitle, achievedText: nil, gapCountText: nil,
+                                           unratedText: nil, gapRows: [], noGradeLine: nil, deletedGradeLine: nil,
+                                           noTargetLine: nil)
+        }
+        guard let g = pick else {
+            return CompetencyTargetSummary(mode: mode, grade: wanted, chipTitle: chip, currentOptionTitle: curTitle,
+                                           nextOptionTitle: nextTitle, achievedText: nil, gapCountText: nil,
+                                           unratedText: nil, gapRows: [], noGradeLine: nil, deletedGradeLine: nil,
+                                           noTargetLine: wanted.short + " 還沒訂目標（設定 → 職能項目 → 職等目標）")
+        }
+        var total = 0
+        var achieved = 0
+        var unrated = 0
+        var levels: Double = 0
+        var rows: [(row: CompetencyGapRow, order: Int)] = []
+        var order = 0
+        for card in cards {
+            for ax in card.axes {
+                order += 1
+                guard ax.targetT != nil, ax.state != .na, !ax.archived else { continue }
+                total += 1
+                if ax.targetMet == true { achieved += 1 }
+                if ax.state == .unrated { unrated += 1 }
+                guard let gap = ax.targetGap, gap > 1e-9 else { continue }
+                levels += gap
+                let detail: String = (ax.valueText ?? "") + " → " + (ax.targetValueText ?? "") + "（差 " + numberText(gap) + "）"
+                let row = CompetencyGapRow(id: card.id.uuidString + "|" + ax.id.uuidString, groupId: card.id, itemId: ax.id,
+                                           title: card.title + "・" + ax.name, detail: detail, gap: gap)
+                rows.append((row, order))
+            }
+        }
+        let sortedRows: [CompetencyGapRow] = rows.sorted { a, b in
+            if abs(a.row.gap - b.row.gap) > 1e-9 { return a.row.gap > b.row.gap }
+            return a.order < b.order
+        }.map { $0.row }
+        let notMet: Int = total - achieved
+        var gapText: String = g.short + " 全部達標"
+        if notMet > 0 {
+            gapText = "離 " + g.short + " 還差 \(notMet) 格"
+            if levels > 1e-9 { gapText += "（差 " + numberText(levels) + " 級）" }
+        }
+        return CompetencyTargetSummary(mode: mode, grade: g, chipTitle: chip, currentOptionTitle: curTitle,
+                                       nextOptionTitle: nextTitle,
+                                       achievedText: total > 0 ? g.short + " 達標 \(achieved)／\(total)" : nil,
+                                       gapCountText: total > 0 ? gapText : nil,
+                                       unratedText: unrated > 0 ? "未評 \(unrated) 格" : nil,
+                                       gapRows: sortedRows, noGradeLine: nil, deletedGradeLine: nil, noTargetLine: nil)
+    }
+
+    /// ↔ record_rows（v1b）：同 recordRows，那一張的職等跟現在不一樣時多「那時 E2 工程師」
+    static func recordRows(sessions: [CompetencySession], setup: CompetencySetupBook,
+                           currentGradeId: UUID?) -> [CompetencyRecordRow] {
+        let base: [CompetencyRecordRow] = recordRows(sessions: sessions, setup: setup)
+        var byId: [UUID: CompetencySession] = [:]
+        for s in sessions { byId[s.id] = s }
+        return base.map { (row: CompetencyRecordRow) -> CompetencyRecordRow in
+            var r = row
+            guard let first = row.sessionIds.first, let s = byId[first], let gid = s.gradeTitleId,
+                  gid != currentGradeId else { return r }
+            let label: String = (s.gradeLabel ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !label.isEmpty { r.gradeNote = "那時 " + label }
+            return r
+        }
+    }
+
+    // MARK: 評分畫面的目標（judge §4.5「E2 目標 3」、底部「E2 達標 10／12」）
+
+    /// ↔ rating_marks：每一格的目標，換到這一張的範圍（沒有職等、沒有目標回空）
+    static func ratingTargetMarks(setup: CompetencySetupBook, grade: CompetencyGradeRef?,
+                                  sections: [CompetencyRatingSection]) -> [CompetencyCellKey: CompetencyTargetMark] {
+        guard let g = grade else { return [:] }
+        let table: [CompetencyTargetKey: CompetencyTarget] = targetTable(setup)
+        guard !table.isEmpty else { return [:] }
+        var out: [CompetencyCellKey: CompetencyTargetMark] = [:]
+        for sec in sections {
+            for ax in sec.axes where !ax.archived {
+                guard let rt = resolveTarget(table, gradeId: g.id, groupId: sec.id, itemId: ax.id,
+                                             fallback: sec.range) else { continue }
+                let v: Double = targetValue(rt, in: sec.range)
+                let lv: Int = sec.range.clamp(roundHalfUp(v))
+                let text: String = g.short + " 目標 " + numberText(v)
+                out[CompetencyCellKey(groupId: sec.id, itemId: ax.id)] =
+                    CompetencyTargetMark(level: lv, value: v, ratio: rt.ratio, gradeShort: g.short, text: text)
+            }
+        }
+        return out
+    }
+
+    /// ↔ rating_mark_text：那一格下面「E2 目標 3 ✓」「E2 目標 3・差 1」「E2 目標 3」（沒評、不適用）
+    static func ratingTargetRowText(_ m: CompetencyTargetMark, value: Int?, na: Bool, range: CompetencyRange) -> String {
+        guard !na, let v = value else { return m.text }
+        let t: Double = ratio(v, range)
+        if t >= m.ratio - 1e-9 { return m.text + " ✓" }
+        return m.text + "・差 " + numberText(m.value - Double(v))
+    }
+
+    /// ↔ rating_target_line：底部「E2 達標 10／12」：草稿有的格子照草稿、沒動的照上一次；不適用不算；
+    /// 都沒有的算「未評」（「・未評 2 格」）。沒有目標 nil
+    static func ratingTargetLine(marks: [CompetencyCellKey: CompetencyTargetMark], sections: [CompetencyRatingSection],
+                                 draft: [CompetencyCellKey: CompetencyDraftCell]) -> String? {
+        var total = 0
+        var met = 0
+        var unrated = 0
+        var short = ""
+        for sec in sections {
+            for ax in sec.axes {
+                let key = CompetencyCellKey(groupId: sec.id, itemId: ax.id)
+                guard let m = marks[key] else { continue }
+                short = m.gradeShort
+                if let d = draft[key], d.isSet {
+                    if d.na { continue }
+                    total += 1
+                    if let v = d.value, ratio(v, sec.range) >= m.ratio - 1e-9 { met += 1 }
+                } else if let p = ax.previous {
+                    if p.na { continue }
+                    total += 1
+                    if let tp = p.ratio, tp >= m.ratio - 1e-9 { met += 1 }
+                } else {
+                    total += 1
+                    unrated += 1
+                }
+            }
+        }
+        guard total > 0 else { return nil }
+        var s: String = short + " 達標 \(met)／\(total)"
+        if unrated > 0 { s += "・未評 \(unrated) 格" }
+        return s
+    }
+
+    // MARK: 〔用建議值〕（主控定案：E2＝範圍中間、E3＝四分之三；職等字對不到 E2／E3 時照職等表順序給第 2、3 個）
+
+    /// ↔ suggest_level：low＋四捨五入(t×(high−low))（1–5：3、4；1–10：6、8；0–100：50、75）
+    static func suggestLevel(_ t: Double, _ r: CompetencyRange) -> Int {
+        r.clamp(r.low + roundHalfUp(t * Double(r.high - r.low)))
+    }
+
+    /// ↔ suggested：職等字＝E2／E3（去空白、全形換半形、不分大小寫）的才給；一個都對不到 → 職等表第 2 個給 E2 的值、第 3 個給 E3 的值
+    ///（只有 1 個職等：那一個給 E2 的值）
+    static func suggestedTargets(grades: [CompetencyGradeRef], traitRange: CompetencyRange,
+                                 skillRange: CompetencyRange) -> [CompetencySuggestedTarget] {
+        var picks: [(ref: CompetencyGradeRef, t: Double)] = []
+        for g in grades {
+            let n: String = normalizedGrade(g.grade)
+            if n == "E2" { picks.append((g, suggestE2Ratio)) }
+            if n == "E3" { picks.append((g, suggestE3Ratio)) }
+        }
+        if picks.isEmpty {
+            if grades.count == 1 {
+                picks.append((grades[0], suggestE2Ratio))
+            } else {
+                if grades.count >= 2 { picks.append((grades[1], suggestE2Ratio)) }
+                if grades.count >= 3 { picks.append((grades[2], suggestE3Ratio)) }
+            }
+        }
+        return picks.map { p in
+            CompetencySuggestedTarget(id: p.ref.id, label: p.ref.label, short: p.ref.short,
+                                      traitLevel: suggestLevel(p.t, traitRange), skillLevel: suggestLevel(p.t, skillRange))
+        }
+    }
+
+    /// ↔ suggestion_text：「E2 每項 3、E3 每項 4」（人格、本職範圍不一樣：「E2 人格 3｜本職 6」）
+    static func suggestionText(_ list: [CompetencySuggestedTarget]) -> String {
+        let parts: [String] = list.map { s in
+            s.traitLevel == s.skillLevel ? s.short + " 每項 \(s.traitLevel)"
+                : s.short + " 人格 \(s.traitLevel)｜本職 \(s.skillLevel)"
+        }
+        return parts.joined(separator: "、")
+    }
+
+    /// ↔ suggest_offer：〔用建議值〕要不要出現：有職等、有建議、現在的職等一個目標都還沒訂
+    static func shouldOfferSuggestion(setup: CompetencySetupBook, grades: [CompetencyGradeRef]) -> Bool {
+        guard !grades.isEmpty else { return false }
+        let live: Set<UUID> = Set(grades.map { $0.id })
+        let table: [CompetencyTargetKey: CompetencyTarget] = targetTable(setup)
+        if table.keys.contains(where: { live.contains($0.gradeId) }) { return false }
+        return !suggestedTargets(grades: grades, traitRange: setup.traitRange, skillRange: setup.skillRange).isEmpty
+    }
+
+    // MARK: 設定「職等目標」一節（judge §4.4：「E2　人格 3｜本職 3 ›」）
+
+    /// ↔ grade_target_rows：職等表每一個＋（目標還在、職等表裡已經沒有的）已刪除的
+    static func gradeTargetRows(setup: CompetencySetupBook, grades: [CompetencyGradeRef]) -> [CompetencyGradeTargetRow] {
+        let table: [CompetencyTargetKey: CompetencyTarget] = targetTable(setup)
+        var out: [CompetencyGradeTargetRow] = []
+        for g in grades {
+            out.append(gradeTargetRow(id: g.id, title: g.label, deleted: false, table: table, setup: setup))
+        }
+        let live: Set<UUID> = Set(grades.map { $0.id })
+        var seen: [UUID] = []
+        for k in table.keys where !live.contains(k.gradeId) && !seen.contains(k.gradeId) {
+            seen.append(k.gradeId)
+        }
+        let ordered: [UUID] = seen.sorted { $0.uuidString < $1.uuidString }
+        for gid in ordered {
+            let label: String = deletedGradeLabel(gid, setup: setup, sessions: [])
+            out.append(gradeTargetRow(id: gid, title: label + "（已刪除）", deleted: true, table: table, setup: setup))
+        }
+        return out
+    }
+
+    /// 一列的字
+    static func gradeTargetRow(id: UUID, title: String, deleted: Bool, table: [CompetencyTargetKey: CompetencyTarget],
+                               setup: CompetencySetupBook) -> CompetencyGradeTargetRow {
+        let mine: [CompetencyTargetKey] = table.keys.filter { $0.gradeId == id }
+        guard !mine.isEmpty else {
+            return CompetencyGradeTargetRow(id: id, title: title, summary: "還沒訂目標", deleted: deleted, hasTargets: false)
+        }
+        let tKey = CompetencyTargetKey(gradeId: id, scope: traitScope, groupId: nil, itemId: nil)
+        let sKey = CompetencyTargetKey(gradeId: id, scope: skillScope, groupId: nil, itemId: nil)
+        let tText: String = areaText(table[tKey], range: setup.traitRange)
+        let sText: String = areaText(table[sKey], range: setup.skillRange)
+        var summary: String = "人格 " + tText + "｜本職 " + sText
+        let others: Int = mine.filter { $0.groupId != nil }.count
+        if others > 0 { summary += "・另外 \(others) 項不同" }
+        return CompetencyGradeTargetRow(id: id, title: title, summary: summary, deleted: deleted, hasTargets: true)
+    }
+
+    /// 「3」「≈5.5」「—」
+    static func areaText(_ t: CompetencyTarget?, range: CompetencyRange) -> String {
+        guard let x = t, let lv = x.level else { return "—" }
+        let r: CompetencyRange = targetRange(x, fallback: range)
+        let rt = CompetencyResolvedTarget(target: x, level: r.clamp(lv), range: r, layer: "area")
+        return targetValueText(rt, in: range)
+    }
+
+    // MARK: 職等目標編輯頁（整區兩個 Stepper＋〔逐項調整〕：系統、每一格；跟上一層不同的標藍字）
+
+    /// ↔ target_editor
+    static func targetEditor(setup: CompetencySetupBook, gradeId: UUID) -> [CompetencyTargetEditSection] {
+        let table: [CompetencyTargetKey: CompetencyTarget] = targetTable(setup)
+        var out: [CompetencyTargetEditSection] = []
+        let tr: CompetencyRange = setup.traitRange
+        let sr: CompetencyRange = setup.skillRange
+        // 人格特質：這一區每項＋每一項
+        var traitRows: [CompetencyTargetEditRow] = []
+        let tArea: CompetencyTarget? = table[CompetencyTargetKey(gradeId: gradeId, scope: traitScope, groupId: nil, itemId: nil)]
+        traitRows.append(editRow(scope: traitScope, groupId: nil, itemId: nil, title: "每項", own: tArea,
+                                 inherited: nil, range: tr, depth: 0))
+        if setup.traitGroup != nil {
+            let tg: UUID = CompetencySetupBook.traitGroupId
+            let tGroup: CompetencyTarget? = table[CompetencyTargetKey(gradeId: gradeId, scope: traitScope, groupId: tg, itemId: nil)]
+            let tParent: CompetencyTarget? = tGroup ?? tArea
+            for it in setup.traitItems {
+                let own: CompetencyTarget? = table[CompetencyTargetKey(gradeId: gradeId, scope: traitScope, groupId: tg, itemId: it.id)]
+                traitRows.append(editRow(scope: traitScope, groupId: tg, itemId: it.id, title: it.displayName, own: own,
+                                         inherited: tParent, range: tr, depth: 2))
+            }
+        }
+        out.append(CompetencyTargetEditSection(id: traitScope, title: "人格特質", rows: traitRows))
+        // 本職學能：這一區每項
+        let sArea: CompetencyTarget? = table[CompetencyTargetKey(gradeId: gradeId, scope: skillScope, groupId: nil, itemId: nil)]
+        out.append(CompetencyTargetEditSection(id: skillScope, title: "本職學能",
+                                               rows: [editRow(scope: skillScope, groupId: nil, itemId: nil, title: "每項",
+                                                              own: sArea, inherited: nil, range: sr, depth: 0)]))
+        // 每個系統：這個系統每項＋每一格
+        for g in setup.activeSystems {
+            var rows: [CompetencyTargetEditRow] = []
+            let gOwn: CompetencyTarget? = table[CompetencyTargetKey(gradeId: gradeId, scope: skillScope, groupId: g.id, itemId: nil)]
+            rows.append(editRow(scope: skillScope, groupId: g.id, itemId: nil, title: g.displayName + " 每項", own: gOwn,
+                                inherited: sArea, range: sr, depth: 1))
+            let parent: CompetencyTarget? = gOwn ?? sArea
+            for it in setup.axes(for: g.id) {
+                let own: CompetencyTarget? = table[CompetencyTargetKey(gradeId: gradeId, scope: skillScope, groupId: g.id, itemId: it.id)]
+                rows.append(editRow(scope: skillScope, groupId: g.id, itemId: it.id, title: it.displayName, own: own,
+                                    inherited: parent, range: sr, depth: 2))
+            }
+            out.append(CompetencyTargetEditSection(id: g.id.uuidString, title: g.displayName, rows: rows))
+        }
+        return out
+    }
+
+    /// 編輯頁一列
+    static func editRow(scope: String, groupId: UUID?, itemId: UUID?, title: String, own: CompetencyTarget?,
+                        inherited: CompetencyTarget?, range: CompetencyRange, depth: Int) -> CompetencyTargetEditRow {
+        let effective: CompetencyTarget? = own ?? inherited
+        let effText: String = areaText(effective, range: range)
+        var ownLevel: Int? = nil
+        if let o = own, let lv = o.level {
+            let r: CompetencyRange = targetRange(o, fallback: range)
+            ownLevel = range.clamp(roundHalfUp(convert(r.clamp(lv), from: r, to: range)))
+        }
+        var start: Int = sliderPlaceholder(range)
+        if let e = effective, let lv = e.level {
+            let r: CompetencyRange = targetRange(e, fallback: range)
+            start = range.clamp(roundHalfUp(convert(r.clamp(lv), from: r, to: range)))
+        }
+        let gPart: String = groupId?.uuidString ?? "-"
+        let iPart: String = itemId?.uuidString ?? "-"
+        let overridden: Bool = own != nil && depth > 0 && areaText(own, range: range) != areaText(inherited, range: range)
+        return CompetencyTargetEditRow(id: scope + "|" + gPart + "|" + iPart, scope: scope, groupId: groupId, itemId: itemId,
+                                       title: title, ownLevel: ownLevel, effectiveText: effText, overridden: overridden,
+                                       startLevel: start, range: range, depth: depth)
+    }
+
+    /// ↔ set_target：寫一層（level nil＝拿掉這一層、跟上一層）。同一層的其他筆（兩台各訂一次）蓋墓碑。範圍＝現在的
+    static func settingTarget(_ book: CompetencySetupBook, gradeId: UUID, gradeLabel: String?, scope: String,
+                              groupId: UUID?, itemId: UUID?, level: Int?, newId: UUID, now: Date) -> CompetencySetupBook {
+        var b = book
+        let key = CompetencyTargetKey(gradeId: gradeId, scope: scope, groupId: groupId, itemId: groupId == nil ? nil : itemId)
+        let r: CompetencyRange = scope == traitScope ? b.traitRange : b.skillRange
+        let table: [CompetencyTargetKey: CompetencyTarget] = targetTable(b)
+        let keepId: UUID? = level == nil ? nil : table[key]?.id
+        var list: [CompetencyTarget] = b.allTargets
+        var changed = false
+        for i in list.indices where list[i].deletedAt == nil && targetKey(list[i]) == key && list[i].id != keepId {
+            list[i].deletedAt = now
+            list[i].updatedAt = now
+            changed = true
+        }
+        if let lv = level {
+            let v: Int = r.clamp(lv)
+            if let kid = keepId, let i = list.firstIndex(where: { $0.id == kid }) {
+                if list[i].level != v || list[i].low != r.low || list[i].high != r.high || list[i].gradeLabel != gradeLabel {
+                    list[i].level = v
+                    list[i].low = r.low
+                    list[i].high = r.high
+                    if gradeLabel != nil { list[i].gradeLabel = gradeLabel }
+                    list[i].updatedAt = now
+                    changed = true
+                }
+            } else {
+                list.append(CompetencyTarget(id: newId, gradeTitleId: gradeId, gradeLabel: gradeLabel, scope: scope,
+                                             groupId: groupId, itemId: groupId == nil ? nil : itemId, level: v,
+                                             low: r.low, high: r.high, updatedAt: now))
+                changed = true
+            }
+        }
+        if changed { b.targets = list }
+        return b
+    }
+
+    // MARK: 改範圍時目標要不要一起換（judge §3.3：「3 會變 5.5，要 5 還是 6？」；只有目標可以重存整數，分數不行）
+
+    /// ↔ retarget_plan：這一區有目標、而且設目標時的範圍跟新範圍不一樣才有。choices：換算剛好是整數「改，目標一起換成 1–10」；
+    /// 不是整數「改，目標換成 6、8（進位）」「改，目標換成 5、7（捨去）」；最後都有「改，目標照比例畫」
+    static func retargetPlan(setup: CompetencySetupBook, scaleId: String, to new: CompetencyRange,
+                             grades: [CompetencyGradeRef]) -> CompetencyRetargetPlan? {
+        let scope: String = scaleId == CompetencySetupBook.traitScaleId ? traitScope : skillScope
+        let current: CompetencyRange = scope == traitScope ? setup.traitRange : setup.skillRange
+        var ups: [UUID: Int] = [:]
+        var downs: [UUID: Int] = [:]
+        var lines: [String] = []
+        var allWhole = true
+        let live: [CompetencyTarget] = setup.allTargets.filter { t in
+            t.deletedAt == nil && t.level != nil && (targetKey(t)?.scope ?? "") == scope
+        }
+        for t in live {
+            guard let lv = t.level else { continue }
+            let r: CompetencyRange = targetRange(t, fallback: current)
+            if r == new { continue }
+            let x: Double = convert(r.clamp(lv), from: r, to: new)
+            let up: Int = new.clamp(Int((x - 1e-9).rounded(.up)))
+            let down: Int = new.clamp(Int((x + 1e-9).rounded(.down)))
+            ups[t.id] = up
+            downs[t.id] = down
+            if up != down { allWhole = false }
+            let short: String = grades.first(where: { $0.id == t.gradeTitleId })?.short
+                ?? (t.gradeLabel ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let line: String = (short.isEmpty ? "" : short + " ") + "\(r.clamp(lv)) → " + numberText(x)
+            if !lines.contains(line) { lines.append(line) }
+        }
+        guard !ups.isEmpty else { return nil }
+        let shown: [String] = Array(lines.prefix(4))
+        var message: String = "目標：" + shown.joined(separator: "、")
+        if lines.count > 4 { message += "…" }
+        var choices: [CompetencyRetargetChoice] = []
+        if allWhole {
+            choices.append(CompetencyRetargetChoice(id: "exact", title: "改，目標一起換成 " + new.text, levels: ups))
+        } else {
+            let upVals: [Int] = Array(Set(ups.values)).sorted()
+            let downVals: [Int] = Array(Set(downs.values)).sorted()
+            let upText: String = upVals.map { "\($0)" }.joined(separator: "、")
+            let downText: String = downVals.map { "\($0)" }.joined(separator: "、")
+            choices.append(CompetencyRetargetChoice(id: "up", title: "改，目標換成 " + upText + "（進位）", levels: ups))
+            choices.append(CompetencyRetargetChoice(id: "down", title: "改，目標換成 " + downText + "（捨去）", levels: downs))
+        }
+        choices.append(CompetencyRetargetChoice(id: "keep", title: "改，目標照比例畫", levels: [:]))
+        return CompetencyRetargetPlan(message: message, choices: choices)
+    }
+
+    /// ↔ apply_retarget：把選好的整數寫回目標（範圍＝新範圍）
+    static func applyingRetarget(_ book: CompetencySetupBook, levels: [UUID: Int], range: CompetencyRange,
+                                 now: Date) -> CompetencySetupBook {
+        guard !levels.isEmpty else { return book }
+        var b = book
+        var list: [CompetencyTarget] = b.allTargets
+        var changed = false
+        for i in list.indices {
+            guard list[i].deletedAt == nil, let v = levels[list[i].id] else { continue }
+            list[i].level = range.clamp(v)
+            list[i].low = range.low
+            list[i].high = range.high
+            list[i].updatedAt = now
+            changed = true
+        }
+        if changed { b.targets = list }
+        return b
+    }
+
+    // MARK: 每一分的說明（judge §2.1 levels.detail、items.levelDetails；§13：出廠空、≤ 11 級才有、範本自己選）
+
+    /// 每一分的說明最多 30 字（評分按鈕下面一行）
+    static let levelDetailMax: Int = 30
+
+    /// ↔ level_detail：那一分的說明（項目自己的蓋過等級表的）；範圍跟等級表不一樣、超過 11 級 nil
+    static func levelDetail(scale: CompetencyScale?, item: CompetencyItem?, value v: Int, range r: CompetencyRange) -> String? {
+        guard namesAllowed(r), let sc = scale, sc.range == r else { return nil }
+        if let own = item?.levelDetails?.first(where: { $0.value == v })?.detail {
+            let t: String = own.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !t.isEmpty { return t }
+        }
+        if let gen = sc.levels?.first(where: { $0.value == v })?.detail {
+            let t: String = gen.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !t.isEmpty { return t }
+        }
+        return nil
+    }
+
+    /// ↔ level_detail_line：選中那顆下面一行「能教人：能帶新人演練、當帶訓者」；沒有名字「4 分：…」
+    static func levelDetailLine(value v: Int, name: String?, detail: String) -> String {
+        let n: String = (name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return (n.isEmpty ? "\(v) 分" : n) + "：" + detail
+    }
+
+    /// ↔ current_details：說明頁打開時的草稿（這個範圍裡每一分現在的說明）
+    static func currentLevelDetails(_ levels: [CompetencyLevel]?, range r: CompetencyRange) -> [Int: String] {
+        var out: [Int: String] = [:]
+        guard namesAllowed(r) else { return out }
+        for lv in levels ?? [] {
+            guard let v = lv.value, r.contains(v) else { continue }
+            let t: String = (lv.detail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if !t.isEmpty { out[v] = t }
+        }
+        return out
+    }
+
+    /// ↔ merged_details：把說明的草稿寫回（範圍裡的照草稿；範圍外的、名字、別台的欄位原樣留著）。全部空的回 nil
+    static func mergedDetails(existing: [CompetencyLevel]?, details: [Int: String], range r: CompetencyRange) -> [CompetencyLevel]? {
+        var out: [CompetencyLevel] = []
+        var used: Set<Int> = []
+        for lv in existing ?? [] {
+            guard let v = lv.value, r.contains(v) else {
+                out.append(lv)
+                continue
+            }
+            used.insert(v)
+            var x = lv
+            x.detail = cleanShortName(details[v], max: levelDetailMax)
+            let name: String = (x.name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if x.detail == nil && name.isEmpty && x.extra == nil { continue }
+            out.append(x)
+        }
+        for v in r.low...r.high where !used.contains(v) {
+            if let d = cleanShortName(details[v], max: levelDetailMax) {
+                out.append(CompetencyLevel(value: v, detail: d))
+            }
+        }
+        out.sort { a, b in (a.value ?? Int.max) < (b.value ?? Int.max) }
+        return out.isEmpty ? nil : out
+    }
+
+    /// ↔ apply_template_details：範本的說明（從最低分往上一級一句）
+    static func applyTemplateDetails(_ t: CompetencyLevelTemplate, to r: CompetencyRange) -> [Int: String] {
+        var out: [Int: String] = [:]
+        let n: Int = min(t.details.count, r.levelCount)
+        for i in 0..<n { out[r.low + i] = t.details[i] }
+        return out
+    }
+
+    /// ↔ item_detail_count：項目自己的說明寫了幾分（說明頁那一列「寫了 2 分」）
+    static func itemDetailCountText(_ it: CompetencyItem, range r: CompetencyRange) -> String {
+        let n: Int = currentLevelDetails(it.levelDetails, range: r).count
+        return n == 0 ? "照通用說明" : "寫了 \(n) 分"
+    }
+
+    // MARK: 點一格（v1b：每一分的說明、目標、小折線）
+
+    /// ↔ cell_history（v1b）：同 v1a-2，多每一分的說明（等級表的＋項目自己的）、「E2 目標 3（差 1）」、三次以上的小折線
+    static func cellHistory(groupId: UUID, itemId: UUID, setup: CompetencySetupBook, subordinateId: UUID,
+                            sessions: [CompetencySession], grade: CompetencyGradeRef?) -> CompetencyCellHistoryModel {
+        let base: CompetencyCellHistoryModel = cellHistory(groupId: groupId, itemId: itemId, setup: setup,
+                                                           subordinateId: subordinateId, sessions: sessions)
+        let key = CompetencyCellKey(groupId: groupId, itemId: itemId)
+        let range: CompetencyRange = setup.range(forGroup: groupId)
+        let scale: CompetencyScale? = setup.scaleFor(group: groupId)
+        let item: CompetencyItem? = setup.item(itemId)
+        let now: CompetencyCellValue? = latestCells(sessions)[key]
+        var levels: [CompetencyLevelRow] = base.levels
+        if namesAllowed(range) {
+            var rows: [CompetencyLevelRow] = []
+            var any = false
+            for v in range.low...range.high {
+                let name: String = scale?.levelName(v) ?? ""
+                let detail: String? = levelDetail(scale: scale, item: item, value: v, range: range)
+                if !name.isEmpty || detail != nil { any = true }
+                let cur: Bool = now.map { !$0.na && $0.range == range && $0.value == v } ?? false
+                rows.append(CompetencyLevelRow(id: v, name: name, isCurrent: cur, detail: detail))
+            }
+            levels = any ? rows : []
+        }
+        var m = CompetencyCellHistoryModel(title: base.title, nowLine: base.nowLine, levels: levels, rows: base.rows,
+                                           otherLine: base.otherLine, archivedNote: base.archivedNote)
+        var target: CompetencyResolvedTarget? = nil
+        if let g = grade {
+            target = resolveTarget(targetTable(setup), gradeId: g.id, groupId: groupId, itemId: itemId, fallback: range)
+            if let rt = target {
+                var line: String = g.short + " 目標 " + targetValueText(rt, in: range)
+                if let c = now, let tc = c.ratio {
+                    if tc >= rt.ratio - 1e-9 {
+                        line += " ✓"
+                    } else {
+                        line += "（差 " + numberText((rt.ratio - tc) * Double(range.high - range.low)) + "）"
+                    }
+                }
+                m.targetLine = line
+            }
+        }
+        m.trend = cellTrend(key: key, range: range, sessions: sessions, target: target)
+        return m
+    }
+
+    /// ↔ cell_trend：我評的、沒刪的、這一格有分數的（不適用不算），舊的在前；三次以上才有
+    static func cellTrend(key: CompetencyCellKey, range: CompetencyRange, sessions: [CompetencySession],
+                          target: CompetencyResolvedTarget?) -> CompetencyTrendModel? {
+        let ordered: [CompetencySession] = sessions.filter { $0.isLive && $0.isByMe }.sorted { a, b in
+            if a.dayKey != b.dayKey { return a.dayKey < b.dayKey }
+            return a.stamp < b.stamp
+        }
+        var pts: [CompetencyTrendPoint] = []
+        for s in ordered {
+            guard let sc = s.score(key), sc.isLive, !sc.isNA, let v = sc.value else { continue }
+            let r: CompetencyRange = s.range(forGroup: key.groupId)
+            let y: Double = r == range ? Double(v) : convert(v, from: r, to: range)
+            let x: Double = Double(dayNumber(s.dayKey) ?? 0)
+            pts.append(CompetencyTrendPoint(id: s.id, dayKey: s.dayKey, x: x, y: y, sameRange: r == range))
+        }
+        guard pts.count >= 3, let first = pts.first, let last = pts.last else { return nil }
+        let spoken: [String] = pts.map { shortDay($0.dayKey) + " " + numberText($0.y) + " 分" }
+        let ty: Double? = target.map { targetValue($0, in: range) }
+        return CompetencyTrendModel(points: pts, low: Double(range.low), high: Double(range.high), targetY: ty,
+                                    firstDayText: shortDay(first.dayKey), lastDayText: shortDay(last.dayKey),
+                                    hasConverted: pts.contains { !$0.sameRange },
+                                    accessibilityText: "走勢：" + spoken.joined(separator: "、"))
+    }
+
+    // MARK: 重名偵測〔合併〕（judge §4.4、critic #13：兩台離線各自加了同名的系統或項目）
+
+    /// ↔ dup_key：去頭尾空白、中間連續空白算一個、不分大小寫（「Gas  system」＝「Gas System」）
+    static func duplicateKey(_ name: String) -> String {
+        let parts: [String] = name.lowercased().components(separatedBy: .whitespacesAndNewlines).filter { !$0.isEmpty }
+        return parts.joined(separator: " ")
+    }
+
+    /// ↔ count_word：「兩個」「3 個」
+    static func countWord(_ n: Int) -> String {
+        n == 2 ? "兩個" : "\(n) 個"
+    }
+
+    /// ↔ duplicates：啟用中的系統、人格特質、共用學習項目、每個系統自己的項目，各自那一份清單裡同名的
+    static func duplicates(setup: CompetencySetupBook) -> [CompetencyDuplicate] {
+        var out: [CompetencyDuplicate] = []
+        let systems: [(id: UUID, name: String, created: Date?)] = setup.activeSystems.map { (id: $0.id, name: $0.displayName, created: $0.createdAt) }
+        out += duplicateList(systems, kind: "system", groupId: nil, prefix: "system")
+        let traits: [(id: UUID, name: String, created: Date?)] = setup.traitItems.map { (id: $0.id, name: $0.displayName, created: $0.createdAt) }
+        out += duplicateList(traits, kind: "trait", groupId: nil, prefix: "trait")
+        let shared: [(id: UUID, name: String, created: Date?)] = setup.sharedItems.map { (id: $0.id, name: $0.displayName, created: $0.createdAt) }
+        out += duplicateList(shared, kind: "shared", groupId: nil, prefix: "shared")
+        for g in setup.activeSystems {
+            let own: [(id: UUID, name: String, created: Date?)] = setup.ownItems(g.id).map { (id: $0.id, name: $0.displayName, created: $0.createdAt) }
+            out += duplicateList(own, kind: "own", groupId: g.id, prefix: "own|" + g.id.uuidString)
+        }
+        return out
+    }
+
+    /// 一份清單裡同名的（照第一次出現的順序）
+    static func duplicateList(_ list: [(id: UUID, name: String, created: Date?)], kind: String, groupId: UUID?,
+                              prefix: String) -> [CompetencyDuplicate] {
+        var keys: [String] = []
+        var byKey: [String: [(id: UUID, name: String, created: Date?)]] = [:]
+        for x in list {
+            let k: String = duplicateKey(x.name)
+            if k.isEmpty { continue }
+            if byKey[k] == nil { keys.append(k) }
+            byKey[k, default: []].append(x)
+        }
+        var out: [CompetencyDuplicate] = []
+        for k in keys {
+            let same = byKey[k] ?? []
+            guard same.count >= 2 else { continue }
+            let sorted = same.sorted { a, b in
+                let ca: Date = a.created ?? Date.distantPast
+                let cb: Date = b.created ?? Date.distantPast
+                if ca != cb { return ca < cb }
+                return a.id.uuidString < b.id.uuidString
+            }
+            let keeper = sorted[0]
+            let others: [UUID] = sorted.dropFirst().map { $0.id }
+            let word: String = countWord(same.count)
+            let what: String = kind == "system" ? "以前的分數會搬到同一個系統" : "以前的分數會搬到同一項"
+            let msg: String = what + "（同一次評分兩邊都有的格子留後改的），另一個停用、可以在 已停用 找到。"
+            out.append(CompetencyDuplicate(id: prefix + "|" + k, kind: kind, groupId: groupId, name: keeper.name,
+                                           keeperId: keeper.id, otherIds: others,
+                                           text: "有" + word + " " + keeper.name,
+                                           confirmTitle: "合併" + word + "「" + keeper.name + "」？",
+                                           confirmMessage: msg))
+        }
+        return out
+    }
+
+    /// ↔ merge_dup：〔合併〕。系統：另一個的分數搬到留下的（自己的項目搬過去、不用學的系統跟著換、目標跟著換）、另一個停用；
+    /// 項目：每一張評分裡那一格搬到留下的那一項、目標跟著換、另一項停用。同一張評分同一格兩邊都有 → 留後改的；
+    /// 搬過去的那一格蓋新時間、原本那一格蓋格子的墓碑（兩台各按一次〔合併〕、或只有一台按，合併後都只剩一個）
+    static func mergingDuplicate(_ d: CompetencyDuplicate, setup: CompetencySetupBook, ratings: CompetencyRatingBook,
+                                 now: Date) -> (setup: CompetencySetupBook, ratings: CompetencyRatingBook) {
+        var b = setup
+        let losers: Set<UUID> = Set(d.otherIds)
+        let keep: UUID = d.keeperId
+        guard !losers.isEmpty, !losers.contains(keep) else { return (setup, ratings) }
+        let isSystem: Bool = d.kind == "system"
+        if isSystem {
+            for it in b.allItems where it.isLive {
+                guard let gid = it.groupId, losers.contains(gid) else { continue }
+                var x = it
+                x.groupId = keep
+                x.updatedAt = now
+                b.upsertItem(x)
+            }
+            for g in b.allGroups where losers.contains(g.id) && g.isLive {
+                var x = g
+                if x.archivedAt == nil { x.archivedAt = now }
+                x.updatedAt = now
+                b.upsertGroup(x)
+            }
+            for a in b.allAssignments where a.deletedAt == nil {
+                let sk: [UUID] = a.skippedGroupIds ?? []
+                guard sk.contains(where: { losers.contains($0) }) else { continue }
+                var x = a
+                var list: [UUID] = sk.filter { !losers.contains($0) }
+                if !list.contains(keep) { list.append(keep) }
+                x.skippedGroupIds = list
+                x.updatedAt = now
+                b.upsertAssignment(x)
+            }
+        } else {
+            var keeper: CompetencyItem? = b.item(keep)
+            for it in b.allItems where losers.contains(it.id) && it.isLive {
+                var x = it
+                if x.archivedAt == nil { x.archivedAt = now }
+                x.updatedAt = now
+                b.upsertItem(x)
+                if var k = keeper {
+                    var touched = false
+                    if k.shortName == nil, let s = it.shortName { k.shortName = s; touched = true }
+                    if k.levelDetails == nil, let l = it.levelDetails { k.levelDetails = l; touched = true }
+                    if touched { k.updatedAt = now; keeper = k }
+                }
+            }
+            if let k = keeper, k != b.item(keep) { b.upsertItem(k) }
+        }
+        // [v25.601 v1b 驗證修] 「這個系統拿掉的共用學習項目」合併後取聯集（任一邊有評的系統，留下的那一個也評）：
+        // 不然一台加 SOP 時沒勾 Chemical、另一台有勾，合併後 Chemical 的 SOP 分數搬過去了卻看不到。要退回這一件：刪這一行與 reconcilingHiddenShared
+        b = reconcilingHiddenShared(b, kind: d.kind, keep: keep, losers: losers, now: now)
+        // 目標跟著換（留下的那一個已經有同一層 → 另一個的蓋墓碑）
+        let table: [CompetencyTargetKey: CompetencyTarget] = targetTable(b)
+        var tlist: [CompetencyTarget] = b.allTargets
+        var tChanged = false
+        for i in tlist.indices where tlist[i].deletedAt == nil {
+            var moved = tlist[i]
+            if isSystem {
+                guard let gid = moved.groupId, losers.contains(gid) else { continue }
+                moved.groupId = keep
+            } else {
+                guard let iid = moved.itemId, losers.contains(iid) else { continue }
+                moved.itemId = keep
+            }
+            if let k = targetKey(moved), let has = table[k], has.id != moved.id {
+                tlist[i].deletedAt = now
+            } else {
+                tlist[i] = moved
+            }
+            tlist[i].updatedAt = now
+            tChanged = true
+        }
+        if tChanged { b.targets = tlist }
+        // 評分：每一張裡搬格子
+        let r: CompetencyRatingBook = movingCells(ratings, setup: b, now: now) { k in
+            if isSystem {
+                return losers.contains(k.groupId) ? CompetencyCellKey(groupId: keep, itemId: k.itemId) : nil
+            }
+            return losers.contains(k.itemId) ? CompetencyCellKey(groupId: k.groupId, itemId: keep) : nil
+        }
+        return (b, r)
+    }
+
+    /// ↔ reconcile_hidden_shared：[v25.601 v1b 驗證修] 合併後共用學習項目在哪些系統評取聯集。
+    /// 共用項目重名（kind "shared"）：留下的那一項在某個系統被拿掉、但另一項在那個系統有評 → 那個系統把留下的那一項勾回來。
+    /// 系統重名（kind "system"）：留下的那個系統拿掉的共用項目，只有在另一個系統也拿掉時才照樣拿掉。
+    /// 兩台各按一次〔合併〕算出來一樣（只看合併前就同步好的清單）
+    static func reconcilingHiddenShared(_ book: CompetencySetupBook, kind: String, keep: UUID, losers: Set<UUID>,
+                                        now: Date) -> CompetencySetupBook {
+        var b = book
+        if kind == "shared" {
+            for g in b.allGroups where g.isLive && !g.isTrait {
+                let hidden: [UUID] = g.hiddenSharedItemIds ?? []
+                guard hidden.contains(keep) else { continue }
+                let loserShown: Bool = losers.contains { !hidden.contains($0) }
+                guard loserShown else { continue }
+                var x = g
+                x.hiddenSharedItemIds = hidden.filter { $0 != keep }
+                x.updatedAt = now
+                b.upsertGroup(x)
+            }
+        } else if kind == "system" {
+            guard let kg = b.group(keep), kg.isLive else { return b }
+            let hidden: [UUID] = kg.hiddenSharedItemIds ?? []
+            guard !hidden.isEmpty else { return b }
+            let loserGroups: [CompetencyGroup] = b.allGroups.filter { losers.contains($0.id) && $0.isLive }
+            let still: [UUID] = hidden.filter { id in
+                loserGroups.allSatisfy { ($0.hiddenSharedItemIds ?? []).contains(id) }
+            }
+            guard still.count != hidden.count else { return b }
+            var x = kg
+            x.hiddenSharedItemIds = still
+            x.updatedAt = now
+            b.upsertGroup(x)
+        }
+        return b
+    }
+
+    /// ↔ move_cells：把符合的格子搬到新的（組, 項目）。那一張那一格已經有、而且比較新 → 留著（搬的那一格只清掉）；
+    /// 搬過去的那一格蓋 now、名字快照換成現在的；原本那一格蓋格子的墓碑。碰到的那幾張 updatedAt＝now
+    static func movingCells(_ book: CompetencyRatingBook, setup: CompetencySetupBook, now: Date,
+                            map: (CompetencyCellKey) -> CompetencyCellKey?) -> CompetencyRatingBook {
+        var b = book
+        var list: [CompetencySession] = b.allSessions
+        var changed = false
+        for i in list.indices where list[i].isLive {
+            var cells: [CompetencyScore] = list[i].allScores
+            var hit = false
+            for j in cells.indices {
+                let src: CompetencyScore = cells[j]
+                guard src.isLive, let dest = map(src.key), dest != src.key else { continue }
+                let existing: Int? = cells.firstIndex(where: { $0.key == dest })
+                var movedWins = true
+                if let e = existing, cells[e].isLive, cells[e].stamp >= src.stamp { movedWins = false }
+                if movedWins {
+                    var x = src
+                    x.groupId = dest.groupId
+                    x.itemId = dest.itemId
+                    x.groupName = setup.group(dest.groupId)?.displayName ?? src.groupName
+                    x.itemName = setup.item(dest.itemId)?.displayName ?? src.itemName
+                    x.updatedAt = now
+                    x.clearedAt = nil
+                    if let e = existing { cells[e] = x } else { cells.append(x) }
+                }
+                cells[j].value = nil
+                cells[j].na = nil
+                cells[j].comment = nil
+                cells[j].levelName = nil
+                cells[j].clearedAt = now
+                hit = true
+            }
+            if hit {
+                list[i].scores = cells
+                list[i].updatedAt = now
+                changed = true
+            }
+        }
+        if changed { b.sessions = list }
+        return b
     }
 }

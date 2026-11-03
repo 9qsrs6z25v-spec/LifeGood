@@ -16,6 +16,14 @@ import SwiftUI
 //   confirmationDialog／alert 用 isPresented: 綁一個 Bool＋另一個 @State 存要做的那一筆。
 // • §13：每一格的評語不做（這一頁本來就沒有評語）。
 // 要退回 v1a-2 這一件：git checkout 69f6fa6 -- LifeGood/Views/Life/CompetencySetupView.swift（回到 v1a-1：系統列點了改名、新增共用項目三個系統都有）。
+// MARK: - [v25.601 職能雷達 v1b] 主頁多了：「職等目標」一節（列每個職等 → CompetencyTargetsView、已刪除職等〔刪掉這組目標〕、
+//   沒職等提示、〔用建議值〕只在 shouldOfferSuggestion 時）、人格／共用／系統三節頂上重名「有兩個 X〔合併〕」、
+//   改範圍時有目標改問 confirmationDialog（進位／捨去／照比例畫 → setCompetencyRange(…retarget:)）、
+//   改範圍後〔套用範本〕名字＋說明一起填（G3；radar/build/v1b/brief.md §4 G3、judge §3.3、§4.4、§13）。
+// • App 不會自己寫目標：只有按〔用建議值〕、改範圍時選了換整數、目標頁動手才寫。
+// • 看不擋（職等目標列點得進去）；〔用建議值〕〔刪掉這組目標〕〔合併〕、改範圍要訂閱；唯讀時按鈕不出現或不能按。
+// 要退回 v1b 這一件：git checkout 92b02fe -- LifeGood/Views/Life/CompetencySetupView.swift（回到 v1a-2；
+//   但 CompetencyTargetsView 就沒有入口了，那個檔要一起換回骨架或刪掉＋pbxproj 四處）。
 // 骨架（主控）：型別名與 init 參數是跨組契約，不准改。這個檔自己的型別一律 CompSetup… 前綴、private。
 
 struct CompetencySetupView: View {
@@ -38,6 +46,11 @@ struct CompetencySetupView: View {
     @State private var showOrphanConfirm = false
     @State private var flash: CompSetupFlash?
     @State private var flashTask: Task<Void, Never>?
+    // [v25.601 職能雷達 v1b] 重名〔合併〕、已刪除職等〔刪掉這組目標〕的確認。要退回這一件：刪這四行與用到的地方
+    @State private var pendingMerge: CompetencyDuplicate?
+    @State private var showMergeConfirm = false
+    @State private var pendingTargetDelete: CompetencyGradeTargetRow?
+    @State private var showTargetDelete = false
 
     private var setup: CompetencySetupBook { lifeStore.competencySetup }
     private var readOnly: Bool { lifeStore.competencyReadOnly }
@@ -63,6 +76,10 @@ struct CompetencySetupView: View {
             } message: { o in
                 Text(o.confirmMessage)
             }
+            .modifier(CompSetupV1bAlerts(showMerge: $showMergeConfirm, merge: pendingMerge,
+                                         onMerge: { d in mergeDuplicate(d) },
+                                         showTargetDelete: $showTargetDelete, targetDelete: pendingTargetDelete,
+                                         onDeleteTargets: { r in deleteTargets(r) }))
             .premiumLockAlert(isPresented: $showPremiumAlert)
     }
 
@@ -75,6 +92,7 @@ struct CompetencySetupView: View {
                 skillSection
                 sharedSection
                 systemSection
+                targetSection
                 previewSection
                 archivedSection
                 orphanSection
@@ -160,9 +178,11 @@ struct CompetencySetupView: View {
     private var traitSection: some View {
         let items: [CompetencyItem] = setup.traitItems
         Section {
+            dupRows(kind: "trait")
             CompSetupRangeRow(current: setup.traitRange, disabled: readOnly, isPremium: subscription.isPremium,
                               onLocked: { showPremiumAlert = true },
-                              onCommit: { r in commitRange(CompetencySetupBook.traitScaleId, r) })
+                              retargetFor: { r in retargetPlan(CompetencySetupBook.traitScaleId, r) },
+                              onCommit: { r, lv in commitRange(CompetencySetupBook.traitScaleId, r, lv) })
             namesRow(CompetencySetupBook.traitScaleId)
             ForEach(items) { it in
                 itemRow(it, trailing: nil)
@@ -186,7 +206,8 @@ struct CompetencySetupView: View {
         Section {
             CompSetupRangeRow(current: setup.skillRange, disabled: readOnly, isPremium: subscription.isPremium,
                               onLocked: { showPremiumAlert = true },
-                              onCommit: { r in commitRange(CompetencySetupBook.skillScaleId, r) })
+                              retargetFor: { r in retargetPlan(CompetencySetupBook.skillScaleId, r) },
+                              onCommit: { r, lv in commitRange(CompetencySetupBook.skillScaleId, r, lv) })
             namesRow(CompetencySetupBook.skillScaleId)
         } header: {
             Text("本職學能")
@@ -199,6 +220,7 @@ struct CompetencySetupView: View {
     private var sharedSection: some View {
         let items: [CompetencyItem] = setup.sharedItems
         Section {
+            dupRows(kind: "shared")
             ForEach(items) { it in
                 itemRow(it, trailing: systemCountText(it.id))
             }
@@ -215,6 +237,7 @@ struct CompetencySetupView: View {
     private var systemSection: some View {
         let systems: [CompetencyGroup] = setup.activeSystems
         Section {
+            dupRows(kind: "system")
             ForEach(systems) { g in
                 systemRow(g)
             }
@@ -224,6 +247,39 @@ struct CompetencySetupView: View {
             Text("系統（\(systems.count)）")
         } footer: {
             Text(Self.systemFooter)
+        }
+    }
+
+    // [v25.601 職能雷達 v1b] 職等目標（judge §4.4「E2　人格 3｜本職 3 ›」）：職等表每一個＋已刪除的；
+    // 〔用建議值〕只在 shouldOfferSuggestion 時（App 不自己寫目標）。要退回這一件：刪這一節、targetRow、body 裡那一行
+    @ViewBuilder
+    private var targetSection: some View {
+        let grades: [CompetencyGradeRef] = lifeStore.competencyGradeRefs
+        let rows: [CompetencyGradeTargetRow] = CompetencyMath.gradeTargetRows(setup: setup, grades: grades)
+        Section {
+            if grades.isEmpty {
+                Text(Self.noGradeNote)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if offerSuggestion {
+                Button {
+                    suggest()
+                } label: {
+                    Label(suggestionTitle, systemImage: "wand.and.stars")
+                }
+            }
+            ForEach(rows) { row in
+                targetRow(row)
+            }
+        } header: {
+            Text("職等目標")
+        } footer: {
+            // 職等表空：只留上面那一行（brief G3-1「不出現其他東西」）
+            if !grades.isEmpty {
+                Text(Self.targetFooter)
+            }
         }
     }
 
@@ -367,6 +423,32 @@ struct CompetencySetupView: View {
             }
     }
 
+    /// [v25.601 職能雷達 v1b] 職等目標一列 → 職等目標頁（看不擋）；已刪除的職等往左滑〔刪掉這組目標〕（紅；不用 role: .destructive）
+    private func targetRow(_ row: CompetencyGradeTargetRow) -> some View {
+        NavigationLink {
+            CompetencyTargetsView(gradeId: row.id)
+        } label: {
+            CompSetupListRow(title: row.title, detail: row.summary, trailing: nil)
+        }
+        .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+            if row.deleted && !readOnly {
+                Button {
+                    askDeleteTargets(row)
+                } label: {
+                    Label("刪掉這組目標", systemImage: "trash")
+                }
+                .tint(.red)
+            }
+        }
+    }
+
+    /// [v25.601 職能雷達 v1b] 那一節頂上的重名「有兩個 Gas System〔合併〕」（kind "trait"／"shared"／"system"；沒有就什麼都不畫）
+    private func dupRows(kind: String) -> some View {
+        ForEach(dups(kind: kind)) { d in
+            CompSetupDupRow(text: d.text, disabled: readOnly, onMerge: { askMerge(d) })
+        }
+    }
+
     private func addButton(_ title: String, kind: CompSetupNameKind) -> some View {
         Button {
             openAdd(kind)
@@ -430,9 +512,33 @@ struct CompetencySetupView: View {
         CompetencyMath.levelNamesSummary(setup.scale(scaleId), range: range(of: scaleId))
     }
 
+    /// [v25.601 職能雷達 v1b] 這一種的重名（lifeStore.competencyDuplicates 每次重算：合併完那一行自己不見）
+    private func dups(kind: String) -> [CompetencyDuplicate] {
+        lifeStore.competencyDuplicates.filter { $0.kind == kind }
+    }
+
+    /// [v25.601 職能雷達 v1b] 〔用建議值〕要不要出現（唯讀不出現）
+    private var offerSuggestion: Bool {
+        guard !readOnly else { return false }
+        return CompetencyMath.shouldOfferSuggestion(setup: setup, grades: lifeStore.competencyGradeRefs)
+    }
+
+    /// [v25.601 職能雷達 v1b] 「用建議值（E2 每項 3、E3 每項 4）」（照現在的範圍換算）
+    private var suggestionTitle: String {
+        let list: [CompetencySuggestedTarget] = CompetencyMath.suggestedTargets(
+            grades: lifeStore.competencyGradeRefs, traitRange: setup.traitRange, skillRange: setup.skillRange)
+        return "用建議值（" + CompetencyMath.suggestionText(list) + "）"
+    }
+
+    /// [v25.601 職能雷達 v1b] 改範圍時這一區有目標、目標的範圍跟新範圍不一樣才有（judge §3.3「要 5 還是 6」）
+    private func retargetPlan(_ scaleId: String, _ r: CompetencyRange) -> CompetencyRetargetPlan? {
+        CompetencyMath.retargetPlan(setup: lifeStore.competencySetup, scaleId: scaleId, to: r,
+                                    grades: lifeStore.competencyGradeRefs)
+    }
+
     private var namesQuestionTitle: String {
         guard let q = namesQuestion else { return "" }
-        return CompetencyMath.namesQuestionText(from: q.oldRange, to: q.newRange)
+        return CompetencyMath.namesQuestionText(from: q.oldRange, to: q.newRange, withDetails: q.hasDetails)
     }
 
     private var deleteTitle: String { pendingDelete?.deleteTitle ?? "" }
@@ -518,15 +624,19 @@ struct CompetencySetupView: View {
     }
 
     /// 說明框〔改〕→ 寫範圍；[v25.600 職能雷達 v1a-2] 寫之前先算要不要問名字（舊範圍裡已經有名字、新範圍 ≤ 11 級），寫成功才問
-    private func commitRange(_ scaleId: String, _ r: CompetencyRange) {
+    /// [v25.601 職能雷達 v1b] levels＝改範圍時選的「目標換成新範圍的整數」（〔照比例畫〕、沒目標時空的）；分數一個字都不動。
+    /// 要退回這一件：拿掉 levels、改回 setCompetencyRange(scaleId:low:high:)
+    private func commitRange(_ scaleId: String, _ r: CompetencyRange, _ levels: [UUID: Int]) {
         guard gate() else { return }
         let old: CompetencyRange = range(of: scaleId)
         let ask: Bool = CompetencyMath.shouldAskNames(scale: setup.scale(scaleId), from: old, to: r)
+        // [v25.601 v1b 裁定修] 舊範圍有說明時，問句寫「名字、說明」（只寫了說明也會問）。要退回這一件：拿掉 hasDetails
+        let hasDetails: Bool = CompetencyMath.hasLevelDetails(setup.scale(scaleId), in: old)
         let store: LifeStore = lifeStore
         DispatchQueue.main.async {
-            let ok: Bool = store.setCompetencyRange(scaleId: scaleId, low: r.low, high: r.high)
+            let ok: Bool = store.setCompetencyRange(scaleId: scaleId, low: r.low, high: r.high, retarget: levels)
             if ok && ask {
-                askNames(CompSetupNamesQuestion(scaleId: scaleId, oldRange: old, newRange: r))
+                askNames(CompSetupNamesQuestion(scaleId: scaleId, oldRange: old, newRange: r, hasDetails: hasDetails))
             }
         }
     }
@@ -540,24 +650,28 @@ struct CompetencySetupView: View {
     }
 
     /// 〔套用 OJT 五級〕等：照新範圍從最低分往上一級一個名字；級數不一樣時那一列下面一行說明
+    /// [v25.601 職能雷達 v1b] §13：範本＝名字＋說明一起填（只有按了才填）。要退回這一件：改回 setCompetencyLevelNames(scaleId:names:)
     private func applyTemplate(_ t: CompetencyLevelTemplate, _ q: CompSetupNamesQuestion) {
         let result: (names: [Int: String], note: String?) = CompetencyMath.applyTemplate(t, to: q.newRange)
         let names: [Int: String] = result.names
+        let details: [Int: String] = CompetencyMath.applyTemplateDetails(t, to: q.newRange)
         let scaleId: String = q.scaleId
         let store: LifeStore = lifeStore
         DispatchQueue.main.async {
-            store.setCompetencyLevelNames(scaleId: scaleId, names: names)
+            store.setCompetencyLevelNames(scaleId: scaleId, names: names, details: details)
         }
         if let note = result.note {
             showFlash(CompSetupFlash(scaleId: scaleId, text: note))
         }
     }
 
-    /// 〔先只用數字〕：現在範圍裡的名字清掉（範圍外的、說明、別台的欄位原樣留著）
+    /// 〔先只用數字〕：現在範圍裡的名字清掉（範圍外的、別台的欄位原樣留著）
+    /// [v25.601 v1b 驗證修] 說明也一起清（跟名字頁的〔先只用數字〕一樣）：不然 1–5 時套的範本說明，改成 1–10 後
+    /// 在 4 分底下還會寫 1–5 那一句。要退回這一件：改回 setCompetencyLevelNames(scaleId: scaleId, names: [:])
     private func clearNames(_ scaleId: String) {
         let store: LifeStore = lifeStore
         DispatchQueue.main.async {
-            store.setCompetencyLevelNames(scaleId: scaleId, names: [:])
+            store.setCompetencyLevelNames(scaleId: scaleId, names: [:], details: [:])
         }
     }
 
@@ -673,6 +787,46 @@ struct CompetencySetupView: View {
         }
     }
 
+    /// [v25.601 職能雷達 v1b] 〔用建議值〕：照職等表給 E2、E3 的人格、本職「這一區每項」（已經有的那一層不動）
+    private func suggest() {
+        guard gate() else { return }
+        let store: LifeStore = lifeStore
+        DispatchQueue.main.async {
+            _ = store.applyCompetencySuggestedTargets()
+        }
+    }
+
+    /// [v25.601 職能雷達 v1b] 往左滑〔刪掉這組目標〕→ 確認
+    private func askDeleteTargets(_ row: CompetencyGradeTargetRow) {
+        guard gate() else { return }
+        pendingTargetDelete = row
+        showTargetDelete = true
+    }
+
+    private func deleteTargets(_ row: CompetencyGradeTargetRow) {
+        guard !readOnly else { return }
+        let gid: UUID = row.id
+        let store: LifeStore = lifeStore
+        DispatchQueue.main.async {
+            store.deleteCompetencyTargets(gradeId: gid)
+        }
+    }
+
+    /// [v25.601 職能雷達 v1b] 〔合併〕→ 確認（留建得最早的；分數搬過去、另一個停用）
+    private func askMerge(_ d: CompetencyDuplicate) {
+        guard gate() else { return }
+        pendingMerge = d
+        showMergeConfirm = true
+    }
+
+    private func mergeDuplicate(_ d: CompetencyDuplicate) {
+        guard !readOnly else { return }
+        let store: LifeStore = lifeStore
+        DispatchQueue.main.async {
+            store.mergeCompetencyDuplicate(d)
+        }
+    }
+
     /// 小提示幾秒後消失（照〔職能〕分頁 toast 的 Task 寫法）
     private func showFlash(_ f: CompSetupFlash) {
         flashTask?.cancel()
@@ -705,6 +859,14 @@ struct CompetencySetupView: View {
     private static let orphanFooter =
         "刪掉部屬時，職能評分會先留著。確定那幾位同仁不會再回到名單（另一台也同步好了）再清。"
 
+    // [v25.601 職能雷達 v1b] 職等目標一節的字
+    private static let noGradeNote =
+        "還沒有職等。先到 部門職等 新增（例：E2、E3），這裡才能訂目標。"
+
+    private static let targetFooter =
+        "建議先訂好目標再評下一輪。目標照每位同仁現在的職等套用：那一格 → 那個系統 → 這一區每項。"
+        + "職等表的順序跟 部門職等 頁一樣。"
+
     private static let bottomNote =
         "項目全課共用一份。改名，以前的分數跟著新名字；停用，以前的評分都留著，可以恢復。"
 }
@@ -716,6 +878,8 @@ private struct CompSetupNamesQuestion: Equatable {
     let scaleId: String
     let oldRange: CompetencyRange
     let newRange: CompetencyRange
+    /// [v25.601 v1b 裁定修] 舊範圍有每一分的說明（問句寫「名字、說明」）
+    var hasDetails: Bool = false
 }
 
 /// 〔自己改…〕打開名字頁（sheet(item:)）
@@ -734,6 +898,63 @@ private struct CompSetupFlash: Equatable {
 private struct CompSetupSystemChoice: Identifiable, Equatable {
     let id: UUID
     let name: String
+}
+
+// MARK: - [v25.601 職能雷達 v1b] 重名一列、合併／刪掉目標的確認框（body 的修飾器鏈不再拉長）
+
+/// 「⚠ 有兩個 Gas System　〔合併〕」
+private struct CompSetupDupRow: View {
+    let text: String
+    let disabled: Bool
+    let onMerge: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+                .accessibilityHidden(true)
+            Text(text)
+                .font(.subheadline)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            Button("合併") { onMerge() }
+                .buttonStyle(.borderless)
+                .disabled(disabled)
+        }
+    }
+}
+
+/// 〔合併〕確認（d.confirmTitle／confirmMessage）、〔刪掉這組目標〕確認
+private struct CompSetupV1bAlerts: ViewModifier {
+    @Binding var showMerge: Bool
+    let merge: CompetencyDuplicate?
+    let onMerge: (CompetencyDuplicate) -> Void
+    @Binding var showTargetDelete: Bool
+    let targetDelete: CompetencyGradeTargetRow?
+    let onDeleteTargets: (CompetencyGradeTargetRow) -> Void
+
+    private var mergeTitle: String { merge?.confirmTitle ?? "" }
+
+    private var deleteTitle: String {
+        guard let r = targetDelete else { return "" }
+        return "刪掉「" + r.title + "」的目標？"
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .alert(mergeTitle, isPresented: $showMerge, presenting: merge) { d in
+                Button("合併") { onMerge(d) }
+                Button("取消", role: .cancel) {}
+            } message: { d in
+                Text(d.confirmMessage)
+            }
+            .alert(deleteTitle, isPresented: $showTargetDelete, presenting: targetDelete) { r in
+                Button("刪掉", role: .destructive) { onDeleteTargets(r) }
+                Button("取消", role: .cancel) {}
+            } message: { _ in
+                Text("這個職等的每一項目標都會刪掉，分數不會動。")
+            }
+    }
 }
 
 // MARK: - 一列（名字＋小字＋右邊灰字）
@@ -844,7 +1065,10 @@ private struct CompSetupRangeRow: View {
     let disabled: Bool
     let isPremium: Bool
     let onLocked: () -> Void
-    let onCommit: (CompetencyRange) -> Void
+    /// [v25.601 職能雷達 v1b] 改成這個範圍時目標要不要一起換（nil＝這一區沒目標，照 v1a 的說明框）
+    let retargetFor: (CompetencyRange) -> CompetencyRetargetPlan?
+    /// [v25.601 職能雷達 v1b] 第二個參數＝目標換成新範圍的整數（空＝不換）
+    let onCommit: (CompetencyRange, [UUID: Int]) -> Void
 
     /// 本機草稿（打開時＝現在的）；按〔改成…〕→ 說明框〔改〕才寫
     @State private var low: Int
@@ -853,14 +1077,19 @@ private struct CompSetupRangeRow: View {
     @State private var highText: String
     @State private var hint: String?
     @State private var showConfirm = false
+    // [v25.601 職能雷達 v1b] 有目標時改問 confirmationDialog（進位／捨去／照比例畫）。要退回這一件：刪這兩行與用到的地方
+    @State private var plan: CompetencyRetargetPlan?
+    @State private var showRetarget = false
     @FocusState private var field: CompSetupRangeField?
 
-    init(current: CompetencyRange, disabled: Bool, isPremium: Bool,
-         onLocked: @escaping () -> Void, onCommit: @escaping (CompetencyRange) -> Void) {
+    init(current: CompetencyRange, disabled: Bool, isPremium: Bool, onLocked: @escaping () -> Void,
+         retargetFor: @escaping (CompetencyRange) -> CompetencyRetargetPlan?,
+         onCommit: @escaping (CompetencyRange, [UUID: Int]) -> Void) {
         self.current = current
         self.disabled = disabled
         self.isPremium = isPremium
         self.onLocked = onLocked
+        self.retargetFor = retargetFor
         self.onCommit = onCommit
         _low = State(initialValue: current.low)
         _high = State(initialValue: current.high)
@@ -893,13 +1122,14 @@ private struct CompSetupRangeRow: View {
         .onChange(of: lowText) { _, t in liveParse(.low, t) }
         .onChange(of: highText) { _, t in liveParse(.high, t) }
         .onChange(of: field) { old, _ in commitText(old) }
-        .alert("改分數範圍", isPresented: $showConfirm) {
-            Button("改") { onCommit(draft) }
-            Button("取消", role: .cancel) { resync(current) }
-        } message: {
-            Text(CompetencyMath.rangeChangeText(from: current, to: draft))
-        }
+        .modifier(CompSetupRangeDialogs(showConfirm: $showConfirm, showRetarget: $showRetarget, plan: plan,
+                                        message: changeText,
+                                        onCommit: { lv in commitDraft(lv) },
+                                        onCancel: { resync(current) }))
     }
+
+    /// 說明框的字（CompetencyMath.rangeChangeText）
+    private var changeText: String { CompetencyMath.rangeChangeText(from: current, to: draft) }
 
     private var headerLine: some View {
         HStack {
@@ -1011,7 +1241,20 @@ private struct CompSetupRangeRow: View {
             onLocked()
             return
         }
-        showConfirm = true
+        // [v25.601 職能雷達 v1b] 這一區有目標、目標的範圍跟新範圍不一樣 → 問目標要不要一起換；沒有 → 照 v1a 的說明框
+        if let p = retargetFor(draft) {
+            plan = p
+            showRetarget = true
+        } else {
+            plan = nil
+            showConfirm = true
+        }
+    }
+
+    /// [v25.601 職能雷達 v1b] 〔改〕／選了一個目標選項：levels 空＝目標不換（照比例畫、沒有目標）
+    private func commitDraft(_ levels: [UUID: Int]) {
+        let r: CompetencyRange = draft
+        onCommit(r, levels)
     }
 
     private func resync(_ r: CompetencyRange) {
@@ -1020,6 +1263,43 @@ private struct CompSetupRangeRow: View {
         lowText = String(r.low)
         highText = String(r.high)
         hint = nil
+    }
+}
+
+// MARK: - [v25.601 職能雷達 v1b] 改範圍的說明框（沒目標：v1a 那個 alert；有目標：confirmationDialog 多一行目標換算）
+
+private struct CompSetupRangeDialogs: ViewModifier {
+    @Binding var showConfirm: Bool
+    @Binding var showRetarget: Bool
+    let plan: CompetencyRetargetPlan?
+    /// CompetencyMath.rangeChangeText(from:to:)
+    let message: String
+    let onCommit: ([UUID: Int]) -> Void
+    let onCancel: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .alert("改分數範圍", isPresented: $showConfirm) {
+                Button("改") { onCommit([:]) }
+                Button("取消", role: .cancel) { onCancel() }
+            } message: {
+                Text(message)
+            }
+            .confirmationDialog("改分數範圍", isPresented: $showRetarget, titleVisibility: .visible,
+                                presenting: plan) { p in
+                retargetActions(p)
+            } message: { p in
+                Text(message + "\n" + p.message)
+            }
+    }
+
+    /// 〔改，目標換成 6、8（進位）〕〔改，目標換成 5、7（捨去）〕〔改，目標照比例畫〕〔取消〕
+    @ViewBuilder
+    private func retargetActions(_ p: CompetencyRetargetPlan) -> some View {
+        ForEach(p.choices) { c in
+            Button(c.title) { onCommit(c.levels) }
+        }
+        Button("取消", role: .cancel) { onCancel() }
     }
 }
 

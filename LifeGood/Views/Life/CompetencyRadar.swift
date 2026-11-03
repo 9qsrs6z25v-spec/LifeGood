@@ -11,6 +11,14 @@ import SwiftUI
 // [v25.600 職能雷達 v1a-2]（radar/build/v1a-2/brief.md §4 G2 8–11）下面橫條那一列在分數後面多寫那一分的名字
 // axis.levelText（「能教人」；名字跟現在不一樣寫「當時：能教人」；§13 沒名字不寫）；↑↓ 顏色照 CompetencyMath.deltaDirection。
 // 檔尾 CompetencyRadarThumb 是設定預覽的小圖（主控寫的）。要退回這一版：CompetencyRadarAxisRowTitle 的 levelText 那兩行拿掉。
+// [v25.601 職能雷達 v1b]（radar/build/v1b/brief.md §1-6、§4 G2 1–6；judge §3.2、§3.8）目標＝第三條線：
+// • 雷達：model.hasTarget 才畫；axis.targetT 的頂點連成 .primary.opacity(0.6) 1.5pt 點線（dash [1, 3]、lineCap .round、不填色），
+//   有目標的軸 < 3 只畫空心小點。ZStack 順序：格線 → 上一次 → 目標 → 這次 → 圈旁小字 → 軸名。不看 showPrevious（模型沒有目標就是不疊）。
+// • 圖例多「┄ 目標 E2」（model.legendTarget）；新人沒評過、只有目標時圖例也出現（只畫目標那一段）。
+// • 橫條：比例條在目標的位置一條 2pt 刻線（overlay 裡的 GeometryReader，高度固定 10）、下面一行 axis.targetText
+//  「目標 3 ✓」（綠）「目標 3・差 1」「目標 3・未評」（灰）；整列 .combine 念得到。
+// • 不做形變動畫、不用 accessibilityChartDescriptor（目標差已經組進 model.accessibilityText）。
+// 要退回這一件：刪 CompetencyRadarTargetLayer、CompetencyRadarBarTick、layout.target、圖例 target、橫條 targetT／targetText 那幾行。
 
 /// 人格特質紫、系統藍綠（跟執掌 (0.18,0.62,0.60) 分開）
 enum CompetencyPalette {
@@ -84,14 +92,18 @@ private struct CompetencyRadarCardContent: View {
     private var legendPrevious: String? {
         (showPrevious && model.hasPrevious) ? model.legendPrevious : nil
     }
+    /// [v25.601 v1b] 有這次或有目標才寫圖例
+    private var showsLegend: Bool { model.legendCurrent != nil || model.legendTarget != nil }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             if isRadar {
                 CompetencyRadarView(model: model, showPrevious: showPrevious)
             }
-            if let current = model.legendCurrent {
-                CompetencyRadarLegend(current: current, previous: legendPrevious, tint: tint)
+            // [v25.601 v1b] 只有目標（新人沒評過）時圖例也出現。要退回這一件：條件改回 if let current = model.legendCurrent
+            if showsLegend {
+                CompetencyRadarLegend(current: model.legendCurrent, previous: legendPrevious,
+                                      target: model.legendTarget, tint: tint)
                     .frame(maxWidth: .infinity, alignment: isRadar ? .center : .leading)
             }
             CompetencyRadarNotes(note: model.note, carriedNote: model.carriedNote)
@@ -129,29 +141,45 @@ private struct CompetencyRadarNotes: View {
     }
 }
 
-/// 圖例一行：「━ 10/30　┅ 4/30」（線型用 Path 畫，色弱一樣分得出）
+/// 圖例一行：「━ 10/30　┅ 4/30　┄ 目標 E2」（線型用 Path 畫，色弱一樣分得出）
+/// [v25.601 v1b] current 可以是 nil（新人沒評過、只有目標）；target＝model.legendTarget
 private struct CompetencyRadarLegend: View {
-    let current: String
+    let current: String?
     let previous: String?
+    let target: String?
     let tint: Color
 
     private var spokenText: String {
-        if let p = previous { return "實線是 " + current + "，灰色虛線是 " + p }
-        return "實線是 " + current
+        var s: String = ""
+        if let c = current {
+            s = "實線是 " + c
+            if let p = previous { s += "，灰色虛線是 " + p }
+        }
+        if let t = target {
+            s += (s.isEmpty ? "" : "，") + "點線是 " + t
+        }
+        return s
     }
 
     var body: some View {
         HStack(spacing: 6) {
-            Capsule()
-                .fill(tint)
-                .frame(width: 16, height: 2)
-            Text(current)
-            if let p = previous {
+            if let c = current {
+                Capsule()
+                    .fill(tint)
+                    .frame(width: 16, height: 2)
+                Text(c)
+            }
+            if current != nil, let p = previous {
                 CompetencyRadarPolygon(points: [CGPoint(x: 0, y: 1), CGPoint(x: 16, y: 1)], closed: false)
                     .stroke(Color.gray, style: StrokeStyle(lineWidth: 1.5, dash: [3, 2]))
                     .frame(width: 16, height: 2)
                     .padding(.leading, 8)
                 Text(p)
+            }
+            if let t = target {
+                CompetencyRadarLegendTargetLine()
+                    .padding(.leading, current == nil ? 0 : 8)
+                Text(t)
             }
         }
         .font(.caption2)
@@ -159,6 +187,21 @@ private struct CompetencyRadarLegend: View {
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(spokenText)
     }
+}
+
+/// [v25.601 v1b] 圖例裡目標那一小段點線（跟雷達的目標點線同一個 StrokeStyle）
+private struct CompetencyRadarLegendTargetLine: View {
+    var body: some View {
+        CompetencyRadarPolygon(points: [CGPoint(x: 1, y: 1), CGPoint(x: 15, y: 1)], closed: false)
+            .stroke(CompetencyRadarTargetStyle.color, style: CompetencyRadarTargetStyle.stroke)
+            .frame(width: 16, height: 2)
+    }
+}
+
+/// [v25.601 v1b] 目標線的顏色與線型（雷達、圖例、橫條刻線共用；brief §1-16 寫死 .primary.opacity(0.6)）
+private enum CompetencyRadarTargetStyle {
+    static let color: Color = Color.primary.opacity(0.6)
+    static let stroke: StrokeStyle = StrokeStyle(lineWidth: 1.5, lineCap: .round, dash: [1, 3])
 }
 
 // MARK: - 雷達本體
@@ -204,6 +247,8 @@ private struct CompetencyRadarChart: View {
         ZStack {
             CompetencyRadarGridLayer(layout: lay)
             CompetencyRadarPreviousLayer(points: lay.previous)
+            // [v25.601 v1b] 目標點線（上一次之上、這次之下）。要退回這一件：刪這一行
+            CompetencyRadarTargetLayer(points: lay.target)
             CompetencyRadarCurrentLayer(layout: lay, tint: tint, fillOpacity: fillOpacity,
                                         drawsPolygon: model.drawsPolygon)
                 .id(layerId)
@@ -270,6 +315,21 @@ private struct CompetencyRadarPreviousLayer: View {
         } else if !points.isEmpty {
             CompetencyRadarDots(points: points, diameter: 4)
                 .fill(Color.gray)
+        }
+    }
+}
+
+/// [v25.601 v1b] 目標：.primary 0.6、1.5pt 點線（dash [1, 3]、圓頭）、不填色；有目標的軸 < 3 只畫空心小點
+private struct CompetencyRadarTargetLayer: View {
+    let points: [CGPoint]
+
+    var body: some View {
+        if points.count >= 3 {
+            CompetencyRadarPolygon(points: points, closed: true)
+                .stroke(CompetencyRadarTargetStyle.color, style: CompetencyRadarTargetStyle.stroke)
+        } else if !points.isEmpty {
+            CompetencyRadarDots(points: points, diameter: 5)
+                .stroke(CompetencyRadarTargetStyle.color, lineWidth: 1)
         }
     }
 }
@@ -398,13 +458,24 @@ struct CompetencyRadarAxisRow: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             CompetencyRadarAxisRowTitle(axis: axis, prefix: prefix)
-            CompetencyRadarAxisRowBar(t: axis.t, previousT: showPrevious ? axis.previousT : nil, tint: tint)
+            CompetencyRadarAxisRowBar(t: axis.t, previousT: showPrevious ? axis.previousT : nil,
+                                      targetT: axis.targetT, tint: tint)
             if let o = axis.originalText {
                 Text(o).font(.caption2).foregroundStyle(.secondary)
+            }
+            // [v25.601 v1b]「目標 3 ✓」「目標 3・差 1」「目標 3・未評」（不適用、沒有目標 nil）。要退回這一件：刪這三行
+            if let tx = axis.targetText {
+                Text(tx).font(.caption2).foregroundStyle(targetColor)
+                    .accessibilityLabel(targetSpoken)
             }
         }
         .accessibilityElement(children: .combine)
     }
+
+    /// [v25.601 v1b] 達標綠、其他灰
+    private var targetColor: Color { axis.targetMet == true ? Color.green : Color.secondary }
+    /// [v25.601 v1b 審查修] VoiceOver 不念「✓」的符號名稱：「目標 3，達標」（跟雷達那一句一樣）
+    private var targetSpoken: String { (axis.targetText ?? "").replacingOccurrences(of: " ✓", with: "，達標") }
 }
 
 /// 「緊急應變　4　能教人　↑2（4/30）」；沒評「未評」、不適用「不適用」（灰）
@@ -463,9 +534,11 @@ private struct CompetencyRadarAxisRowTitle: View {
 }
 
 /// 細比例條（這次，主題色）＋上一次淡色短條（灰）。長度＝比例 t（brief §4 G2：橫條看準確數字）
+/// [v25.601 v1b] targetT 有就在比例條上畫一條目標刻線（高 10，比例條在中間）
 private struct CompetencyRadarAxisRowBar: View {
     let t: Double?
     let previousT: Double?
+    var targetT: Double? = nil
     let tint: Color
 
     var body: some View {
@@ -478,6 +551,10 @@ private struct CompetencyRadarAxisRowBar: View {
                 }
             }
             .frame(height: 6)
+            .frame(height: targetT == nil ? 6 : 10)
+            .overlay(alignment: .leading) {
+                CompetencyRadarBarTick(fraction: targetT)
+            }
             if let p = previousT {
                 CompetencyRadarBarFill(fraction: p)
                     .fill(Color.gray.opacity(0.45))
@@ -485,6 +562,30 @@ private struct CompetencyRadarAxisRowBar: View {
             }
         }
         .accessibilityHidden(true)
+    }
+}
+
+/// [v25.601 v1b] 目標刻線：2pt 寬、10pt 高，中心在比例 fraction（夾在條內）；nil 不畫。
+/// GeometryReader 只在 overlay 裡（大小＝比例條那一塊），不會撐開版面
+private struct CompetencyRadarBarTick: View {
+    let fraction: Double?
+
+    var body: some View {
+        if let f = fraction {
+            GeometryReader { g in
+                Rectangle()
+                    .fill(CompetencyRadarTargetStyle.color)
+                    .frame(width: 2, height: 10)
+                    .offset(x: Self.offsetX(width: g.size.width, fraction: f))
+            }
+        }
+    }
+
+    /// 刻線左緣的 x：中心對準 width×fraction，夾在 0…width−2
+    static func offsetX(width: CGFloat, fraction: Double) -> CGFloat {
+        let f: CGFloat = CGFloat(min(max(fraction, 0), 1))
+        let x: CGFloat = width * f - 1
+        return min(max(x, 0), max(width - 2, 0))
     }
 }
 
@@ -638,6 +739,8 @@ private struct CompetencyRadarLayout {
     var dashedEdges: [CompetencyRadarSegment] = []
     /// 上一次有分數的頂點（不疊時空）
     var previous: [CGPoint] = []
+    /// [v25.601 v1b] 有目標的軸的頂點（模型沒有目標時空）
+    var target: [CGPoint] = []
     var labels: [CompetencyRadarLabelSpot] = []
 
     init(model: CompetencyChartModel, width: CGFloat, lineHeight: CGFloat, numbered: Bool, showPrevious: Bool) {
@@ -706,6 +809,12 @@ private struct CompetencyRadarLayout {
         if showPrevious && model.hasPrevious {
             let pts: [Double?] = model.axes.map { $0.previousT }
             previous = CompetencyMath.vertices(pts, radius: r).map { cg($0.x, $0.y) }
+        }
+
+        // 4b. [v25.601 v1b] 目標（不看 showPrevious：模型裡沒有目標就是不疊）
+        if model.hasTarget {
+            let tts: [Double?] = model.axes.map { $0.targetT }
+            target = CompetencyMath.vertices(tts, radius: r).map { cg($0.x, $0.y) }
         }
 
         // 5. 標籤換成絕對座標

@@ -9713,3 +9713,158 @@ extension LifeStore {
         return nil
     }
 }
+
+// MARK: - [v25.601 職能雷達 v1b] 職等目標、每一分的說明、改範圍時目標一起換、重名〔合併〕
+//（radar/judge.md §7 v1b、§3.3、§3.6、§4.4、§5、§13；radar/build/v1b/brief.md §2.3）
+// 跟上面兩段同一套規矩：每支一個 batched（mutateCompetencySetup／mutateCompetencyRatings；合併一次 batched 寫兩包）、
+// 唯讀時一支都不寫、訂閱由畫面擋。App 不會自己寫目標：只有使用者按〔用建議值〕、Stepper、〔刪掉這組目標〕、改範圍選了才寫。
+// 沒有新的同步鍵、Competency.swift 一個欄位都沒加。sim：radar/build/v1b/sim_v1b.py（set_target、suggest、retarget、merge_dup…）。
+
+extension LifeStore {
+    // MARK: 職等（照職等表順序）
+
+    /// 目標用的職等表（職等字數字感知排序，跟 部門職等 頁一樣）
+    var competencyGradeRefs: [CompetencyGradeRef] { CompetencyMath.gradeRefs(gradeTitles) }
+
+    /// 這位同仁的職等（目標用；部屬身上的 id 可能是已經刪掉的職等）
+    func competencyGradeContext(for subordinateId: UUID) -> CompetencyGradeContext {
+        let current: UUID? = subordinates.first(where: { $0.id == subordinateId })?.gradeTitleId
+        return CompetencyGradeContext(grades: competencyGradeRefs, currentId: current)
+    }
+
+    /// 這位同仁現在的職等（職等表裡有的才算；評分畫面「E2 目標 3」用）
+    func competencyCurrentGrade(for subordinateId: UUID) -> CompetencyGradeRef? {
+        let ctx: CompetencyGradeContext = competencyGradeContext(for: subordinateId)
+        guard let cid = ctx.currentId else { return nil }
+        return ctx.grades.first { $0.id == cid }
+    }
+
+    // MARK: 職等目標（judge §4.4「職等目標」一節）
+
+    /// 訂一層目標：scope＝"trait"／"skill"；groupId、itemId 都 nil＝這一區每項；只有 groupId＝那個系統每項；都有＝那一格。
+    /// level nil＝拿掉這一層（跟上一層一樣）。範圍＝現在的範圍；職稱快照照現在的職等表
+    func setCompetencyTarget(gradeId: UUID, scope: String, groupId: UUID?, itemId: UUID?, level: Int?) {
+        guard scope == CompetencyMath.traitScope || scope == CompetencyMath.skillScope else { return }
+        let label: String? = competencyGradeRefs.first(where: { $0.id == gradeId })?.label
+        let newId = UUID()
+        mutateCompetencySetup { b, now in
+            b = CompetencyMath.settingTarget(b, gradeId: gradeId, gradeLabel: label, scope: scope, groupId: groupId,
+                                             itemId: itemId, level: level, newId: newId, now: now)
+        }
+    }
+
+    /// 〔用建議值〕：照職等表給 E2、E3（CompetencyMath.suggestedTargets）的人格、本職「這一區每項」；已經有的那一層不動。
+    /// 回傳寫了幾個職等（0＝沒東西可寫或唯讀）
+    @discardableResult
+    func applyCompetencySuggestedTargets() -> Int {
+        guard !competencySetup.isReadOnlyHere else { return 0 }
+        let refs: [CompetencyGradeRef] = competencyGradeRefs
+        let plan: [CompetencySuggestedTarget] = CompetencyMath.suggestedTargets(
+            grades: refs, traitRange: competencySetup.traitRange, skillRange: competencySetup.skillRange)
+        guard !plan.isEmpty else { return 0 }
+        var count = 0
+        mutateCompetencySetup { b, now in
+            for s in plan {
+                let table: [CompetencyTargetKey: CompetencyTarget] = CompetencyMath.targetTable(b)
+                let tKey = CompetencyTargetKey(gradeId: s.id, scope: CompetencyMath.traitScope, groupId: nil, itemId: nil)
+                let sKey = CompetencyTargetKey(gradeId: s.id, scope: CompetencyMath.skillScope, groupId: nil, itemId: nil)
+                var wrote = false
+                if table[tKey] == nil {
+                    b = CompetencyMath.settingTarget(b, gradeId: s.id, gradeLabel: s.label, scope: CompetencyMath.traitScope,
+                                                     groupId: nil, itemId: nil, level: s.traitLevel, newId: UUID(), now: now)
+                    wrote = true
+                }
+                if table[sKey] == nil {
+                    b = CompetencyMath.settingTarget(b, gradeId: s.id, gradeLabel: s.label, scope: CompetencyMath.skillScope,
+                                                     groupId: nil, itemId: nil, level: s.skillLevel, newId: UUID(), now: now)
+                    wrote = true
+                }
+                if wrote { count += 1 }
+            }
+        }
+        return count
+    }
+
+    /// 〔刪掉這組目標〕（已刪除的職等、或不想要了）：這個職等的每一層都蓋墓碑
+    func deleteCompetencyTargets(gradeId: UUID) {
+        mutateCompetencySetup { b, now in
+            var list: [CompetencyTarget] = b.allTargets
+            var changed = false
+            for i in list.indices where list[i].deletedAt == nil && list[i].gradeTitleId == gradeId {
+                list[i].deletedAt = now
+                list[i].updatedAt = now
+                changed = true
+            }
+            if changed { b.targets = list }
+        }
+    }
+
+    /// 改範圍＋（選了的話）目標一起換成新範圍的整數（CompetencyMath.retargetPlan 的 choice.levels）。一次存檔。
+    /// 原始分數一個字都不動；retarget 空＝跟 setCompetencyRange(scaleId:low:high:) 一樣
+    @discardableResult
+    func setCompetencyRange(scaleId: String, low: Int, high: Int, retarget: [UUID: Int]) -> Bool {
+        guard CompetencyRange.isValid(low: low, high: high),
+              scaleId == CompetencySetupBook.traitScaleId || scaleId == CompetencySetupBook.skillScaleId else { return false }
+        let r = CompetencyRange(low: low, high: high)
+        mutateCompetencySetup { b, now in
+            var sc = b.scale(scaleId) ?? CompetencyScale(id: scaleId)
+            if sc.low != low || sc.high != high {
+                sc.low = low
+                sc.high = high
+                sc.updatedAt = now
+                b.upsertScale(sc)
+            }
+            b = CompetencyMath.applyingRetarget(b, levels: retarget, range: r, now: now)
+        }
+        return true
+    }
+
+    // MARK: 每一分的說明（§13：出廠空；範圍裡的照草稿寫，範圍外的、名字、別台的欄位原樣留著）
+
+    /// 名字頁〔完成〕（名字＋說明一起寫；details 空＝說明全部清掉）
+    func setCompetencyLevelNames(scaleId: String, names: [Int: String], details: [Int: String]) {
+        guard scaleId == CompetencySetupBook.traitScaleId || scaleId == CompetencySetupBook.skillScaleId else { return }
+        mutateCompetencySetup { b, now in
+            var sc = b.scale(scaleId) ?? CompetencyScale(id: scaleId, low: 1, high: 5)
+            let withNames: [CompetencyLevel]? = CompetencyMath.mergedLevels(existing: sc.levels, names: names, range: sc.range)
+            let merged: [CompetencyLevel]? = CompetencyMath.mergedDetails(existing: withNames, details: details, range: sc.range)
+            guard merged != sc.levels else { return }
+            sc.levels = merged
+            sc.updatedAt = now
+            b.upsertScale(sc)
+        }
+    }
+
+    /// 一個項目自己的每一分說明（蓋過等級表的通用說明；details 空＝全部清掉、回到通用說明）
+    func setCompetencyItemLevelDetails(_ itemId: UUID, details: [Int: String]) {
+        mutateCompetencySetup { b, now in
+            guard var it = b.item(itemId), it.isLive else { return }
+            // 人格特質的項目照人格的範圍；共用學習項目、系統自己的照本職的範圍
+            let range: CompetencyRange = it.groupId == CompetencySetupBook.traitGroupId ? b.traitRange : b.skillRange
+            let merged: [CompetencyLevel]? = CompetencyMath.mergedDetails(existing: it.levelDetails, details: details, range: range)
+            guard merged != it.levelDetails else { return }
+            it.levelDetails = merged
+            it.updatedAt = now
+            b.upsertItem(it)
+        }
+    }
+
+    // MARK: 重名〔合併〕（judge §4.4）
+
+    /// 現在有的重名（設定頁、系統頁那一行「有兩個 Gas System〔合併〕」）
+    var competencyDuplicates: [CompetencyDuplicate] { CompetencyMath.duplicates(setup: competencySetup) }
+
+    /// 〔合併〕：分數搬到留下的那一個、另一個停用（一次存檔：設定、評分兩包一起）
+    func mergeCompetencyDuplicate(_ d: CompetencyDuplicate) {
+        guard !competencyReadOnly else { return }
+        let result = CompetencyMath.mergingDuplicate(d, setup: competencySetup, ratings: competencyRatings, now: Date())
+        batched {
+            var s: CompetencySetupBook = result.setup
+            s.stampFormat()
+            if s != competencySetup { competencySetup = s }
+            var r: CompetencyRatingBook = result.ratings
+            r.stampFormat()
+            if r != competencyRatings { competencyRatings = r }
+        }
+    }
+}

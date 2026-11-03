@@ -10,6 +10,12 @@ import SwiftUI
 // • 共用項目的 Toggle：get 讀 store（拿掉清單），set 走 gate＋確認框；沒訂閱、按〔取消〕都不寫 → sharedRefresh 加一、那幾列換 id 重建，Toggle 回到 store 的樣子。
 // 要退回這一件：把這個檔換回骨架（CompetencySystemPage 只留 Form＋系統名＋標題）。
 // 骨架（主控）：型別名與 init 參數是跨組契約，不准改；body 由 G4 換成真的。自己加的型別一律 CompSys… 前綴、private。
+//
+// MARK: [v25.601 職能雷達 v1b]（G4；radar/build/v1b/brief.md §4 G4 B；judge §4.4 重名偵測、§13 每一分的說明）
+// • 這個系統自己的項目往右滑〔說明〕→ sheet(item:) 打開 CompetencyItemDetailsView(itemId:showsDoneButton: true)（看不擋，頁裡〔完成〕才擋）。
+// • 「這個系統自己的項目」那一節頂上：兩台各自加的同名項目一行「有兩個 鋼瓶更換〔合併〕」（competencyDuplicates 的 kind "own"、groupId 這個系統）
+//   → 擋訂閱 → 確認框 → 下一個 runloop mergeCompetencyDuplicate（LifeStore 一次 batched）；合併完那一行自己不見。
+// 要退回這一件：刪 detailRequest／pendingMerge／showMergeAlert、ownRow 的往右滑、ownSection 頂上的 ForEach、CompSysDetailRequest／CompSysDupRow、第二個 sheet 與合併的 alert。
 
 struct CompetencySystemPage: View {
     let groupId: UUID
@@ -30,6 +36,11 @@ struct CompetencySystemPage: View {
     @State private var showArchiveAlert = false
     /// 複製完頁內一行「已複製成「Gas System（複製）」」
     @State private var copiedText: String?
+    /// [v25.601 v1b] 往右滑〔說明〕：打開那一項的每一分說明（sheet(item:)）
+    @State private var detailRequest: CompSysDetailRequest?
+    /// [v25.601 v1b] 重名〔合併〕先問（存要合併的那一筆）
+    @State private var pendingMerge: CompetencyDuplicate?
+    @State private var showMergeAlert = false
 
     private var setup: CompetencySetupBook { lifeStore.competencySetup }
     private var readOnly: Bool { lifeStore.competencyReadOnly }
@@ -47,6 +58,12 @@ struct CompetencySystemPage: View {
             .toolbar { toolbarContent }
             .sheet(item: $formRequest) { r in
                 CompSysFormSheet(request: r, onCopied: noteCopied).appStores()
+            }
+            .sheet(item: $detailRequest) { r in
+                NavigationStack {
+                    CompetencyItemDetailsView(itemId: r.itemId, showsDoneButton: true)
+                }
+                .appStores()
             }
             .alert(archiveTitle, isPresented: $showArchiveAlert) {
                 Button("停用", role: .destructive) { archiveNow() }
@@ -93,6 +110,12 @@ struct CompetencySystemPage: View {
             Button("取消", role: .cancel) { cancelHide() }
         } message: {
             Text(CompetencyMath.hideSharedWarning(systemName: g.displayName))
+        }
+        .alert(mergeTitle, isPresented: $showMergeAlert, presenting: pendingMerge) { d in
+            Button("合併") { mergeNow(d) }
+            Button("取消", role: .cancel) { pendingMerge = nil }
+        } message: { d in
+            Text(d.confirmMessage)
         }
     }
 
@@ -169,7 +192,12 @@ struct CompetencySystemPage: View {
     private var ownSection: some View {
         let items: [CompetencyItem] = setup.ownItems(groupId)
         let axisCount: Int = setup.axes(for: groupId).count
+        let dups: [CompetencyDuplicate] = ownDuplicates
         Section {
+            // [v25.601 v1b] 兩台各自加的同名項目「有兩個 鋼瓶更換〔合併〕」
+            ForEach(dups) { d in
+                CompSysDupRow(text: d.text, disabled: readOnly, onMerge: { askMerge(d) })
+            }
             ForEach(items) { it in
                 ownRow(it)
             }
@@ -235,6 +263,15 @@ struct CompetencySystemPage: View {
                 .tint(.orange)
             }
         }
+        // [v25.601 v1b] 往右滑〔說明〕（看不擋；唯讀也看得到，頁裡不能改）
+        .swipeActions(edge: .leading, allowsFullSwipe: false) {
+            Button {
+                openDetails(it.id)
+            } label: {
+                Label("說明", systemImage: "text.bubble")
+            }
+            .tint(.blue)
+        }
     }
 
     /// 共用項目那一列：開＝這個系統有評（get 每次讀 store）
@@ -270,6 +307,14 @@ struct CompetencySystemPage: View {
 
     private var archiveTitle: String { "停用「" + titleText + "」？" }
 
+    /// [v25.601 v1b] 這個系統自己的項目重名（kind "own"、groupId 這個系統）
+    private var ownDuplicates: [CompetencyDuplicate] {
+        let gid: UUID = groupId
+        return lifeStore.competencyDuplicates.filter { d in d.kind == "own" && d.groupId == gid }
+    }
+
+    private var mergeTitle: String { pendingMerge?.confirmTitle ?? "" }
+
     /// 其他啟用中的系統名（擋重名；扣掉自己）
     private func otherSystemNames() -> [String] {
         setup.activeSystems.filter { $0.id != groupId }.map { $0.displayName }
@@ -289,7 +334,7 @@ struct CompetencySystemPage: View {
         "卡片不再出現，分數都留著；可以在 職能項目 → 已停用 恢復。"
 
     private static let ownFooter =
-        "只在這個系統有，接在共用項目後面。例：Slurry 的「研磨液濃度」。往左滑停用。"
+        "只在這個系統有，接在共用項目後面。例：Slurry 的「研磨液濃度」。往左滑停用。往右滑〔說明〕可以寫這一項每一分的說明。"
 
     private static let bottomFooter =
         "複製會帶走拿掉的共用項目與這個系統自己的項目，以前的分數不帶（每個系統各自一格）；短名不抄。"
@@ -387,6 +432,27 @@ struct CompetencySystemPage: View {
         showArchiveAlert = true
     }
 
+    /// [v25.601 v1b] 往右滑〔說明〕：看不擋（頁裡〔完成〕才擋訂閱）
+    private func openDetails(_ itemId: UUID) {
+        detailRequest = CompSysDetailRequest(itemId: itemId)
+    }
+
+    /// [v25.601 v1b] 〔合併〕：先擋唯讀與訂閱，再問
+    private func askMerge(_ d: CompetencyDuplicate) {
+        guard gate() else { return }
+        pendingMerge = d
+        showMergeAlert = true
+    }
+
+    /// [v25.601 v1b] 確認框〔合併〕：下一個 runloop 才寫 store（LifeStore 一次 batched；那一行自己會不見）
+    private func mergeNow(_ d: CompetencyDuplicate) {
+        let store: LifeStore = lifeStore
+        pendingMerge = nil
+        DispatchQueue.main.async {
+            store.mergeCompetencyDuplicate(d)
+        }
+    }
+
     /// 停用：先退回上一頁，下一個 runloop 才寫 store
     private func archiveNow() {
         let store: LifeStore = lifeStore
@@ -419,6 +485,36 @@ private struct CompSysValueRow: View {
                 .foregroundStyle(.tertiary)
         }
         .contentShape(Rectangle())
+    }
+}
+
+// MARK: - [v25.601 職能雷達 v1b] 往右滑〔說明〕的 sheet(item:)
+
+private struct CompSysDetailRequest: Identifiable {
+    let id = UUID()
+    let itemId: UUID
+}
+
+// MARK: - [v25.601 職能雷達 v1b] 重名一行「⚠︎ 有兩個 鋼瓶更換〔合併〕」
+
+private struct CompSysDupRow: View {
+    let text: String
+    let disabled: Bool
+    let onMerge: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .foregroundStyle(.orange)
+                .accessibilityHidden(true)
+            Text(text)
+                .font(.subheadline)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 8)
+            Button("合併") { onMerge() }
+                .buttonStyle(.borderless)
+                .disabled(disabled)
+        }
     }
 }
 
