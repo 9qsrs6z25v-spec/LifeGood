@@ -90,6 +90,9 @@ struct CompetencyAxisModel: Equatable, Identifiable {
     let valueText: String?
     /// 換算過時「原 1–5 的 4」
     let originalText: String?
+    /// [v25.600 v1a-2] 這一分的名字（§13：出廠沒有 → nil）：現在的名字「能教人」；當時的名字跟現在不一樣「當時：能教人」；
+    /// 評分紀錄的唯讀雷達寫那一張存的名字
+    let levelText: String?
     /// 上一次的比例（沒有 nil）
     let previousT: Double?
     let previousText: String?
@@ -153,6 +156,8 @@ struct CompetencyChartModel: Equatable, Identifiable {
     let axisCount: Int
     /// 這一組最新的評分日（D）
     let latestDay: String?
+    /// [v25.600 v1a-2] 這張卡自己的上一次「上一次 4/30」「上一次 12/15 之前」（沒有上一次 nil）
+    let previousDayText: String?
 }
 
 /// 摘要卡（judge §4.3①；不寫 0–100）
@@ -186,6 +191,17 @@ struct CompetencyTabModel: Equatable {
     let skippedNames: [String]
     /// 這位一張都沒評過
     let neverRated: Bool
+    // [v25.600 v1a-2] 原本 SubordinateCompetencyTab 自己的小函式搬進來（sim 對照）
+    /// 有任何一張卡有上一次（才出現「疊：上一次」）
+    let hasAnyPrevious: Bool
+    /// 疊的膠囊「上一次 4/30」；各張卡不是同一天「上一次」
+    let overlayLabel: String
+    /// 各張卡的上一次不是同一天時，膠囊下面一行「上一次：人格特質 10/30・Gas System 11/30」（同一天或沒有 nil）
+    let previousDayText: String?
+    /// 「不用學：（無）」「不用學：Gas System、Chemical System」
+    let skippedLineText: String
+    /// 評分紀錄（新的在前；同一天合成一列）
+    let records: [CompetencyRecordRow]
 }
 
 /// 評分畫面一格的草稿
@@ -215,6 +231,8 @@ struct CompetencyRatingAxis: Equatable, Identifiable {
     let previousSameRange: Bool
     /// 這位這一格從來沒評過（新增的項目：標「新」）
     let isNew: Bool
+    /// [v25.600 v1a-2] 改舊紀錄時才會有：現在已停用（或這個系統拿掉了）、但那一張有評的項目（標「已停用」）
+    let archived: Bool
 }
 
 /// 評分畫面一區（一組）
@@ -230,6 +248,10 @@ struct CompetencyRatingSection: Equatable, Identifiable {
     let canCarry: Bool
     /// 「範圍改過（1–5 → 1–10），這組要重新點」
     let carryBlockedNote: String?
+    /// [v25.600 v1a-2]「這次評」膠囊上的字（系統有短名寫短名；人格特質寫「人格特質」）
+    let chipTitle: String
+    /// [v25.600 v1a-2] 改舊紀錄時才會有：這個系統現在已停用（或這位不用學），但那一張有評
+    let archived: Bool
 }
 
 /// 評分畫面底部那一行的數字
@@ -239,6 +261,12 @@ struct CompetencyFooterCounts: Equatable {
     let up: Int
     let down: Int
     let hasPrevious: Bool
+    /// [v25.600 v1a-2] 打開的是已經有的那一張（跟打開時比：改了幾格、清掉幾格、沒動幾格）
+    let editing: Bool
+    /// 改那一張時：跟打開時一樣的格子
+    let unchanged: Int
+    /// 改那一張時：打開時有、現在清掉的格子
+    let removed: Int
 }
 
 // MARK: - 數學
@@ -640,9 +668,12 @@ enum CompetencyMath {
 
     // MARK: 一張卡（judge §3.2、§3.8、§4.3）
 
-    /// ↔ card：axes＝這張卡的軸（照順序）；archivedIds＝其中已停用的項目（已轉出的卡片才會帶）
+    /// ↔ card：axes＝這張卡的軸（照順序）；archivedIds＝其中已停用的項目（已轉出的卡片、評分紀錄的唯讀雷達才會帶）。
+    /// [v25.600 v1a-2] scale＝這一組現在的等級表（每一分的名字；沒有就 nil）；snapshotDay 有值＝評分紀錄的唯讀雷達
+    ///（sessions 只放那一張、range＝那一張的範圍：畫當時的樣子，不疊上一次、名字用那一張存的）
     static func chartModel(group: CompetencyGroup, axes: [CompetencyItem], archivedIds: Set<UUID>,
-                           sessions: [CompetencySession], range: CompetencyRange) -> CompetencyChartModel {
+                           sessions: [CompetencySession], range: CompetencyRange,
+                           scale: CompetencyScale? = nil, snapshotDay: String? = nil) -> CompetencyChartModel {
         let gid: UUID = group.id
         let n: Int = axes.count
         let style: CompetencyChartStyle = chartStyle(axisCount: n)
@@ -650,7 +681,7 @@ enum CompetencyMath {
         let curCells: [CompetencyCellValue?] = axes.map { now[CompetencyCellKey(groupId: gid, itemId: $0.id)] }
         let latest: String? = curCells.compactMap { $0?.dayKey }.max()
         var prevCells: [CompetencyCellValue?] = Array(repeating: nil, count: n)
-        if let d = latest {
+        if let d = latest, snapshotDay == nil {
             let before = latestCells(sessions, before: d)
             prevCells = axes.map { before[CompetencyCellKey(groupId: gid, itemId: $0.id)] }
         }
@@ -674,8 +705,16 @@ enum CompetencyMath {
             let pText: String? = p.map { cellText($0, in: range) }
             let dText: String? = deltaText(current: c, previous: p)
             let isArchived: Bool = archivedIds.contains(item.id)
+            var lText: String? = nil
+            if let cell = c {
+                if snapshotDay == nil {
+                    lText = levelText(cell, scale: scale, in: range)
+                } else {
+                    lText = snapshotLevelText(cell)
+                }
+            }
             let model = CompetencyAxisModel(id: item.id, name: item.displayName, label: label, state: state,
-                                            t: c?.ratio, valueText: vText, originalText: oText,
+                                            t: c?.ratio, valueText: vText, originalText: oText, levelText: lText,
                                             previousT: p?.ratio, previousText: pText, deltaText: dText,
                                             carriedFrom: carriedFrom, archived: isArchived)
             axisModels.append(model)
@@ -688,7 +727,9 @@ enum CompetencyMath {
         let title: String = group.displayName
 
         let dateLine: String
-        if let d = latest {
+        if let snap = snapshotDay {
+            dateLine = shortDay(snap)
+        } else if let d = latest {
             if !hasPrev {
                 dateLine = "第一次評分"
             } else if prevDays.count == 1 {
@@ -722,13 +763,14 @@ enum CompetencyMath {
         let draws: Bool = rated >= 3 && isRadar
         let legendNow: String? = latest.map { shortDay($0) }
         let carriedLine: String? = carried.isEmpty ? nil : carried.joined(separator: "、")
+        let prevDayText: String? = legendPrev.map { "上一次 " + $0 }
         return CompetencyChartModel(
             id: gid, isTrait: group.isTrait, title: title, dateLine: dateLine, headline: headline,
             averageText: avgText, style: style, axes: axisModels, rings: ringList, range: range,
             ratedCount: rated, drawsPolygon: draws, hasPrevious: hasPrev, legendCurrent: legendNow,
             legendPrevious: legendPrev, note: note, carriedNote: carriedLine, accessibilityText: a11y,
             neverRated: latest == nil, averageRatio: avg, previousAverageRatio: prevAvg,
-            filledCount: filled, axisCount: n, latestDay: latest)
+            filledCount: filled, axisCount: n, latestDay: latest, previousDayText: prevDayText)
     }
 
     /// ↔ a11y：「Gas System，3 項，平均 4 分。P&ID 4 分，跟上次一樣；緊急應變 4 分，上次 2 分；值班技能 4 分，上次 3 分。」
@@ -801,7 +843,7 @@ enum CompetencyMath {
         for g in groups {
             let ax = cardAxes(group: g, setup: setup, archivedPerson: archivedPerson, sessions: sessions)
             cards.append(chartModel(group: g, axes: ax.axes, archivedIds: ax.archived, sessions: sessions,
-                                    range: setup.range(forGroup: g.id)))
+                                    range: setup.range(forGroup: g.id), scale: setup.scaleFor(group: g.id)))
         }
         let skipped: Set<UUID> = setup.skippedGroupIds(subordinateId)
         let skippedNames: [String] = setup.activeSystems.filter { skipped.contains($0.id) }.map { $0.displayName }
@@ -810,7 +852,12 @@ enum CompetencyMath {
         return CompetencyTabModel(configured: setup.isConfigured,
                                   readOnly: setup.isReadOnlyHere || ratings.isReadOnlyHere,
                                   summary: summary, cards: cards, skippedNames: skippedNames,
-                                  neverRated: lastDay == nil)
+                                  neverRated: lastDay == nil,
+                                  hasAnyPrevious: hasAnyPrevious(cards),
+                                  overlayLabel: overlayLabel(cards),
+                                  previousDayText: previousDayText(cards),
+                                  skippedLineText: skippedLineText(skippedNames),
+                                  records: recordRows(sessions: sessions, setup: setup))
     }
 
     /// ↔ summary：人格特質＝人格那張卡的平均；本職學能＝要學的、啟用的、至少評過一格的系統，每個系統一樣重；覆蓋率一定配著
@@ -886,16 +933,42 @@ enum CompetencyMath {
 
     /// ↔ rating_plan：評分畫面的每一區。editing＝這一天已經有的那一張（用它自己的範圍）；沒有＝用現在的範圍。
     /// 上一次＝這張評分日之前、每一格最後一筆（不含這一張）。範圍跟這一張不一樣的格子不能照上次（§3.3）
+    /// [v25.600 v1a-2] 改已經有的那一張時，那一張有評、但現在不在畫面上的組（已停用的系統、不用學的系統）
+    /// 與項目（已停用、這個系統拿掉的）也列出來、標 archived（評分紀錄〔改分數〕用；editing＝nil 時跟 v1a-1 一模一樣）
     static func ratingPlan(setup: CompetencySetupBook, subordinateId: UUID, sessions: [CompetencySession],
                            dayKey: String, editing: CompetencySession?) -> [CompetencyRatingSection] {
-        let groups: [CompetencyGroup] = visibleGroups(setup: setup, subordinateId: subordinateId,
-                                                      archivedPerson: false, sessions: sessions)
+        let shown: [CompetencyGroup] = visibleGroups(setup: setup, subordinateId: subordinateId,
+                                                     archivedPerson: false, sessions: sessions)
+        let editedCells: [CompetencyScore] = editing?.liveScores ?? []
+        let editedGroupIds: Set<UUID> = Set(editedCells.map { $0.groupId })
+        let shownIds: Set<UUID> = Set(shown.map { $0.id })
+        var groups: [CompetencyGroup] = shown
+        if !editedGroupIds.isEmpty {
+            let extraGroups: [CompetencyGroup] = setup.allGroups.filter {
+                $0.isLive && !shownIds.contains($0.id) && editedGroupIds.contains($0.id)
+            }
+            if !extraGroups.isEmpty { groups = CompetencySetupBook.sortedGroups(shown + extraGroups) }
+        }
         let others: [CompetencySession] = sessions.filter { $0.id != editing?.id }
         let before: [CompetencyCellKey: CompetencyCellValue] = latestCells(others, before: dayKey)
         let everRated: Set<CompetencyCellKey> = Set(latestCells(others).keys)
         var out: [CompetencyRatingSection] = []
         for g in groups {
-            let axes: [CompetencyItem] = setup.axes(for: g.id)
+            let groupArchived: Bool = !shownIds.contains(g.id)
+            let active: [CompetencyItem] = setup.axes(for: g.id)
+            let activeIds: Set<UUID> = Set(active.map { $0.id })
+            let ratedHere: Set<UUID> = Set(editedCells.filter { $0.groupId == g.id }.map { $0.itemId })
+            let extraItems: [CompetencyItem] = CompetencySetupBook.sortedItems(setup.allItems.filter {
+                $0.isLive && !activeIds.contains($0.id) && ratedHere.contains($0.id)
+            })
+            let archivedIds: Set<UUID> = Set(extraItems.map { $0.id })
+            let axes: [CompetencyItem]
+            if groupArchived {
+                let ratedActive: [CompetencyItem] = active.filter { ratedHere.contains($0.id) }
+                axes = ratedActive + extraItems
+            } else {
+                axes = active + extraItems
+            }
             if axes.isEmpty { continue }
             let range: CompetencyRange = editing?.range(forGroup: g.id) ?? setup.range(forGroup: g.id)
             var rows: [CompetencyRatingAxis] = []
@@ -912,7 +985,8 @@ enum CompetencyMath {
                 let sameOK: Bool = p != nil && same
                 let isNew: Bool = !everRated.contains(key) && !others.isEmpty
                 let row = CompetencyRatingAxis(id: it.id, name: it.displayName, previous: p, previousText: pText,
-                                               previousNearest: pNear, previousSameRange: sameOK, isNew: isNew)
+                                               previousNearest: pNear, previousSameRange: sameOK, isNew: isNew,
+                                               archived: groupArchived || archivedIds.contains(it.id))
                 rows.append(row)
             }
             var blocked: String? = nil
@@ -920,7 +994,8 @@ enum CompetencyMath {
                 blocked = "範圍改過（\(o.text) → \(range.text)），這組要重新點"
             }
             out.append(CompetencyRatingSection(id: g.id, title: g.displayName, isTrait: g.isTrait, range: range,
-                                               axes: rows, canCarry: anySame, carryBlockedNote: blocked))
+                                               axes: rows, canCarry: anySame, carryBlockedNote: blocked,
+                                               chipTitle: chipTitle(g), archived: groupArchived))
         }
         return out
     }
@@ -957,27 +1032,66 @@ enum CompetencyMath {
     /// ↔ footer：改了幾格、照上次幾格、進步幾格、退步幾格（跟上一次比，用比例 t）
     static func footerCounts(draft: [CompetencyCellKey: CompetencyDraftCell],
                              sections: [CompetencyRatingSection]) -> CompetencyFooterCounts {
+        footerCounts(draft: draft, sections: sections, baseline: nil)
+    }
+
+    /// ↔ footer（baseline）：[v25.600 v1a-2] baseline＝打開已經有的那一張時的樣子（CompetencyMath.draft(from:)）。
+    /// 有 baseline：跟打開時一樣的格子算「沒動」、不一樣（或新點的）算「改了」、打開時有現在清掉的算「清掉」；
+    /// 照上次帶進原本空著的格子算「照上次」。進步／退步照舊跟上一次比（用比例 t）。沒有 baseline＝v1a-1 一模一樣
+    static func footerCounts(draft: [CompetencyCellKey: CompetencyDraftCell], sections: [CompetencyRatingSection],
+                             baseline: [CompetencyCellKey: CompetencyDraftCell]?) -> CompetencyFooterCounts {
         var changed = 0
         var carried = 0
         var up = 0
         var down = 0
+        var unchanged = 0
+        var removed = 0
         var hasPrev = false
         for sec in sections {
             for ax in sec.axes {
                 if ax.previous != nil { hasPrev = true }
-                guard let d = draft[CompetencyCellKey(groupId: sec.id, itemId: ax.id)], d.isSet else { continue }
-                if d.carried { carried += 1 } else { changed += 1 }
+                let key = CompetencyCellKey(groupId: sec.id, itemId: ax.id)
+                let b: CompetencyDraftCell? = baseline?[key]
+                let bSet: Bool = b?.isSet == true
+                guard let d = draft[key], d.isSet else {
+                    if bSet { removed += 1 }
+                    continue
+                }
+                if let b0 = b, bSet, sameCell(d, b0) {
+                    unchanged += 1
+                } else if d.carried && !bSet {
+                    carried += 1
+                } else {
+                    changed += 1
+                }
                 guard let v = d.value, !d.na, let p = ax.previous, let tp = p.ratio else { continue }
                 let tc: Double = ratio(v, sec.range)
                 if tc > tp + 1e-9 { up += 1 }
                 if tc < tp - 1e-9 { down += 1 }
             }
         }
-        return CompetencyFooterCounts(changed: changed, carried: carried, up: up, down: down, hasPrevious: hasPrev)
+        return CompetencyFooterCounts(changed: changed, carried: carried, up: up, down: down, hasPrevious: hasPrev,
+                                      editing: baseline != nil, unchanged: unchanged, removed: removed)
     }
 
-    /// ↔ footer_text：「改了 8 格・照上次 4 格・進步 8・退步 0」；第一次「評了 12 格」；什麼都沒評「還沒評任何一格」
+    /// ↔ same_cell：兩格一樣（分數、不適用；評語不算——§13 不做每一格的評語，別台寫的照留）
+    static func sameCell(_ a: CompetencyDraftCell, _ b: CompetencyDraftCell) -> Bool {
+        a.isSet == b.isSet && a.na == b.na && (a.na || a.value == b.value)
+    }
+
+    /// ↔ footer_text：「改了 8 格・照上次 4 格・進步 8・退步 0」；第一次「評了 12 格」；什麼都沒評「還沒評任何一格」。
+    /// [v25.600 v1a-2] 改已經有的那一張：沒改「沒有改動（這一張 12 格）」；有改「改了 2 格・沒動 10 格・進步 1・退步 0」
+    ///（照上次、清掉有才寫）
     static func footerText(_ c: CompetencyFooterCounts) -> String {
+        if c.editing {
+            if c.changed + c.carried + c.removed == 0 { return "沒有改動（這一張 \(c.unchanged) 格）" }
+            var parts: [String] = ["改了 \(c.changed) 格"]
+            if c.carried > 0 { parts.append("照上次 \(c.carried) 格") }
+            if c.removed > 0 { parts.append("清掉 \(c.removed) 格") }
+            parts.append("沒動 \(c.unchanged) 格")
+            if c.hasPrevious { parts.append("進步 \(c.up)・退步 \(c.down)") }
+            return parts.joined(separator: "・")
+        }
         let total: Int = c.changed + c.carried
         if total == 0 { return "還沒評任何一格" }
         if !c.hasPrevious { return "評了 \(total) 格" }
@@ -1028,7 +1142,13 @@ enum CompetencyMath {
             }
             let gName: String? = setup.group(key.groupId)?.displayName
             let iName: String? = setup.item(key.itemId)?.displayName
-            let lName: String? = d.na ? nil : d.value.flatMap { setup.scaleFor(group: key.groupId)?.levelName($0) }
+            // [v25.600 v1a-2] 那一分的名字只在「這一張的範圍＝現在等級表的範圍」時存（改舊紀錄用舊範圍時不存現在的名字）
+            let lvScale: CompetencyScale? = setup.scaleFor(group: key.groupId)
+            // [v25.600 v1a-2 驗證修] 超過 11 級（例 0–100）不設名字（§13）：1–5 時設的名字在 0–100 裡還留著（1～5 在範圍裡），
+            // 不擋的話 0–100 評 4 會存「能教人」、雷達寫「當時：能教人」。要退回這一件：拿掉 && namesAllowed(...)
+            let fitRange: CompetencyRange = s.range(forGroup: key.groupId)
+            let namesFit: Bool = lvScale?.range == fitRange && namesAllowed(fitRange)
+            let lName: String? = (d.na || !namesFit) ? nil : d.value.flatMap { lvScale?.levelName($0) }
             var sc = CompetencyScore(groupId: key.groupId, itemId: key.itemId, value: d.na ? nil : d.value,
                                      na: d.na ? true : nil, comment: comment, groupName: gName, itemName: iName,
                                      levelName: lName, updatedAt: now)
@@ -1062,5 +1182,758 @@ enum CompetencyMath {
         let ts: [Double] = cards.filter { $0.isTrait == trait }.compactMap { $0.averageRatio }
         guard !ts.isEmpty else { return nil }
         return roundHalfUp(ts.reduce(0, +) / Double(ts.count) * 100)
+    }
+}
+
+// MARK: - [v25.600 職能雷達 v1a-2] 評分紀錄、點一格的歷史、每一分的名字、系統頁、設定預覽、已停用、清理、數字欄
+//（radar/judge.md §7 分版表 v1a-2、§3.3、§3.4、§3.5、§3.7-10、§4.3④、§4.4、§1.4-8、§13（每一格的評語不做）；
+//  radar/build/v1a-2/brief.md §2；sim_v1a-2.py 一個函式一個函式對照，↔ 後面是 sim 的名字）
+// • §13 追加：每一格的評語不做——這裡組的字一個都不放評語（CompetencyScore.comment 照留、別台寫的原樣存回去）。
+// • 一次評分的總評（CompetencySession.note）照 v1a-1 留著（評分紀錄明細照樣寫）。
+
+/// 評分紀錄一列（同一天兩台各評一張時合成一列「10/30（五）・2 次」）
+struct CompetencyRecordRow: Equatable, Identifiable {
+    /// ＝dayKey
+    let id: String
+    let dayKey: String
+    /// 「10/30（五）」
+    let dayText: String
+    /// 「2 次」（只有一張 nil）
+    let countText: String?
+    /// 「評了 人格・Gas System・Slurry System・Chemical System」（系統有短名寫短名）；一格都沒有「沒有分數」
+    let groupsText: String
+    /// 「12 格」
+    let cellCountText: String
+    /// 這一天的評分（後改的在前）
+    let sessionIds: [UUID]
+    /// VoiceOver 一句
+    let accessibilityText: String
+}
+
+/// 一次評分的明細（唯讀雷達畫當時的樣子）
+struct CompetencySessionDetailModel: Equatable, Identifiable {
+    /// 評分 id
+    let id: UUID
+    let dayKey: String
+    /// 「2026/10/30（五）的評分」
+    let title: String
+    /// 「評了 12 格」「那時：E2 工程師」「人格特質 1–5・本職學能 1–5」
+    let infoLines: [String]
+    /// 總評（沒寫 nil）
+    let note: String?
+    /// 每一組一張唯讀雷達（那一張有評的組；含已停用的項目／系統，標「已停用」；名字用那一張存的快照）
+    let cards: [CompetencyChartModel]
+    /// 刪除確認框
+    let deleteTitle: String
+    let deleteMessage: String
+}
+
+/// 點一格的歷史：一列
+struct CompetencyHistoryRow: Equatable, Identifiable {
+    /// 評分 id
+    let id: UUID
+    let dayKey: String
+    /// 「10/30（五）」
+    let dayText: String
+    /// 「4」「≈7.8」「不適用」（換成現在的範圍）
+    let valueText: String
+    /// 「原 1–5 的 4（當時：能教人）」「能教人」；沒有 nil
+    let detailText: String?
+}
+
+/// 點一格的歷史：每一分的名字那一排（有名字才有）
+struct CompetencyLevelRow: Equatable, Identifiable {
+    /// ＝分數
+    let id: Int
+    /// 「能教人」（這一分沒名字＝空字串）
+    let name: String
+    /// 現在是這一分
+    let isCurrent: Bool
+}
+
+/// 點一格的歷史 sheet（.medium；§13：沒有評語）
+struct CompetencyCellHistoryModel: Equatable {
+    /// 「Gas System・緊急應變」
+    let title: String
+    /// 「現在 4（10/30）」「現在 4 能教人（10/30）」「現在 不適用（10/30）」「還沒評過」
+    let nowLine: String
+    /// 每一分的名字（等級表有名字、而且 ≤ 11 級才有；不然空）
+    let levels: [CompetencyLevelRow]
+    /// 歷史（新的在前）
+    let rows: [CompetencyHistoryRow]
+    /// 共用學習項目才有：「在其他系統：Slurry System 3、Chemical System 2」
+    let otherLine: String?
+    /// 「這一項已停用（分數留著）」「這個系統拿掉了這一項（分數留著）」
+    let archivedNote: String?
+}
+
+/// 每一分的名字範本（〔套用範本 ▾〕；§13：出廠不套，使用者自己選）
+struct CompetencyLevelTemplate: Equatable, Identifiable {
+    let id: String
+    /// 「OJT 五級」
+    let title: String
+    let names: [String]
+
+    /// 選單上的字「OJT 五級（看過…專家）」
+    var menuTitle: String {
+        guard let a = names.first, let b = names.last else { return title }
+        return title + "（" + a + "…" + b + "）"
+    }
+}
+
+/// 設定預覽一格（空殼小雷達＋「3 項 → 三角形」）
+struct CompetencyPreviewRow: Equatable, Identifiable {
+    /// 組 id
+    let id: UUID
+    let title: String
+    let isTrait: Bool
+    let axisCount: Int
+    let style: CompetencyChartStyle
+    /// 「3 項 → 三角形」「2 項 → 橫條」「12 項 → 雷達（軸上寫短名）」「還沒有項目」
+    let text: String
+    /// 9 項起「超過 8 項雷達會很擠，建議拆成兩個系統」
+    let warning: String?
+}
+
+/// 已停用清單一列（〔恢復〕〔永久刪除〕）
+struct CompetencyArchivedRow: Equatable, Identifiable {
+    let id: UUID
+    /// true＝系統；false＝項目
+    let isGroup: Bool
+    let title: String
+    /// 「系統」「人格特質」「共用學習項目」「Slurry System 自己的項目」
+    let kindText: String
+    /// 這一項（這個系統）有幾格評分
+    let cellCount: Int
+    /// 「8 格評分」「沒有評分」
+    let countText: String
+    /// 永久刪除的第二次確認
+    let deleteTitle: String
+    let deleteMessage: String
+}
+
+/// 〔清理已刪除同仁的評分〕（只算 life_subordinates 裡已經沒有這個人的；judge §1.4-8）
+struct CompetencyOrphanSummary: Equatable {
+    let personCount: Int
+    let sessionCount: Int
+    let sessionIds: [UUID]
+    let assignmentIds: [UUID]
+    /// 「清理已刪除同仁的評分（1 位、1 次）」
+    let buttonText: String
+    let confirmTitle: String
+    /// 「這 1 位已經不在部屬名單。如果是家裡還沒更新的 iPad 還沒同步到，先別清。」
+    let confirmMessage: String
+    /// 清完的小提示「已清理 1 位、1 次評分」
+    let doneText: String
+}
+
+/// 數字欄打的字（§13：high > 10）
+enum CompetencyInputCheck: Equatable {
+    /// 空白（不改）
+    case empty
+    /// 跟現在一樣（不算改，關掉不用問）
+    case same
+    /// 會改成這個數字（超出範圍已經夾回）
+    case changed(Int)
+    /// 不是數字（儲存按鈕灰、欄位下面紅字）
+    case invalid
+}
+
+extension CompetencyMath {
+
+    // MARK: 〔職能〕分頁的小函式（v1a-1 G1 的 private 搬過來）
+
+    /// ↔ has_any_previous
+    static func hasAnyPrevious(_ cards: [CompetencyChartModel]) -> Bool {
+        cards.contains { $0.hasPrevious }
+    }
+
+    /// ↔ overlay_label：疊的膠囊「上一次 4/30」；各張卡的上一次不是同一天（或沒有）只寫「上一次」
+    static func overlayLabel(_ cards: [CompetencyChartModel]) -> String {
+        let days: Set<String> = Set(cards.filter { $0.hasPrevious }.compactMap { $0.legendPrevious })
+        guard days.count == 1, let d = days.first else { return "上一次" }
+        return "上一次 " + d
+    }
+
+    /// ↔ previous_day_text：各張卡的上一次不是同一天時，每張卡寫自己的「上一次：人格特質 4/30・Gas System 11/30」；同一天 nil
+    static func previousDayText(_ cards: [CompetencyChartModel]) -> String? {
+        let withPrev: [CompetencyChartModel] = cards.filter { $0.hasPrevious && $0.legendPrevious != nil }
+        let days: Set<String> = Set(withPrev.compactMap { $0.legendPrevious })
+        guard days.count > 1 else { return nil }
+        let parts: [String] = withPrev.map { $0.title + " " + ($0.legendPrevious ?? "") }
+        return "上一次：" + parts.joined(separator: "・")
+    }
+
+    /// ↔ skipped_line_text：「不用學：（無）」「不用學：Gas System、Chemical System」
+    static func skippedLineText(_ names: [String]) -> String {
+        if names.isEmpty { return "不用學：（無）" }
+        return "不用學：" + names.joined(separator: "、")
+    }
+
+    /// ↔ delta_direction：「↑…」1、「↓…」−1、其他 0（畫面照這個上色：↑ 綠、↓ 橘、其他灰）
+    static func deltaDirection(_ text: String?) -> Int {
+        guard let t = text else { return 0 }
+        if t.hasPrefix("↑") { return 1 }
+        if t.hasPrefix("↓") { return -1 }
+        return 0
+    }
+
+    // MARK: 名字、短名
+
+    /// 系統短名最多 10 字、項目短名最多 4 字、每一分的名字最多 4 字（judge §2.1、§4.4）
+    static let groupShortMax: Int = 10
+    static let itemShortMax: Int = 4
+    static let levelNameMax: Int = 4
+
+    /// ↔ clean_short：去空白、超過截掉、空的回 nil
+    static func cleanShortName(_ s: String?, max n: Int) -> String? {
+        let t: String = (s ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.isEmpty { return nil }
+        return String(t.prefix(n))
+    }
+
+    /// ↔ chip_title：「這次評」膠囊、紀錄那一列用的組名（系統有短名寫短名）
+    static func chipTitle(_ g: CompetencyGroup) -> String {
+        if g.isTrait { return g.displayName }
+        return cleanShortName(g.shortName, max: groupShortMax) ?? g.displayName
+    }
+
+    /// ↔ record_group_name：紀錄那一列（人格特質寫「人格」）
+    static func recordGroupName(_ g: CompetencyGroup) -> String {
+        g.isTrait ? "人格" : chipTitle(g)
+    }
+
+    /// ↔ level_text：一格旁邊寫的那一分的名字。範圍跟現在一樣才有「現在的名字」；那一張存的名字跟現在不一樣寫「當時：能教人」
+    static func levelText(_ c: CompetencyCellValue, scale: CompetencyScale?, in range: CompetencyRange) -> String? {
+        guard !c.na, let v = c.value else { return nil }
+        let current: String? = (c.range == range && namesAllowed(range)) ? scale?.levelName(v) : nil
+        if let snap = snapshotLevelText(c) {
+            if snap == current { return current }
+            return "當時：" + snap
+        }
+        return current
+    }
+
+    /// ↔ snap_level：那一張存的那一分的名字（空的 nil）
+    static func snapshotLevelText(_ c: CompetencyCellValue) -> String? {
+        guard !c.na else { return nil }
+        let t: String = (c.levelName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? nil : t
+    }
+
+    // MARK: 評分紀錄（judge §4.3④、§3.7-10）
+
+    /// 一格 → 畫面用的值（照那一張的範圍）
+    static func cellValue(_ sc: CompetencyScore, in s: CompetencySession) -> CompetencyCellValue {
+        CompetencyCellValue(value: sc.isNA ? nil : sc.value, na: sc.isNA, range: s.range(forGroup: sc.groupId),
+                            dayKey: s.dayKey, sessionId: s.id, stamp: sc.updatedAt ?? s.stamp,
+                            comment: sc.comment, levelName: sc.levelName)
+    }
+
+    /// ↔ ordered_groups：組照設定的順序（人格特質在前）；設定裡找不到的接在後面（照出現的順序）
+    static func orderedGroupIds(_ ids: [UUID], setup: CompetencySetupBook) -> [UUID] {
+        var seen: [UUID] = []
+        for id in ids where !seen.contains(id) { seen.append(id) }
+        let known: [CompetencyGroup] = CompetencySetupBook.sortedGroups(setup.allGroups.filter { seen.contains($0.id) })
+        let knownIds: [UUID] = known.map { $0.id }
+        return knownIds + seen.filter { !knownIds.contains($0) }
+    }
+
+    /// 一組的名字（設定裡找不到＝用那一張存的快照）
+    static func groupTitle(_ gid: UUID, setup: CompetencySetupBook, sessions: [CompetencySession], short: Bool) -> String {
+        if let g = setup.group(gid) { return short ? recordGroupName(g) : g.displayName }
+        if gid == CompetencySetupBook.traitGroupId { return short ? "人格" : "人格特質" }
+        for s in sessions {
+            if let n = s.allScores.first(where: { $0.groupId == gid })?.groupName,
+               !n.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty { return n }
+        }
+        return "已刪除的系統"
+    }
+
+    /// ↔ record_rows：評分紀錄（我評的、沒刪的；新的日子在前；同一天合成一列）
+    static func recordRows(sessions: [CompetencySession], setup: CompetencySetupBook) -> [CompetencyRecordRow] {
+        let live: [CompetencySession] = sessions.filter { $0.isLive && $0.isByMe }
+        var byDay: [String: [CompetencySession]] = [:]
+        for s in live { byDay[s.dayKey, default: []].append(s) }
+        let days: [String] = byDay.keys.sorted(by: >)
+        var out: [CompetencyRecordRow] = []
+        for d in days {
+            let list: [CompetencySession] = (byDay[d] ?? []).sorted { a, b in a.stamp > b.stamp }
+            var gids: [UUID] = []
+            var keys: Set<CompetencyCellKey> = []
+            for s in list {
+                for sc in s.liveScores {
+                    gids.append(sc.groupId)
+                    keys.insert(sc.key)
+                }
+            }
+            let ordered: [UUID] = orderedGroupIds(gids, setup: setup)
+            let names: [String] = ordered.map { groupTitle($0, setup: setup, sessions: list, short: true) }
+            let groupsText: String = names.isEmpty ? "沒有分數" : "評了 " + names.joined(separator: "・")
+            let countText: String? = list.count > 1 ? "\(list.count) 次" : nil
+            let cellText: String = "\(keys.count) 格"
+            var a11y: String = dayText(d)
+            if let c = countText { a11y += "，" + c }
+            a11y += "，" + groupsText + "，" + cellText
+            out.append(CompetencyRecordRow(id: d, dayKey: d, dayText: dayText(d), countText: countText,
+                                           groupsText: groupsText, cellCountText: cellText,
+                                           sessionIds: list.map { $0.id }, accessibilityText: a11y))
+        }
+        return out
+    }
+
+    /// ↔ session_cards：一次評分的唯讀雷達（畫當時的樣子）：那一張有評的組、有評的格子；
+    /// 軸＝現在的順序裡有評的 → 已停用／這個系統拿掉的（標已停用）→ 設定裡找不到的（用快照名字、標已停用）；
+    /// 範圍＝那一張的範圍；名字＝那一張存的快照；不疊上一次
+    static func sessionCards(_ s: CompetencySession, setup: CompetencySetupBook) -> [CompetencyChartModel] {
+        let cells: [CompetencyScore] = s.liveScores
+        let gids: [UUID] = orderedGroupIds(cells.map { $0.groupId }, setup: setup)
+        var out: [CompetencyChartModel] = []
+        for gid in gids {
+            let mine: [CompetencyScore] = cells.filter { $0.groupId == gid }
+            let ratedIds: [UUID] = mine.map { $0.itemId }
+            let ratedSet: Set<UUID> = Set(ratedIds)
+            let current: [CompetencyItem] = setup.axes(for: gid).filter { ratedSet.contains($0.id) }
+            let currentIds: Set<UUID> = Set(current.map { $0.id })
+            let others: [CompetencyItem] = CompetencySetupBook.sortedItems(setup.allItems.filter {
+                $0.isLive && ratedSet.contains($0.id) && !currentIds.contains($0.id)
+            })
+            let knownIds: Set<UUID> = currentIds.union(others.map { $0.id })
+            var unknown: [CompetencyItem] = []
+            for id in ratedIds where !knownIds.contains(id) {
+                let raw: String = (mine.first(where: { $0.itemId == id })?.itemName ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                unknown.append(CompetencyItem(id: id, groupId: gid, name: raw.isEmpty ? "已刪除的項目" : raw))
+            }
+            let axes: [CompetencyItem] = current + others + unknown
+            let archivedIds: Set<UUID> = Set(others.map { $0.id }).union(unknown.map { $0.id })
+            var g: CompetencyGroup
+            if let found = setup.group(gid), found.isLive {
+                g = found
+                if !found.isTrait && !found.isActive { g.name = found.displayName + "（已停用）" }
+            } else {
+                let isTrait: Bool = gid == CompetencySetupBook.traitGroupId
+                g = CompetencyGroup(id: gid, kind: isTrait ? CompetencyGroup.kindTrait : CompetencyGroup.kindSystem,
+                                    name: groupTitle(gid, setup: setup, sessions: [s], short: false))
+            }
+            out.append(chartModel(group: g, axes: axes, archivedIds: archivedIds, sessions: [s],
+                                  range: s.range(forGroup: gid), scale: nil, snapshotDay: s.dayKey))
+        }
+        return out
+    }
+
+    /// ↔ session_detail：明細頁
+    static func sessionDetail(_ s: CompetencySession, setup: CompetencySetupBook) -> CompetencySessionDetailModel {
+        let cards: [CompetencyChartModel] = sessionCards(s, setup: setup)
+        let live: [CompetencyScore] = s.liveScores
+        var info: [String] = ["評了 \(live.count) 格"]
+        let grade: String = (s.gradeLabel ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        if !grade.isEmpty { info.append("那時：" + grade) }
+        var ranges: [String] = []
+        if live.contains(where: { $0.groupId == CompetencySetupBook.traitGroupId }) {
+            ranges.append("人格特質 " + s.traitRange.text)
+        }
+        if live.contains(where: { $0.groupId != CompetencySetupBook.traitGroupId }) {
+            ranges.append("本職學能 " + s.skillRange.text)
+        }
+        if !ranges.isEmpty { info.append(ranges.joined(separator: "・")) }
+        let n: String = (s.note ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let del = deleteSessionConfirm(s)
+        return CompetencySessionDetailModel(id: s.id, dayKey: s.dayKey, title: longDayText(s.dayKey) + "的評分",
+                                            infoLines: info, note: n.isEmpty ? nil : n, cards: cards,
+                                            deleteTitle: del.title, deleteMessage: del.message)
+    }
+
+    /// ↔ session_details：這一天的每一張（後改的在前；通常只有一張）
+    static func sessionDetails(dayKey: String, sessions: [CompetencySession],
+                               setup: CompetencySetupBook) -> [CompetencySessionDetailModel] {
+        let list: [CompetencySession] = sessions.filter { $0.isLive && $0.isByMe && $0.dayKey == dayKey }
+        return list.sorted { a, b in a.stamp > b.stamp }.map { sessionDetail($0, setup: setup) }
+    }
+
+    /// ↔ delete_session_confirm：「刪掉 10/30 的評分？」「這一次的 12 格會一起刪，不能復原。」
+    static func deleteSessionConfirm(_ s: CompetencySession) -> (title: String, message: String) {
+        let n: Int = s.liveScores.count
+        let title: String = "刪掉 " + shortDay(s.dayKey) + " 的評分？"
+        let msg: String = n > 0 ? "這一次的 \(n) 格會一起刪，不能復原。" : "這一次的評分會刪掉，不能復原。"
+        return (title, msg)
+    }
+
+    /// ↔ move_problem：改評分日期能不能改（nil＝可以；同一天也是 nil、什麼都不做）
+    static func moveSessionProblem(_ s: CompetencySession, to day: String, sessions: [CompetencySession],
+                                   today: String) -> String? {
+        guard parseDay(day) != nil else { return "日子不對" }
+        if day == s.dayKey { return nil }
+        if day > today { return "不能晚於今天" }
+        let clash: Bool = sessions.contains { $0.id != s.id && $0.isLive && $0.isByMe && $0.dayKey == day }
+        if clash { return shortDay(day) + " 已經有一張評分，先改或刪那一張。" }
+        return nil
+    }
+
+    // MARK: 點一格的歷史（judge §4.3「點雷達頂點、軸名或橫條那一列」；§13：沒有評語）
+
+    /// ↔ cell_history
+    static func cellHistory(groupId: UUID, itemId: UUID, setup: CompetencySetupBook, subordinateId: UUID,
+                            sessions: [CompetencySession]) -> CompetencyCellHistoryModel {
+        let key = CompetencyCellKey(groupId: groupId, itemId: itemId)
+        let range: CompetencyRange = setup.range(forGroup: groupId)
+        let scale: CompetencyScale? = setup.scaleFor(group: groupId)
+        let gName: String = groupTitle(groupId, setup: setup, sessions: sessions, short: false)
+        var iName: String = setup.item(itemId)?.displayName ?? ""
+        if iName.isEmpty {
+            for s in sessions {
+                if let n = s.score(key)?.itemName, !n.isEmpty { iName = n; break }
+            }
+        }
+        if iName.isEmpty { iName = "已刪除的項目" }
+        let latest: [CompetencyCellKey: CompetencyCellValue] = latestCells(sessions)
+        let now: CompetencyCellValue? = latest[key]
+
+        var nowLine: String = "還沒評過"
+        if let c = now {
+            var v: String = cellText(c, in: range)
+            if !c.na, let n = c.value, c.range == range, namesAllowed(range), let ln = scale?.levelName(n) {
+                v += " " + ln
+            }
+            nowLine = "現在 " + v + "（" + shortDay(c.dayKey) + "）"
+        }
+
+        var levels: [CompetencyLevelRow] = []
+        if let sc = scale, namesAllowed(range), hasLevelNames(sc, in: range) {
+            for v in range.low...range.high {
+                let cur: Bool = now.map { !$0.na && $0.range == range && $0.value == v } ?? false
+                levels.append(CompetencyLevelRow(id: v, name: sc.levelName(v) ?? "", isCurrent: cur))
+            }
+        }
+
+        var rows: [CompetencyHistoryRow] = []
+        let ordered: [CompetencySession] = sessions.filter { $0.isLive && $0.isByMe }.sorted { a, b in
+            if a.dayKey != b.dayKey { return a.dayKey > b.dayKey }
+            return a.stamp > b.stamp
+        }
+        for s in ordered {
+            guard let sc = s.score(key), sc.isLive else { continue }
+            let c: CompetencyCellValue = cellValue(sc, in: s)
+            let o: String? = originalText(c, in: range)
+            let l: String? = levelText(c, scale: scale, in: range)
+            let detail: String?
+            if let o, let l {
+                detail = o + "（" + l + "）"
+            } else {
+                detail = o ?? l
+            }
+            rows.append(CompetencyHistoryRow(id: s.id, dayKey: s.dayKey, dayText: dayText(s.dayKey),
+                                             valueText: cellText(c, in: range), detailText: detail))
+        }
+
+        var otherLine: String? = nil
+        if setup.item(itemId)?.isShared == true && groupId != CompetencySetupBook.traitGroupId {
+            let groups: [CompetencyGroup] = visibleGroups(setup: setup, subordinateId: subordinateId,
+                                                          archivedPerson: false, sessions: sessions)
+            var parts: [String] = []
+            for g in groups where !g.isTrait && g.id != groupId {
+                guard setup.axes(for: g.id).contains(where: { $0.id == itemId }) else { continue }
+                let c: CompetencyCellValue? = latest[CompetencyCellKey(groupId: g.id, itemId: itemId)]
+                let t: String = c.map { cellText($0, in: setup.skillRange) } ?? "未評"
+                parts.append(chipTitle(g) + " " + t)
+            }
+            if !parts.isEmpty { otherLine = "在其他系統：" + parts.joined(separator: "、") }
+        }
+
+        var archivedNote: String? = nil
+        if let g = setup.group(groupId), g.isLive, !g.isTrait, g.archivedAt != nil {
+            archivedNote = "這個系統已停用（分數留著）"
+        } else if let it = setup.item(itemId), it.isLive, it.archivedAt != nil {
+            archivedNote = "這一項已停用（分數留著）"
+        } else if (setup.group(groupId)?.hiddenSharedItemIds ?? []).contains(itemId) {
+            archivedNote = "這個系統拿掉了這一項（分數留著）"
+        }
+        return CompetencyCellHistoryModel(title: gName + "・" + iName, nowLine: nowLine, levels: levels,
+                                          rows: rows, otherLine: otherLine, archivedNote: archivedNote)
+    }
+
+    // MARK: 每一分的名字（§13：出廠空、範本自己選、改範圍時已經有名字才問）
+
+    /// ↔ templates
+    static let levelTemplates: [CompetencyLevelTemplate] = [
+        CompetencyLevelTemplate(id: "ojt", title: "OJT 五級", names: ["看過", "指導下做", "能獨立", "能教人", "專家"]),
+        CompetencyLevelTemplate(id: "trait5", title: "人格五級", names: ["很少", "偶爾", "穩定", "主動", "帶動"]),
+        CompetencyLevelTemplate(id: "iluo", title: "ILUO 四級", names: ["在訓練", "能獨立", "能帶人", "訂標準"])
+    ]
+
+    /// ↔ names_allowed：≤ 11 級才設每一分的名字（0–100 這種只用數字）
+    static func namesAllowed(_ r: CompetencyRange) -> Bool {
+        r.levelCount <= 11
+    }
+
+    /// ↔ names_not_allowed_text
+    static func namesNotAllowedText(_ r: CompetencyRange) -> String {
+        "現在是 " + r.text + "，超過 11 級不設每一分的名字，只用數字。"
+    }
+
+    /// ↔ has_names_in：這個範圍裡有沒有任何一分有名字
+    static func hasLevelNames(_ scale: CompetencyScale?, in r: CompetencyRange) -> Bool {
+        guard let sc = scale, namesAllowed(r) else { return false }
+        for v in r.low...r.high where sc.levelName(v) != nil { return true }
+        return false
+    }
+
+    /// ↔ names_summary：設定頁那一列「看過・指導下做・能獨立・能教人・專家」；沒有「只用數字」
+    static func levelNamesSummary(_ scale: CompetencyScale?, range r: CompetencyRange) -> String {
+        guard let sc = scale, namesAllowed(r) else { return "只用數字" }
+        var names: [String] = []
+        for v in r.low...r.high {
+            if let n = sc.levelName(v) { names.append(n) }
+        }
+        return names.isEmpty ? "只用數字" : names.joined(separator: "・")
+    }
+
+    /// ↔ current_names：名字頁打開時的草稿（這個範圍裡每一分現在的名字）
+    static func currentLevelNames(_ scale: CompetencyScale?, range r: CompetencyRange) -> [Int: String] {
+        var out: [Int: String] = [:]
+        guard let sc = scale, namesAllowed(r) else { return out }
+        for v in r.low...r.high {
+            if let n = sc.levelName(v) { out[v] = n }
+        }
+        return out
+    }
+
+    /// ↔ apply_template：範本從最低分往上一級一個名字；級數不一樣寫一句
+    static func applyTemplate(_ t: CompetencyLevelTemplate, to r: CompetencyRange) -> (names: [Int: String], note: String?) {
+        var out: [Int: String] = [:]
+        let n: Int = min(t.names.count, r.levelCount)
+        for i in 0..<n { out[r.low + i] = t.names[i] }
+        var note: String? = nil
+        if t.names.count < r.levelCount {
+            let first: Int = r.low + t.names.count
+            let gap: String = first == r.high ? "\(r.high)" : "\(first)～\(r.high)"
+            note = "範本只有 \(t.names.count) 級：" + gap + " 沒有名字，可以自己補。"
+        } else if t.names.count > r.levelCount {
+            note = "現在只有 \(r.levelCount) 級（" + r.text + "）：只用範本前 \(r.levelCount) 個。"
+        }
+        return (out, note)
+    }
+
+    /// ↔ merged_levels：把名字頁的草稿寫回等級表（範圍裡的照草稿；範圍外的原樣留著——改回原來的範圍名字還在；
+    /// 每一分的說明 detail、別台的 extra 原樣留著）。全部空的回 nil
+    static func mergedLevels(existing: [CompetencyLevel]?, names: [Int: String], range r: CompetencyRange) -> [CompetencyLevel]? {
+        var out: [CompetencyLevel] = []
+        var used: Set<Int> = []
+        for lv in existing ?? [] {
+            guard let v = lv.value, r.contains(v) else {
+                out.append(lv)
+                continue
+            }
+            used.insert(v)
+            var x = lv
+            x.name = cleanShortName(names[v], max: levelNameMax)
+            let detail: String = (x.detail ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            if x.name == nil && detail.isEmpty && x.extra == nil { continue }
+            out.append(x)
+        }
+        for v in r.low...r.high where !used.contains(v) {
+            if let n = cleanShortName(names[v], max: levelNameMax) {
+                out.append(CompetencyLevel(value: v, name: n))
+            }
+        }
+        out.sort { a, b in (a.value ?? Int.max) < (b.value ?? Int.max) }
+        return out.isEmpty ? nil : out
+    }
+
+    /// ↔ should_ask_names：改範圍按〔改〕之後要不要接著問「每一分的名字要重新設嗎？」（舊範圍裡已經有名字、新範圍 ≤ 11 級才問）
+    static func shouldAskNames(scale: CompetencyScale?, from old: CompetencyRange, to new: CompetencyRange) -> Bool {
+        old != new && hasLevelNames(scale, in: old) && namesAllowed(new)
+    }
+
+    /// ↔ names_question
+    static func namesQuestionText(from old: CompetencyRange, to new: CompetencyRange) -> String {
+        "每一分的名字是照 " + old.text + " 設的。改成 " + new.text + " 後要重新設嗎？"
+    }
+
+    // MARK: 系統頁（judge §3.5、§4.4）
+
+    /// ↔ hide_warning：系統拿掉一個共用項目的那一刻
+    static func hideSharedWarning(systemName: String) -> String {
+        systemName + " 會少一軸，雷達形狀跟其他系統不能直接比。"
+    }
+
+    /// ↔ copy_name：「Gas System（複製）」「Gas System（複製 2）」
+    static func copyName(_ name: String, taken: [String]) -> String {
+        let base: String = name + "（複製）"
+        if !taken.contains(base) { return base }
+        var i: Int = 2
+        while taken.contains(name + "（複製 \(i)）") { i += 1 }
+        return name + "（複製 \(i)）"
+    }
+
+    /// ↔ axes_line：「3 項：P&ID・緊急應變・值班技能」「還沒有學習項目」
+    static func axesLine(setup: CompetencySetupBook, groupId: UUID) -> String {
+        let names: [String] = setup.axes(for: groupId).map { $0.displayName }
+        if names.isEmpty { return "還沒有學習項目" }
+        return "\(names.count) 項：" + names.joined(separator: "・")
+    }
+
+    // MARK: 設定預覽（judge §4.4 預覽：改任何東西馬上跟著變）
+
+    static let crowdedWarning: String = "超過 8 項雷達會很擠，建議拆成兩個系統"
+
+    /// ↔ shape_name
+    static func shapeName(_ n: Int) -> String {
+        switch n {
+        case ...0: return "還沒有項目"
+        case 1, 2: return "橫條"
+        case 3: return "三角形"
+        case 4: return "四邊形"
+        case 5: return "五邊形"
+        case 6: return "六邊形"
+        case 7: return "七邊形"
+        case 8: return "八邊形"
+        case 9...12: return "雷達（軸上寫短名）"
+        default: return "橫條（超過 12 項）"
+        }
+    }
+
+    /// ↔ preview_rows：人格特質（有那一組才有）＋啟用中的系統
+    static func previewRows(setup: CompetencySetupBook) -> [CompetencyPreviewRow] {
+        var out: [CompetencyPreviewRow] = []
+        if let tg = setup.traitGroup {
+            let n: Int = setup.traitItems.count
+            let text: String = n == 0 ? "沒有項目，不顯示" : "\(n) 項 → " + shapeName(n)
+            out.append(CompetencyPreviewRow(id: tg.id, title: tg.displayName, isTrait: true, axisCount: n,
+                                            style: chartStyle(axisCount: n), text: text,
+                                            warning: n > 8 ? crowdedWarning : nil))
+        }
+        for g in setup.activeSystems {
+            let n: Int = setup.axes(for: g.id).count
+            let text: String = n == 0 ? "還沒有項目" : "\(n) 項 → " + shapeName(n)
+            out.append(CompetencyPreviewRow(id: g.id, title: g.displayName, isTrait: false, axisCount: n,
+                                            style: chartStyle(axisCount: n), text: text,
+                                            warning: n > 8 ? crowdedWarning : nil))
+        }
+        return out
+    }
+
+    // MARK: 已停用清單、永久刪除（judge §3.1-2、§3.4）
+
+    /// ↔ cell_count_item：這一項在所有評分裡有幾格（沒刪的評分、沒清掉的格子；共用項目算所有系統）
+    static func cellCount(itemId: UUID, ratings: CompetencyRatingBook) -> Int {
+        var n: Int = 0
+        for s in ratings.allSessions where s.isLive {
+            n += s.liveScores.filter { $0.itemId == itemId }.count
+        }
+        return n
+    }
+
+    /// ↔ cell_count_group
+    static func cellCount(groupId: UUID, ratings: CompetencyRatingBook) -> Int {
+        var n: Int = 0
+        for s in ratings.allSessions where s.isLive {
+            n += s.liveScores.filter { $0.groupId == groupId }.count
+        }
+        return n
+    }
+
+    /// ↔ archived_kind：已停用的項目屬於哪裡
+    static func archivedKindText(_ it: CompetencyItem, setup: CompetencySetupBook) -> String {
+        if it.groupId == CompetencySetupBook.traitGroupId { return "人格特質" }
+        guard let gid = it.groupId else { return "共用學習項目" }
+        let gname: String = setup.group(gid)?.displayName ?? "系統"
+        return gname + " 自己的項目"
+    }
+
+    /// ↔ archived_rows：已停用的系統在前、項目在後；每一列有幾格評分＋永久刪除的確認字
+    static func archivedRows(setup: CompetencySetupBook, ratings: CompetencyRatingBook) -> [CompetencyArchivedRow] {
+        var out: [CompetencyArchivedRow] = []
+        for g in setup.archivedSystems {
+            let n: Int = cellCount(groupId: g.id, ratings: ratings)
+            let own: Int = setup.allItems.filter { $0.isLive && $0.groupId == g.id }.count
+            var msg: String = n > 0 ? "會一起刪掉 \(n) 格評分" : "沒有評分"
+            if own > 0 { msg += "，這個系統自己的 \(own) 個項目也會一起刪" }
+            msg += "。不能復原。"
+            out.append(CompetencyArchivedRow(id: g.id, isGroup: true, title: g.displayName, kindText: "系統",
+                                             cellCount: n, countText: n > 0 ? "\(n) 格評分" : "沒有評分",
+                                             deleteTitle: "永久刪除「" + g.displayName + "」？", deleteMessage: msg))
+        }
+        for it in setup.archivedItems {
+            let n: Int = cellCount(itemId: it.id, ratings: ratings)
+            let msg: String = n > 0 ? "會一起刪掉 \(n) 格評分（每一張評分裡這一格都拿掉）。不能復原。" : "沒有評分。刪掉不能復原。"
+            out.append(CompetencyArchivedRow(id: it.id, isGroup: false, title: it.displayName,
+                                             kindText: archivedKindText(it, setup: setup), cellCount: n,
+                                             countText: n > 0 ? "\(n) 格評分" : "沒有評分",
+                                             deleteTitle: "永久刪除「" + it.displayName + "」？", deleteMessage: msg))
+        }
+        return out
+    }
+
+    /// ↔ clearing_cells：把符合的格子蓋格子的墓碑（clearedAt＝now，分數、名字快照拿掉；兩台合併時不會被舊的帶回來）。
+    /// 碰到的那幾張 updatedAt＝now。永久刪除項目／系統用
+    static func clearingCells(_ book: CompetencyRatingBook, now: Date,
+                              match: (CompetencyScore) -> Bool) -> CompetencyRatingBook {
+        var b = book
+        var list: [CompetencySession] = b.allSessions
+        var changed = false
+        for i in list.indices {
+            var cells: [CompetencyScore] = list[i].allScores
+            var hit = false
+            for j in cells.indices where cells[j].isLive && match(cells[j]) {
+                cells[j].value = nil
+                cells[j].na = nil
+                cells[j].comment = nil
+                cells[j].levelName = nil
+                cells[j].clearedAt = now
+                hit = true
+            }
+            if hit {
+                list[i].scores = cells
+                list[i].updatedAt = now
+                changed = true
+            }
+        }
+        if changed { b.sessions = list }
+        return b
+    }
+
+    // MARK: 〔清理已刪除同仁的評分〕（judge §1.4-8、§4.4）
+
+    /// ↔ orphans：knownIds＝life_subordinates 裡現在有的人（含已轉出）。部屬名單是空的時候不提供（可能還沒載入）
+    static func orphanSummary(setup: CompetencySetupBook, ratings: CompetencyRatingBook,
+                              knownIds: Set<UUID>) -> CompetencyOrphanSummary? {
+        guard !knownIds.isEmpty else { return nil }
+        let sess: [CompetencySession] = ratings.allSessions.filter { $0.isLive && !knownIds.contains($0.subordinateId) }
+        let asg: [CompetencyAssignment] = setup.allAssignments.filter { $0.deletedAt == nil && !knownIds.contains($0.id) }
+        var people: Set<UUID> = Set(sess.map { $0.subordinateId })
+        people.formUnion(asg.map { $0.id })
+        guard !people.isEmpty else { return nil }
+        let p: Int = people.count
+        let n: Int = sess.count
+        let button: String = n > 0 ? "清理已刪除同仁的評分（\(p) 位、\(n) 次）" : "清理已刪除同仁的評分（\(p) 位）"
+        let msg: String = "這 \(p) 位已經不在部屬名單。如果是家裡還沒更新的 iPad 還沒同步到，先別清。"
+        let done: String = n > 0 ? "已清理 \(p) 位、\(n) 次評分" : "已清理 \(p) 位"
+        return CompetencyOrphanSummary(personCount: p, sessionCount: n, sessionIds: sess.map { $0.id },
+                                       assignmentIds: asg.map { $0.id }, buttonText: button,
+                                       confirmTitle: "清理已刪除同仁的評分？", confirmMessage: msg, doneText: done)
+    }
+
+    // MARK: 數字欄、儲存按鈕（v1a-1 adjudicate 留下的三件）
+
+    /// ↔ check_input：current＝這一格現在的分數（沒評 nil）
+    static func checkInput(_ text: String, current: Int?, range: CompetencyRange) -> CompetencyInputCheck {
+        let t: String = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if t.isEmpty { return .empty }
+        guard let p = parseInput(t, range) else { return .invalid }
+        return p.value == current ? .same : .changed(p.value)
+    }
+
+    /// ↔ invalid_text：「請打 0～100 的整數」
+    static func invalidInputText(_ r: CompetencyRange) -> String {
+        "請打 \(r.low)～\(r.high) 的整數"
+    }
+
+    /// ↔ can_save：打了不是數字 → 灰；改已經有的那一張 → 有改格子或總評才亮；新的一張 → 有評 1 格以上（或數字欄打了會改的數字）
+    static func canSave(counts c: CompetencyFooterCounts, noteChanged: Bool, pendingChange: Bool,
+                        invalidInput: Bool) -> Bool {
+        if invalidInput { return false }
+        if c.editing { return c.changed + c.carried + c.removed > 0 || noteChanged || pendingChange }
+        return c.changed + c.carried > 0 || pendingChange
     }
 }

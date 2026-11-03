@@ -11,6 +11,17 @@ import SwiftUI
 // • body 只排版：每一列要的字、狀態先在 rowModels(_:) 算成 CompRatingRowModel；子 View 都很小（型別檢查不逾時）。
 // • 字不用「他／她」：找不到名字寫「這位同仁」。評分、總評只在 App 裡（通知、小工具、手錶、鎖定畫面、靈動島一個字都沒加）。
 // 骨架（主控）：CompetencyRatingRequest、CompetencyRatingSheet(request:onSaved:) 是跨組契約，不准改。
+//
+// [v25.600 職能雷達 v1a-2]（radar/build/v1a-2/brief.md §4 G2 1–7；judge §3.7-5、§13）
+// • request.sessionId：評分紀錄〔改分數〕打開的就是那一張（沒刪、我評的、是這位的；不然照日子找）。
+// • 底部那一行、儲存按鈕：改已經有的那一張時跟打開時比（footerCounts(baseline:)＋CompetencyMath.canSave）——
+//   沒改寫「沒有改動（這一張 12 格）」、儲存灰；不會再寫「改了 12 格」。
+// • 數字欄：打跟現在一樣的數字不算改（關掉不問）；打了不是數字 → 那一格下面紅字「請打 0～100 的整數」、兩顆〔儲存〕都灰，
+//   字留著到改對或清掉為止。
+// • 〔⋯〕只有〔不適用〕（已經是不適用寫〔取消不適用〕＝清掉）〔清掉〕；VoiceOver 自訂動作一樣兩個。
+//   §13 每一格的評語不做：畫面上沒有評語；別台寫的評語原樣存回去（draft 帶著 comment）。
+// • 改舊紀錄：現在已停用的系統、項目照樣列出來，標頭／列名後面灰字「已停用」；「這次評」膠囊寫短名（chipTitle）。
+// 要退回這一版：還原這個檔到 69f6fa6（request.sessionId 那兩行是主控加的，要留）。
 
 /// 打開評分畫面的請求（sheet(item:) 用）
 struct CompetencyRatingRequest: Identifiable {
@@ -18,6 +29,8 @@ struct CompetencyRatingRequest: Identifiable {
     let subordinateId: UUID
     /// 要評哪一天（nil＝今天）
     var dayKey: String? = nil
+    /// [v25.600 v1a-2] 評分紀錄〔改分數〕：要改的就是這一張（同一天兩台各評一張時不會改錯；nil＝照 dayKey 找那一天的）
+    var sessionId: UUID? = nil
 }
 
 struct CompetencyRatingSheet: View {
@@ -130,8 +143,16 @@ struct CompetencyRatingSheet: View {
         }
     }
 
+    /// [v25.600 職能雷達 v1a-2 裁定] 評分紀錄〔改分數〕打開的那一張：日期不能在這裡改（改了會在別天多存一張、原本那一張還在）；
+    /// 搬日子用明細頁的〔改日期〕。要退回這一件：刪這個 var、topCard 的 dateLocked 那一行、CompRatingTopCard 的 dateLocked
+    private var dateLocked: Bool {
+        guard let sid = request.sessionId, let e = editing else { return false }
+        return e.id == sid
+    }
+
     private var topCard: some View {
         CompRatingTopCard(date: $date,
+                          dateLocked: dateLocked,
                           infoLine: editingLine,
                           joinWarning: joinWarningLine,
                           readOnlyLine: readOnly ? "這台的 App 比較舊，評分請在已更新的那台做" : nil,
@@ -209,24 +230,55 @@ struct CompetencyRatingSheet: View {
         return out
     }
 
+    /// [v25.600 v1a-2] 改已經有的那一張時跟打開時比（baseline＝打開時的 draft(from:)）：沒改「沒有改動（這一張 12 格）」。
+    /// 改已經有的那一張時算全部的區：沒勾「這次評」的區 effectiveDraft 原樣放回去 → 算「沒動」（不然「這一張 N 格」會變少）；
+    /// 新的一張照 v1a-1 只算勾了的區。要退回這一件：baseline 拿掉、sections 改回 includedSections（＝v1a-1）
     private var counts: CompetencyFooterCounts {
-        CompetencyMath.footerCounts(draft: effectiveDraft, sections: includedSections)
+        let baseline: [CompetencyCellKey: CompetencyDraftCell]? = editing == nil ? nil : initialDraft
+        let secs: [CompetencyRatingSection] = editing == nil ? includedSections : sections
+        return CompetencyMath.footerCounts(draft: effectiveDraft, sections: secs, baseline: baseline)
     }
 
-    /// 有評 1 格以上才能存（數字欄打到一半也算：按儲存時先算數）；唯讀不能存
+    /// 新的一張：有評 1 格以上才能存（數字欄打了會改的數字也算：按儲存時先算數）；改已經有的那一張：有改格子或總評才亮；
+    /// 數字欄打了不是數字 → 灰；唯讀不能存。[v25.600 v1a-2] 規則在 CompetencyMath.canSave（sim 對照）
     private var canSave: Bool {
         guard loaded, !readOnly else { return false }
-        let c: CompetencyFooterCounts = counts
-        return c.changed + c.carried > 0 || hasPendingInput
+        return CompetencyMath.canSave(counts: counts, noteChanged: note != initialNote,
+                                      pendingChange: hasPendingChange, invalidInput: hasInvalidInput)
     }
 
-    /// 數字欄有打字、還沒離開欄位
-    private var hasPendingInput: Bool {
-        inputText.values.contains { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    /// [v25.600 v1a-2] 數字欄每一格打的字（只看這次評的區）：空白、跟現在一樣 → 不算改；會改 → .changed；不是數字 → .invalid
+    private var inputChecks: [CompetencyInputCheck] {
+        var out: [CompetencyInputCheck] = []
+        for (k, t) in inputText where included.contains(k.groupId) {
+            guard let sec = sections.first(where: { $0.id == k.groupId }) else { continue }
+            out.append(CompetencyMath.checkInput(t, current: currentValue(k), range: sec.range))
+        }
+        return out
     }
 
+    /// 數字欄打了會改分數的數字、還沒離開欄位（打一樣的數字不算）
+    private var hasPendingChange: Bool {
+        inputChecks.contains { c in
+            if case .changed(_) = c { return true }
+            return false
+        }
+    }
+
+    /// 數字欄打了不是數字（兩顆〔儲存〕都灰）
+    private var hasInvalidInput: Bool {
+        inputChecks.contains(.invalid)
+    }
+
+    /// 這一格現在的分數（沒評、不適用 nil）
+    private func currentValue(_ key: CompetencyCellKey) -> Int? {
+        guard let c = draft[key], !c.na else { return nil }
+        return c.value
+    }
+
+    /// 有改：關掉先問「不儲存就關掉？」（數字欄打一樣的數字不算改）
     private var hasChanges: Bool {
-        draft != initialDraft || note != initialNote || hasPendingInput
+        draft != initialDraft || note != initialNote || hasPendingChange
     }
 
     /// 「今天已經評過一次，這次會改那一張」「10/30 已經有一張，這次會改那一張」
@@ -246,8 +298,9 @@ struct CompetencyRatingSheet: View {
 
     private var chips: [CompRatingChip] {
         var out: [CompRatingChip] = []
+        // [v25.600 v1a-2] 膠囊寫短名（系統有短名寫短名）。要退回這一件：chipTitle 改回 title
         for sec in sections {
-            out.append(CompRatingChip(id: sec.id, title: sec.title, isOn: included.contains(sec.id),
+            out.append(CompRatingChip(id: sec.id, title: sec.chipTitle, isOn: included.contains(sec.id),
                                       tint: CompetencyPalette.tint(isTrait: sec.isTrait)))
         }
         return out
@@ -289,6 +342,7 @@ struct CompetencyRatingSheet: View {
             setValue: { k, v in setValueQuietly(k, v) },
             confirm: { k in confirmCarried(k) },
             clear: { k in clearCell(k) },
+            na: { k in toggleNA(k) },
             adjust: { k, up in adjust(k, up: up) },
             text: { k in textBinding(k) })
     }
@@ -298,7 +352,8 @@ struct CompetencyRatingSheet: View {
         let tint: Color = CompetencyPalette.tint(isTrait: sec.isTrait)
         let scale: CompetencyScale? = lifeStore.competencySetup.scaleFor(group: sec.id)
         // 每一分的名字只在範圍一樣時才寫（改舊紀錄用舊範圍時不寫；§13 出廠沒有名字 → 都是 nil）
-        let namesOK: Bool = scale?.range == sec.range
+        // [v25.600 v1a-2 驗證修] 超過 11 級（例 0–100）不寫名字（§13；1–5 時設的名字在 0–100 裡還留著）。要退回這一件：拿掉 && 後面
+        let namesOK: Bool = scale?.range == sec.range && CompetencyMath.namesAllowed(sec.range)
         var out: [CompRatingRowModel] = []
         for ax in sec.axes {
             let key = CompetencyCellKey(groupId: sec.id, itemId: ax.id)
@@ -311,15 +366,27 @@ struct CompetencyRatingSheet: View {
             if namesOK, let v = value { level = scale?.levelName(v) }
             let spoken: String = compRatingSpokenValue(cell: cell, level: level, carried: carried,
                                                        previous: ax.previous, range: sec.range)
+            let invalid: String? = invalidNote(key, value: value, range: sec.range)
+            // VoiceOver 也念紅字（整列是 children: .ignore，只念 a11yValue）
+            var spokenAll: String = spoken
+            if let w = invalid { spokenAll += "，" + w }
             let row = CompRatingRowModel(id: key, name: ax.name, sectionTitle: sec.title, isNew: ax.isNew,
+                                         archived: ax.archived,
                                          range: sec.range, tint: tint, value: value, na: na,
                                          faint: carried && !isConfirmed, carriedConfirmed: carried && isConfirmed,
                                          levelName: level, previousText: ax.previousText,
                                          previousNearest: ax.previousNearest, clampNote: clampNotes[key],
-                                         a11yValue: spoken)
+                                         invalidNote: invalid, a11yValue: spokenAll)
             out.append(row)
         }
         return out
+    }
+
+    /// [v25.600 v1a-2] 數字欄打了不是數字：那一格下面紅字「請打 0～100 的整數」（打一樣的、會改的、空白都沒有）
+    private func invalidNote(_ key: CompetencyCellKey, value: Int?, range: CompetencyRange) -> String? {
+        guard let t = inputText[key] else { return nil }
+        let check: CompetencyInputCheck = CompetencyMath.checkInput(t, current: value, range: range)
+        return check == .invalid ? CompetencyMath.invalidInputText(range) : nil
     }
 
     // MARK: 打開、換日子
@@ -327,18 +394,30 @@ struct CompetencyRatingSheet: View {
     private func loadIfNeeded() {
         guard !loaded else { return }
         let t: String = CompetencyMath.dayKey(Date())
-        var key: String = request.dayKey ?? t
-        if key > t || CompetencyMath.parseDay(key) == nil { key = t }
+        let sessions: [CompetencySession] = lifeStore.competencySessions(of: request.subordinateId)
+        // [v25.600 v1a-2] 評分紀錄〔改分數〕：打開的就是那一張（日子＝那一張的日子），不走 sessionOn。
+        // 要退回這一件：target 拿掉（＝v1a-1 照 dayKey 找）
+        let target: CompetencySession? = requestedSession()
+        var key: String = target?.dayKey ?? request.dayKey ?? t
+        if target == nil && (key > t || CompetencyMath.parseDay(key) == nil) { key = t }
         today = t
         dayKey = key
         // 今天就用現在（中午 12 點在上午會晚於 DatePicker 的上限 ...Date()）；以前的日子用那天中午
-        if key != t, let d = compRatingDate(key) { date = d }
+        //（那一張的日子在這台時區晚於今天時也用現在：DatePicker 不能超過 ...Date()）
+        if key < t, let d = compRatingDate(key) { date = d }
         openedTrait = lifeStore.competencySetup.traitRange
         openedSkill = lifeStore.competencySetup.skillRange
-        let sessions: [CompetencySession] = lifeStore.competencySessions(of: request.subordinateId)
-        let e: CompetencySession? = CompetencyMath.sessionOn(key, sessions: sessions)
+        let e: CompetencySession? = target ?? CompetencyMath.sessionOn(key, sessions: sessions)
         openSession(e, sessions: sessions, keepDraft: false)
         loaded = true
+    }
+
+    /// [v25.600 v1a-2] request.sessionId 那一張還在（沒刪、我評的、是這位同仁的、日子認得）才用；不然 nil（照日子找）
+    private func requestedSession() -> CompetencySession? {
+        guard let id = request.sessionId, let s = lifeStore.competencyRatings.session(id) else { return nil }
+        guard s.isLive, s.isByMe, s.subordinateId == request.subordinateId else { return nil }
+        guard CompetencyMath.parseDay(s.dayKey) != nil else { return nil }
+        return s
     }
 
     /// 改日期：那一天已經有一張 → 直接換成那一張；沒有 → 保留現在的草稿（範圍外的、這一天沒有的格子拿掉）
@@ -452,6 +531,8 @@ struct CompetencyRatingSheet: View {
     /// 滑桿、〔－〕〔＋〕、VoiceOver 上下滑：不捲（拖到一半被捲走很難用）
     private func setValueQuietly(_ key: CompetencyCellKey, _ v: Int) {
         clampNotes[key] = nil
+        // [v25.600 v1a-2] 數字欄打了一半（或打了不是數字）又動滑桿／〔－〕〔＋〕：以最後動的為準，欄位改寫成新的分數
+        inputText[key] = nil
         applyValue(key, v)
     }
 
@@ -476,6 +557,24 @@ struct CompetencyRatingSheet: View {
         confirmed.remove(key)
         clampNotes[key] = nil
         inputText[key] = nil
+    }
+
+    /// [v25.600 v1a-2]〔⋯〕〔不適用〕／〔取消不適用〕（judge §3.7-5）：已經是不適用 → 清掉（未評）；不是 → 標不適用
+    /// （不畫頂點、不算平均）。別台寫的那一格評語原樣帶著（§13 每一格的評語不做、不顯示）。從空變不適用時下一格空的才捲。
+    /// 點任何一個分數＝改回評分（applyValue 會蓋掉不適用）。要退回這一件：拿掉這支與 CompRatingActions.na
+    private func toggleNA(_ key: CompetencyCellKey) {
+        if draft[key]?.na == true {
+            clearCell(key)
+            return
+        }
+        let old: CompetencyDraftCell? = draft[key]
+        let wasSet: Bool = old?.isSet == true
+        draft[key] = CompetencyDraftCell(value: nil, na: true, comment: old?.comment, carried: false)
+        confirmed.remove(key)
+        clampNotes[key] = nil
+        inputText[key] = nil
+        if focusedKey == key { focusedKey = nil }
+        if !wasSet { scrollToNext(after: key) }
     }
 
     /// VoiceOver 上下滑：往上 未評 → 最低分、v → v+1；往下 v → v−1、最低分 → 清掉（未評）
@@ -527,14 +626,19 @@ struct CompetencyRatingSheet: View {
         commitInput(o)
     }
 
-    /// 離開數字欄才算數：全形也認；超出範圍夾回並提示；空白、不是數字＝不改
+    /// 離開數字欄才算數：全形也認；超出範圍夾回並提示；空白＝不改。
+    /// [v25.600 v1a-2] 不是數字＝不改，而且字留著（紅字「請打 0～100 的整數」、〔儲存〕灰，到改對或清掉為止）。
+    /// 要退回這一件：parse 失敗那一行的 inputText[key] = raw 拿掉
     private func commitInput(_ key: CompetencyCellKey) {
         guard let raw = inputText[key] else { return }
         inputText[key] = nil
         guard let sec = sections.first(where: { $0.id == key.groupId }) else { return }
         let trimmed: String = raw.trimmingCharacters(in: .whitespacesAndNewlines)
         if trimmed.isEmpty { return }
-        guard let parsed = CompetencyMath.parseInput(trimmed, sec.range) else { return }
+        guard let parsed = CompetencyMath.parseInput(trimmed, sec.range) else {
+            inputText[key] = raw
+            return
+        }
         tapValue(key, parsed.value)
         if parsed.clamped {
             clampNotes[key] = "超出範圍，改成 \(parsed.value)"
@@ -640,6 +744,8 @@ private struct CompRatingRowModel: Identifiable {
     let name: String
     let sectionTitle: String
     let isNew: Bool
+    /// [v25.600 v1a-2] 改舊紀錄時：這一項現在已停用（或這個系統拿掉了），名字後面灰字「已停用」
+    let archived: Bool
     let range: CompetencyRange
     let tint: Color
     /// 這次的分數（不適用 nil）
@@ -653,6 +759,8 @@ private struct CompRatingRowModel: Identifiable {
     let previousText: String?
     let previousNearest: Int?
     let clampNote: String?
+    /// [v25.600 v1a-2] 數字欄打了不是數字：「請打 0～100 的整數」（紅字）
+    let invalidNote: String?
     let a11yValue: String
 
     var usesButtons: Bool { range.usesButtons }
@@ -660,6 +768,8 @@ private struct CompRatingRowModel: Identifiable {
     var isSet: Bool { value != nil || na }
     /// 「Gas System，緊急應變」
     var a11yLabel: String { sectionTitle + "，" + name }
+    /// [v25.600 v1a-2]〔⋯〕與 VoiceOver 自訂動作的字：已經是不適用寫「取消不適用」
+    var naTitle: String { na ? "取消不適用" : "不適用" }
 }
 
 /// 列要回呼的動作（sheet 那邊改 @State）
@@ -668,6 +778,8 @@ private struct CompRatingActions {
     let setValue: (CompetencyCellKey, Int) -> Void
     let confirm: (CompetencyCellKey) -> Void
     let clear: (CompetencyCellKey) -> Void
+    /// [v25.600 v1a-2]〔不適用〕／〔取消不適用〕
+    let na: (CompetencyCellKey) -> Void
     let adjust: (CompetencyCellKey, Bool) -> Void
     let text: (CompetencyCellKey) -> Binding<String>
 }
@@ -693,6 +805,8 @@ private enum CompRatingButtonKind {
 
 private struct CompRatingTopCard: View {
     @Binding var date: Date
+    /// [v25.600 v1a-2 裁定] 〔改分數〕打開的那一張：日期灰掉，下面一行說明
+    let dateLocked: Bool
     let infoLine: String?
     let joinWarning: String?
     let readOnlyLine: String?
@@ -705,6 +819,13 @@ private struct CompRatingTopCard: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             DatePicker("日期", selection: $date, in: ...Date(), displayedComponents: .date)
+                .disabled(dateLocked)
+            if dateLocked {
+                Text(Self.dateLockedText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             HStack {
                 Text("評分人")
                 Spacer()
@@ -723,6 +844,8 @@ private struct CompRatingTopCard: View {
         .background(Color(.systemBackground), in: RoundedRectangle(cornerRadius: 16))
         .overlay(RoundedRectangle(cornerRadius: 16).stroke(Color(.separator).opacity(0.12), lineWidth: 1))
     }
+
+    private static let dateLockedText: String = "要改這一次的日期，請用評分紀錄裡的〔改日期〕。"
 }
 
 private struct CompRatingNotices: View {
@@ -840,6 +963,7 @@ private struct CompRatingSectionView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             CompRatingSectionHeader(title: section.title, rangeText: section.range.text, tint: tint,
+                                    archived: section.archived,
                                     showsCarry: showsCarry, canCarry: section.canCarry,
                                     blockedNote: section.carryBlockedNote, onCarry: onCarry)
             ForEach(rows) { row in
@@ -861,6 +985,8 @@ private struct CompRatingSectionHeader: View {
     let title: String
     let rangeText: String
     let tint: Color
+    /// [v25.600 v1a-2] 改舊紀錄時：這個系統現在已停用（或這位不用學），標題後面灰字「已停用」
+    let archived: Bool
     let showsCarry: Bool
     let canCarry: Bool
     let blockedNote: String?
@@ -878,6 +1004,11 @@ private struct CompRatingSectionHeader: View {
                 Text("（" + rangeText + "）")
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                if archived {
+                    Text("已停用")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
                 Spacer(minLength: 4)
                 if showsCarry {
                     Button("這組照上次", action: onCarry)
@@ -929,8 +1060,9 @@ private struct CompRatingRow: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
-            CompRatingRowTitle(name: model.name, isNew: model.isNew, canClear: model.isSet, tint: model.tint,
-                               onClear: { actions.clear(model.id) })
+            CompRatingRowTitle(name: model.name, isNew: model.isNew, archived: model.archived,
+                               canClear: model.isSet, naTitle: model.naTitle, tint: model.tint,
+                               onNA: { actions.na(model.id) }, onClear: { actions.clear(model.id) })
             input
             CompRatingRowCaption(model: model)
         }
@@ -942,6 +1074,7 @@ private struct CompRatingRow: View {
         .accessibilityAdjustableAction { direction in
             adjust(direction)
         }
+        .accessibilityAction(named: model.naTitle) { actions.na(model.id) }
         .accessibilityAction(named: "清掉") { actions.clear(model.id) }
     }
 
@@ -971,12 +1104,17 @@ private struct CompRatingRow: View {
     }
 }
 
-/// 名字（新增的項目標「新」）＋〔⋯〕（v1a-1 只有〔清掉〕；評語、不適用在 v1a-2）
+/// 名字（新增的項目標「新」、改舊紀錄時已停用的標「已停用」）＋〔⋯〕
+/// [v25.600 v1a-2]〔⋯〕只有〔不適用〕（已經是不適用寫〔取消不適用〕）〔清掉〕——§13 每一格的評語不做。
 private struct CompRatingRowTitle: View {
     let name: String
     let isNew: Bool
+    let archived: Bool
     let canClear: Bool
+    /// 「不適用」／「取消不適用」
+    let naTitle: String
     let tint: Color
+    let onNA: () -> Void
     let onClear: () -> Void
 
     var body: some View {
@@ -992,8 +1130,14 @@ private struct CompRatingRowTitle: View {
                     .padding(.vertical, 2)
                     .background(tint, in: Capsule())
             }
+            if archived {
+                Text("已停用")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
             Spacer(minLength: 4)
             Menu {
+                Button(naTitle) { onNA() }
                 Button("清掉", role: .destructive) { onClear() }
                     .disabled(!canClear)
             } label: {
@@ -1007,7 +1151,7 @@ private struct CompRatingRowTitle: View {
     }
 }
 
-/// 下面小字：「上次 2（4/30）」、不適用（別台設的）、「超出範圍，改成 100」
+/// 下面小字：「上次 2（4/30）」、不適用、「超出範圍，改成 100」、[v25.600 v1a-2] 打了不是數字「請打 0～100 的整數」（紅）
 private struct CompRatingRowCaption: View {
     let model: CompRatingRowModel
 
@@ -1027,6 +1171,11 @@ private struct CompRatingRowCaption: View {
                 Text(c)
                     .font(.caption2)
                     .foregroundStyle(.orange)
+            }
+            if let w = model.invalidNote {
+                Text(w)
+                    .font(.caption)
+                    .foregroundStyle(Color.red)
             }
         }
     }

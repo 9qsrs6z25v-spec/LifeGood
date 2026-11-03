@@ -3644,6 +3644,8 @@ class LifeStore: ObservableObject {
         let competencyCount = competencyRatings.liveSessionCount(of: item.id)
         if competencyCount > 0 {
             message += "\n職能評分 \(competencyCount) 次會先留著，不會一起刪。"
+            // [v25.600 職能雷達 v1a-2] 清理按鈕有了（設定 → 職能項目 最下面）。字跟 sim_v0a.py 一字不差。要退回這一件：刪這一行
+            message += "可以在 設定 → 職能項目 清理。"
         }
         return (title: "刪掉\(who)？", message: message)
     }
@@ -9502,5 +9504,212 @@ extension LifeStore {
             s.updatedAt = now
             b.upsertSession(s)
         }
+    }
+}
+
+// MARK: - [v25.600 職能雷達 v1a-2] 每一分的名字、系統頁、新增共用項目問系統、永久刪除、清理已刪除同仁、評分改日期
+//（radar/judge.md §7 v1a-2、§3.4、§3.5、§4.4、§1.4-8、§13；radar/build/v1a-2/brief.md §2.3）
+// 跟上面那一段同一套規矩：每支一個 batched（mutateCompetencySetup／mutateCompetencyRatings）、唯讀時一支都不寫、訂閱由畫面擋
+//（〔清理已刪除同仁的評分〕不擋：刪自己的資料）。沒有新的同步鍵、Competency.swift 一個欄位都沒加。
+// sim：radar/build/v1a-2/sim_v1a-2.py（set_level_names、hide_shared、add_shared_skip、duplicate、forever、purge、move）。
+
+extension LifeStore {
+    // MARK: 每一分的名字（§13：出廠空；範圍裡的照草稿寫，範圍外的、說明、別台的欄位原樣留著）
+
+    /// 名字頁〔完成〕／〔套用範本〕／〔先只用數字〕（names 空＝全部清掉）。scaleId＝"trait"／"skill"
+    func setCompetencyLevelNames(scaleId: String, names: [Int: String]) {
+        guard scaleId == CompetencySetupBook.traitScaleId || scaleId == CompetencySetupBook.skillScaleId else { return }
+        mutateCompetencySetup { b, now in
+            var sc = b.scale(scaleId) ?? CompetencyScale(id: scaleId, low: 1, high: 5)
+            let merged: [CompetencyLevel]? = CompetencyMath.mergedLevels(existing: sc.levels, names: names, range: sc.range)
+            guard merged != sc.levels else { return }
+            sc.levels = merged
+            sc.updatedAt = now
+            b.upsertScale(sc)
+        }
+    }
+
+    // MARK: 系統頁
+
+    /// 這個系統拿掉／勾回某個共用學習項目（拿掉＝只有這個系統少一軸，分數留著；勾回來分數都在）
+    func setCompetencySharedHidden(systemId: UUID, itemId: UUID, hidden: Bool) {
+        mutateCompetencySetup { b, now in
+            guard var g = b.group(systemId), g.isLive, !g.isTrait else { return }
+            var list: [UUID] = g.hiddenSharedItemIds ?? []
+            let has: Bool = list.contains(itemId)
+            guard hidden != has else { return }
+            if hidden {
+                list.append(itemId)
+            } else {
+                list.removeAll { $0 == itemId }
+            }
+            g.hiddenSharedItemIds = list
+            g.updatedAt = now
+            b.upsertGroup(g)
+        }
+    }
+
+    /// 系統短名（最多 10 字；空的＝不用短名）
+    func setCompetencyGroupShortName(_ id: UUID, to short: String?) {
+        let v: String? = CompetencyMath.cleanShortName(short, max: CompetencyMath.groupShortMax)
+        mutateCompetencySetup { b, now in
+            guard var g = b.group(id), g.isLive, g.shortName != v else { return }
+            g.shortName = v
+            g.updatedAt = now
+            b.upsertGroup(g)
+        }
+    }
+
+    /// 項目短名（最多 4 字；9～12 項時軸上寫這個）
+    func setCompetencyItemShortName(_ id: UUID, to short: String?) {
+        let v: String? = CompetencyMath.cleanShortName(short, max: CompetencyMath.itemShortMax)
+        mutateCompetencySetup { b, now in
+            guard var it = b.item(id), it.isLive, it.shortName != v else { return }
+            it.shortName = v
+            it.updatedAt = now
+            b.upsertItem(it)
+        }
+    }
+
+    /// 新增共用學習項目，問過「要加到哪些系統？」：沒勾的系統（skipSystems）把它放進那個系統的「拿掉」清單（judge §3.5）
+    @discardableResult
+    func addCompetencySharedItem(name: String, skipSystems: Set<UUID>) -> UUID? {
+        let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !n.isEmpty, !competencySetup.isReadOnlyHere else { return nil }
+        let newId = UUID()
+        mutateCompetencySetup { b, now in
+            let siblings: [CompetencyItem] = b.allItems.filter { $0.isLive && $0.groupId == nil }
+            let maxOrder: Double = siblings.compactMap { $0.order }.max() ?? -1
+            b.upsertItem(CompetencyItem(id: newId, groupId: nil, name: n, order: maxOrder + 1,
+                                        createdAt: now, updatedAt: now))
+            for gid in skipSystems {
+                guard var g = b.group(gid), g.isLive, !g.isTrait else { continue }
+                var list: [UUID] = g.hiddenSharedItemIds ?? []
+                if !list.contains(newId) { list.append(newId) }
+                g.hiddenSharedItemIds = list
+                g.updatedAt = now
+                b.upsertGroup(g)
+            }
+        }
+        return newId
+    }
+
+    /// 〔複製成新系統〕：拿掉的共用項目照抄；這個系統自己的項目（啟用中的）複製成新代號（分數本來就要分開）；
+    /// 短名不抄（兩個系統同一個短名會分不出來）。排在最後。名字空的不建，回 nil
+    @discardableResult
+    func duplicateCompetencySystem(_ id: UUID, name: String) -> UUID? {
+        let n = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !n.isEmpty, !competencySetup.isReadOnlyHere,
+              let src = competencySetup.group(id), src.isLive, !src.isTrait else { return nil }
+        let newId = UUID()
+        mutateCompetencySetup { b, now in
+            b = b.ensuringBasics(now: now)
+            let maxOrder: Double = b.allGroups.filter { $0.isLive && !$0.isTrait }.compactMap { $0.order }.max() ?? 0
+            b.upsertGroup(CompetencyGroup(id: newId, kind: CompetencyGroup.kindSystem, name: n, order: maxOrder + 1,
+                                          hiddenSharedItemIds: src.hiddenSharedItemIds, createdAt: now, updatedAt: now))
+            for it in b.ownItems(id) {
+                b.upsertItem(CompetencyItem(id: UUID(), groupId: newId, name: it.name, shortName: it.shortName,
+                                            order: it.order, createdAt: now, updatedAt: now))
+            }
+        }
+        return newId
+    }
+
+    // MARK: 已停用清單 → 永久刪除（只在「已停用」裡有；第二次確認寫出筆數；judge §3.1-2、§3.4）
+
+    /// 永久刪除一個已停用的項目：項目蓋墓碑＋每一張評分裡那一格蓋格子的墓碑（兩台合併時舊的不會被帶回來）
+    func deleteCompetencyItemForever(_ id: UUID) {
+        guard !competencyReadOnly, let it = competencySetup.item(id), it.isLive, it.archivedAt != nil else { return }
+        batched {
+            mutateCompetencySetup { b, now in
+                guard var x = b.item(id), x.isLive else { return }
+                x.deletedAt = now
+                x.updatedAt = now
+                b.upsertItem(x)
+            }
+            mutateCompetencyRatings { b, now in
+                b = CompetencyMath.clearingCells(b, now: now) { $0.itemId == id }
+            }
+        }
+    }
+
+    /// 永久刪除一個已停用的系統：系統與它自己的項目蓋墓碑＋那個系統的每一格蓋格子的墓碑
+    func deleteCompetencySystemForever(_ id: UUID) {
+        guard !competencyReadOnly, id != CompetencySetupBook.traitGroupId,
+              let g = competencySetup.group(id), g.isLive, g.archivedAt != nil else { return }
+        batched {
+            mutateCompetencySetup { b, now in
+                guard var x = b.group(id), x.isLive else { return }
+                x.deletedAt = now
+                x.updatedAt = now
+                b.upsertGroup(x)
+                for it in b.allItems where it.isLive && it.groupId == id {
+                    var y = it
+                    y.deletedAt = now
+                    y.updatedAt = now
+                    b.upsertItem(y)
+                }
+            }
+            mutateCompetencyRatings { b, now in
+                b = CompetencyMath.clearingCells(b, now: now) { $0.groupId == id }
+            }
+        }
+    }
+
+    // MARK: 〔清理已刪除同仁的評分〕（不擋訂閱；judge §1.4-8）
+
+    /// 現在要清的（設定頁那顆按鈕用；沒有 nil）
+    var competencyOrphans: CompetencyOrphanSummary? {
+        CompetencyMath.orphanSummary(setup: competencySetup, ratings: competencyRatings,
+                                     knownIds: Set(subordinates.map { $0.id }))
+    }
+
+    /// 清理：找不到人的評分整張蓋墓碑、不用學的系統那一筆蓋墓碑。回傳清了幾位（0＝沒東西可清或唯讀）
+    @discardableResult
+    func purgeCompetencyOrphans() -> Int {
+        guard !competencyReadOnly, let sum = competencyOrphans else { return 0 }
+        let sessionIds: [UUID] = sum.sessionIds
+        let assignmentIds: [UUID] = sum.assignmentIds
+        batched {
+            mutateCompetencyRatings { b, now in
+                for sid in sessionIds {
+                    guard var s = b.session(sid), s.deletedAt == nil else { continue }
+                    s.deletedAt = now
+                    s.updatedAt = now
+                    b.upsertSession(s)
+                }
+            }
+            mutateCompetencySetup { b, now in
+                for aid in assignmentIds {
+                    guard var a = b.allAssignments.first(where: { $0.id == aid }), a.deletedAt == nil else { continue }
+                    a.deletedAt = now
+                    a.updatedAt = now
+                    b.upsertAssignment(a)
+                }
+            }
+        }
+        return sum.personCount
+    }
+
+    // MARK: 評分紀錄〔改日期〕（分數用評分畫面改；judge §3.7-10）
+
+    /// 把一張評分搬到別天。不行的話回一句話（「不能晚於今天」「10/31 已經有一張評分，先改或刪那一張。」），可以回 nil
+    @discardableResult
+    func moveCompetencySession(_ id: UUID, toDay day: String) -> String? {
+        guard !competencyRatings.isReadOnlyHere else { return "這台的 App 比較舊，評分請在已更新的那台做" }
+        guard let s = competencyRatings.session(id), s.isLive else { return "找不到這次評分" }
+        let today: String = CompetencyMath.dayKey(Date())
+        if let problem = CompetencyMath.moveSessionProblem(s, to: day, sessions: competencySessions(of: s.subordinateId),
+                                                           today: today) {
+            return problem
+        }
+        guard day != s.dayKey else { return nil }
+        mutateCompetencyRatings { b, now in
+            guard var x = b.session(id), x.isLive else { return }
+            x.dayKey = day
+            x.updatedAt = now
+            b.upsertSession(x)
+        }
+        return nil
     }
 }

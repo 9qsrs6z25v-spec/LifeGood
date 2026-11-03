@@ -8,6 +8,9 @@ import SwiftUI
 // • 級數 > 11 只畫 4 圈（model.rings 已經是 4 圈）。
 // 骨架（主控）：型別名與 init 參數是跨組契約，不准改；body 由 G2 換成真的。
 // 座標一律在 CompetencyRadarLayout（private struct）裡用 Double 算好、明寫 CGFloat(...) 換過去；各個子 View 只排版。
+// [v25.600 職能雷達 v1a-2]（radar/build/v1a-2/brief.md §4 G2 8–11）下面橫條那一列在分數後面多寫那一分的名字
+// axis.levelText（「能教人」；名字跟現在不一樣寫「當時：能教人」；§13 沒名字不寫）；↑↓ 顏色照 CompetencyMath.deltaDirection。
+// 檔尾 CompetencyRadarThumb 是設定預覽的小圖（主控寫的）。要退回這一版：CompetencyRadarAxisRowTitle 的 levelText 那兩行拿掉。
 
 /// 人格特質紫、系統藍綠（跟執掌 (0.18,0.62,0.60) 分開）
 enum CompetencyPalette {
@@ -404,7 +407,7 @@ struct CompetencyRadarAxisRow: View {
     }
 }
 
-/// 「緊急應變　4　↑2（4/30）」；沒評「未評」、不適用「不適用」（灰）
+/// 「緊急應變　4　能教人　↑2（4/30）」；沒評「未評」、不適用「不適用」（灰）
 private struct CompetencyRadarAxisRowTitle: View {
     let axis: CompetencyAxisModel
     let prefix: String?
@@ -420,11 +423,13 @@ private struct CompetencyRadarAxisRowTitle: View {
     private var valueFont: Font {
         isRated ? Font.footnote.weight(.semibold).monospacedDigit() : Font.caption
     }
+    /// [v25.600 v1a-2] 方向照 CompetencyMath.deltaDirection（1 綠、−1 橘、0 灰；跟〔職能〕分頁同一支）
     private var deltaColor: Color {
-        guard let d = axis.deltaText else { return Color.secondary }
-        if d.hasPrefix("↑") { return Color.green }
-        if d.hasPrefix("↓") { return Color.orange }
-        return Color.secondary
+        switch CompetencyMath.deltaDirection(axis.deltaText) {
+        case 1: return Color.green
+        case -1: return Color.orange
+        default: return Color.secondary
+        }
     }
 
     var body: some View {
@@ -443,6 +448,10 @@ private struct CompetencyRadarAxisRowTitle: View {
             Text(valueText)
                 .font(valueFont)
                 .foregroundStyle(isRated ? Color.primary : Color.secondary)
+            // [v25.600 v1a-2] 那一分的名字「能教人」「當時：能教人」（§13：有名字才寫）
+            if let lt = axis.levelText {
+                Text(lt).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+            }
             if let d = axis.deltaText {
                 Text(d).font(.caption.weight(.semibold)).foregroundStyle(deltaColor)
             }
@@ -770,4 +779,73 @@ private struct CompetencyRadarLabelBox {
     let height: Double
     let top: Double
     let centerX: Double
+}
+
+// MARK: - [v25.600 職能雷達 v1a-2] 設定預覽的空殼小雷達（主控先寫好能用的；G2 可以調樣子，型別名與 init 參數不准改）
+
+/// 設定「預覽」一格的小圖：3～12 項畫空殼多邊形（12 點鐘起順時針）、1～2 項與 13 項以上畫三條橫條、0 項畫虛線圓
+struct CompetencyRadarThumb: View {
+    let axisCount: Int
+    let tint: Color
+
+    private var style: CompetencyChartStyle { CompetencyMath.chartStyle(axisCount: axisCount) }
+
+    var body: some View {
+        ZStack {
+            switch style {
+            case .empty:
+                Circle()
+                    .stroke(Color(.separator), style: StrokeStyle(lineWidth: 1, dash: [3, 2]))
+            case .bars:
+                CompetencyRadarThumbBars()
+                    .fill(tint.opacity(0.55))
+            case .radar, .radarShort:
+                CompetencyRadarThumbShape(sides: axisCount)
+                    .fill(tint.opacity(0.12))
+                CompetencyRadarThumbShape(sides: axisCount)
+                    .stroke(tint, lineWidth: 1.2)
+            }
+        }
+        .frame(width: 36, height: 36)
+        .accessibilityHidden(true)
+    }
+}
+
+/// 正 n 邊形（頂點在 12 點鐘、順時針；角度照 CompetencyMath.angle）
+struct CompetencyRadarThumbShape: Shape {
+    let sides: Int
+
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        let n: Int = max(sides, 3)
+        let r: Double = Double(min(rect.width, rect.height)) / 2
+        let cx: Double = Double(rect.midX)
+        let cy: Double = Double(rect.midY)
+        for i in 0..<n {
+            let a: Double = CompetencyMath.angle(i, n)
+            let pt = CGPoint(x: CGFloat(cx + r * cos(a)), y: CGFloat(cy + r * sin(a)))
+            if i == 0 {
+                p.move(to: pt)
+            } else {
+                p.addLine(to: pt)
+            }
+        }
+        p.closeSubpath()
+        return p
+    }
+}
+
+/// 三條長短不一的橫條（1～2 項、13 項以上「改用橫條」）
+struct CompetencyRadarThumbBars: Shape {
+    func path(in rect: CGRect) -> Path {
+        var p = Path()
+        let h: CGFloat = rect.height / 7
+        let widths: [CGFloat] = [0.9, 0.65, 0.8]
+        for (i, w) in widths.enumerated() {
+            let y: CGFloat = rect.minY + h * CGFloat(1 + i * 2)
+            let r = CGRect(x: rect.minX, y: y, width: rect.width * w, height: h)
+            p.addRoundedRect(in: r, cornerSize: CGSize(width: h / 2, height: h / 2))
+        }
+        return p
+    }
 }

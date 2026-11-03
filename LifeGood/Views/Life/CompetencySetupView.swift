@@ -1,15 +1,21 @@
 import SwiftUI
 
-// MARK: - [v25.599 職能雷達 v1a-1] 設定「職能項目」（G4 負責；radar/judge.md §4.4、§3.3、§3.4、§3.5、§6、§13；radar/build/v1a-1/brief.md §4 G4）
+// MARK: - [v25.599 職能雷達 v1a-1] 設定「職能項目」主頁（radar/judge.md §4.4、§3.3、§3.4、§3.5、§6、§13）
+// MARK: - [v25.600 職能雷達 v1a-2] 主頁多了：每一分的名字那一列、改範圍後問名字、系統列 → 系統頁、新增共用項目問要加到哪些系統、
+//   項目短名、預覽、已停用（恢復＋永久刪除＋格數）、〔清理已刪除同仁的評分〕（G3；radar/build/v1a-2/brief.md §4 G3）
 //
-// • 人格特質（範圍、項目新增／改名／排序／停用／恢復）、本職學能（範圍）、共用學習項目（新增／改名／排序／停用）、系統（新增／改名／排序／停用）。
-// • 範圍 0…100、low < high 由畫面擋；改範圍先跳說明框（CompetencyMath.rangeChangeText）。§13：每一分不預設名字（名字頁在 v1a-2），所以改範圍不問名字。
-// • 打開看不擋；〔用範例開始〕〔自己設定〕、新增、改名、排序、停用、恢復、改範圍要訂閱（judge §6）。寫入只走 LifeStore 的職能那幾支（每支一個 batched）。
-// • 這台的 App 比較舊（competencyReadOnly）：最上面一行說明、全部按鈕不能按。
-// • 改名、新增一律用 sheet(item:) 的小表單（repo 沒有 alert 裡放 TextField 的先例）；dismiss 之後下一個 runloop 才寫 store。
-// • v1a-1 不做（v1a-2）：每一分的名字頁、系統頁（勾共用項目、系統自己的項目、短名、複製）、設定預覽、永久刪除、〔清理已刪除同仁的評分〕。
-//   新增共用學習項目一律三個系統都有（不問「要加到哪些系統」）。
-// 要退回這一件：把這個檔換回骨架（CompetencySetupView 只留 Form＋標題＋〔完成〕）。
+// • 系統頁（CompetencySystemPage.swift）、每一分的名字頁（CompetencyLevelNamesView.swift）在另外兩個檔；這裡是主頁。
+// • 人格特質（範圍、每一分的名字、項目新增／改名／短名／排序／停用）、本職學能（範圍、每一分的名字）、
+//   共用學習項目（新增／改名／短名／排序／停用）、系統（新增／排序／停用；點進去是系統頁）、預覽、已停用、清理。
+// • 範圍 0…100、low < high 由畫面擋；改範圍先跳說明框（CompetencyMath.rangeChangeText）。§13：舊範圍裡已經有名字、
+//   新範圍 ≤ 11 級，按〔改〕之後才接著問「每一分的名字要重新設嗎？」（CompetencyMath.shouldAskNames）。
+// • 打開看不擋；〔用範例開始〕〔自己設定〕、新增、改名、排序、停用、恢復、永久刪除、改範圍要訂閱（judge §6）。
+//   〔清理已刪除同仁的評分〕不擋訂閱（刪自己的資料）。寫入只走 LifeStore 的職能那幾支（每支一個 batched）。
+// • 這台的 App 比較舊（competencyReadOnly）：最上面一行說明、按鈕不能按（系統頁、名字頁照樣點得進去看）。
+// • 改名、新增一律用 sheet(item:) 的小表單；dismiss 之後下一個 runloop 才寫 store。
+//   confirmationDialog／alert 用 isPresented: 綁一個 Bool＋另一個 @State 存要做的那一筆。
+// • §13：每一格的評語不做（這一頁本來就沒有評語）。
+// 要退回 v1a-2 這一件：git checkout 69f6fa6 -- LifeGood/Views/Life/CompetencySetupView.swift（回到 v1a-1：系統列點了改名、新增共用項目三個系統都有）。
 // 骨架（主控）：型別名與 init 參數是跨組契約，不准改。這個檔自己的型別一律 CompSetup… 前綴、private。
 
 struct CompetencySetupView: View {
@@ -22,6 +28,16 @@ struct CompetencySetupView: View {
 
     @State private var nameRequest: CompSetupNameRequest?
     @State private var showPremiumAlert = false
+    // [v25.600 職能雷達 v1a-2] 改範圍後問名字、〔自己改…〕、永久刪除、清理、小提示。要退回這一件：刪這幾行與用到的地方
+    @State private var namesQuestion: CompSetupNamesQuestion?
+    @State private var showNamesQuestion = false
+    @State private var namesSheet: CompSetupNamesSheetRequest?
+    @State private var pendingDelete: CompetencyArchivedRow?
+    @State private var showDeleteConfirm = false
+    @State private var pendingOrphans: CompetencyOrphanSummary?
+    @State private var showOrphanConfirm = false
+    @State private var flash: CompSetupFlash?
+    @State private var flashTask: Task<Void, Never>?
 
     private var setup: CompetencySetupBook { lifeStore.competencySetup }
     private var readOnly: Bool { lifeStore.competencyReadOnly }
@@ -29,6 +45,28 @@ struct CompetencySetupView: View {
     private var started: Bool { setup.isConfigured || setup.traitGroup != nil }
 
     var body: some View {
+        mainForm
+            .sheet(item: $nameRequest) { r in
+                CompSetupNameSheet(request: r).appStores()
+            }
+            .confirmationDialog(namesQuestionTitle, isPresented: $showNamesQuestion,
+                                titleVisibility: .visible, presenting: namesQuestion) { q in
+                namesQuestionActions(q)
+            }
+            .alert(deleteTitle, isPresented: $showDeleteConfirm, presenting: pendingDelete) { row in
+                deleteForeverActions(row)
+            } message: { row in
+                Text(row.deleteMessage)
+            }
+            .alert(orphanTitle, isPresented: $showOrphanConfirm, presenting: pendingOrphans) { o in
+                orphanActions(o)
+            } message: { o in
+                Text(o.confirmMessage)
+            }
+            .premiumLockAlert(isPresented: $showPremiumAlert)
+    }
+
+    private var mainForm: some View {
         Form {
             readOnlySection
             startSection
@@ -37,7 +75,9 @@ struct CompetencySetupView: View {
                 skillSection
                 sharedSection
                 systemSection
+                previewSection
                 archivedSection
+                orphanSection
                 noteSection
             }
         }
@@ -45,10 +85,13 @@ struct CompetencySetupView: View {
         .navigationTitle("職能項目")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar { toolbarContent }
-        .sheet(item: $nameRequest) { r in
-            CompSetupNameSheet(request: r).appStores()
+        // [v25.600 職能雷達 v1a-2] 改範圍後〔自己改…〕：名字頁用 sheet 打開（右上〔完成〕關掉）。要退回這一件：刪這個 sheet
+        .sheet(item: $namesSheet) { r in
+            NavigationStack {
+                CompetencyLevelNamesView(scaleId: r.scaleId, showsDoneButton: true)
+            }
+            .appStores()
         }
-        .premiumLockAlert(isPresented: $showPremiumAlert)
     }
 
     // MARK: 工具列
@@ -120,6 +163,7 @@ struct CompetencySetupView: View {
             CompSetupRangeRow(current: setup.traitRange, disabled: readOnly, isPremium: subscription.isPremium,
                               onLocked: { showPremiumAlert = true },
                               onCommit: { r in commitRange(CompetencySetupBook.traitScaleId, r) })
+            namesRow(CompetencySetupBook.traitScaleId)
             ForEach(items) { it in
                 itemRow(it, trailing: nil)
             }
@@ -143,6 +187,7 @@ struct CompetencySetupView: View {
             CompSetupRangeRow(current: setup.skillRange, disabled: readOnly, isPremium: subscription.isPremium,
                               onLocked: { showPremiumAlert = true },
                               onCommit: { r in commitRange(CompetencySetupBook.skillScaleId, r) })
+            namesRow(CompetencySetupBook.skillScaleId)
         } header: {
             Text("本職學能")
         } footer: {
@@ -178,28 +223,66 @@ struct CompetencySetupView: View {
         } header: {
             Text("系統（\(systems.count)）")
         } footer: {
-            Text("每個系統一張雷達；新增的系統會有全部共用學習項目。")
+            Text(Self.systemFooter)
         }
     }
 
+    // [v25.600 職能雷達 v1a-2] 預覽（judge §4.4）：每一組一個空殼小雷達＋「3 項 → 三角形」。要退回這一件：刪這一節與 body 裡那一行
     @ViewBuilder
-    private var archivedSection: some View {
-        let items: [CompetencyItem] = setup.archivedItems
-        let systems: [CompetencyGroup] = setup.archivedSystems
-        if !items.isEmpty || !systems.isEmpty {
+    private var previewSection: some View {
+        let rows: [CompetencyPreviewRow] = CompetencyMath.previewRows(setup: setup)
+        if !rows.isEmpty {
             Section {
-                ForEach(systems) { g in
-                    CompSetupArchivedRow(title: g.displayName, kind: "系統", disabled: readOnly,
-                                         onRestore: { restoreGroup(g.id) })
-                }
-                ForEach(items) { it in
-                    CompSetupArchivedRow(title: it.displayName, kind: archivedKindText(it), disabled: readOnly,
-                                         onRestore: { restoreItem(it.id) })
+                ForEach(rows) { p in
+                    CompSetupPreviewRow(row: p)
                 }
             } header: {
-                Text("已停用（\(items.count + systems.count)）")
+                Text("預覽")
             } footer: {
-                Text("停用的不畫、不評、不算平均；以前的分數都留著，恢復後全部回來。")
+                Text("改任何東西，這裡馬上跟著變。")
+            }
+        }
+    }
+
+    // [v25.600 職能雷達 v1a-2] 已停用照 CompetencyMath.archivedRows：「共用學習項目・13 格評分」〔恢復〕＋往左滑〔永久刪除〕
+    @ViewBuilder
+    private var archivedSection: some View {
+        let rows: [CompetencyArchivedRow] = CompetencyMath.archivedRows(setup: setup, ratings: lifeStore.competencyRatings)
+        if !rows.isEmpty {
+            Section {
+                ForEach(rows) { row in
+                    archivedRow(row)
+                }
+            } header: {
+                Text("已停用（\(rows.count)）")
+            } footer: {
+                Text(Self.archivedFooter)
+            }
+        }
+    }
+
+    // [v25.600 職能雷達 v1a-2] 〔清理已刪除同仁的評分〕（judge §1.4-8；有才出現；不擋訂閱）。要退回這一件：刪這一節與 body 裡那一行
+    @ViewBuilder
+    private var orphanSection: some View {
+        let o: CompetencyOrphanSummary? = lifeStore.competencyOrphans
+        let done: String? = flashText(for: nil)
+        if o != nil || done != nil {
+            Section {
+                if let o = o {
+                    Button {
+                        askPurge(o)
+                    } label: {
+                        Label(o.buttonText, systemImage: "trash")
+                    }
+                    .disabled(readOnly)
+                }
+                if let d = done {
+                    Label(d, systemImage: "checkmark.circle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(.green)
+                }
+            } footer: {
+                Text(Self.orphanFooter)
             }
         }
     }
@@ -214,11 +297,26 @@ struct CompetencySetupView: View {
 
     // MARK: 列
 
+    /// [v25.600 職能雷達 v1a-2] 「每一分的名字　只用數字 ›」（看不擋：名字頁裡動手才擋）；套用範本有說明時下面一行橘字
+    @ViewBuilder
+    private func namesRow(_ scaleId: String) -> some View {
+        NavigationLink {
+            CompetencyLevelNamesView(scaleId: scaleId)
+        } label: {
+            CompSetupListRow(title: "每一分的名字", detail: nil, trailing: namesSummary(scaleId))
+        }
+        if let note = flashText(for: scaleId) {
+            Text(note)
+                .font(.caption)
+                .foregroundStyle(.orange)
+        }
+    }
+
     private func itemRow(_ it: CompetencyItem, trailing: String?) -> some View {
         Button {
             openRename(item: it)
         } label: {
-            CompSetupListRow(title: it.displayName, detail: nil, trailing: trailing)
+            CompSetupListRow(title: it.displayName, detail: shortLine(it), trailing: trailing)
         }
         .disabled(readOnly)
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
@@ -233,13 +331,14 @@ struct CompetencySetupView: View {
         }
     }
 
+    /// [v25.600 職能雷達 v1a-2] 系統列 → 系統頁（看不擋；系統頁裡動手才擋）；右邊寫短名。往左滑〔停用〕照留
     private func systemRow(_ g: CompetencyGroup) -> some View {
-        Button {
-            openRename(group: g)
+        NavigationLink {
+            CompetencySystemPage(groupId: g.id)
         } label: {
-            CompSetupListRow(title: g.displayName, detail: axesLine(g.id), trailing: nil)
+            CompSetupListRow(title: g.displayName, detail: CompetencyMath.axesLine(setup: setup, groupId: g.id),
+                             trailing: groupShortText(g))
         }
-        .disabled(readOnly)
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             if !readOnly {
                 Button {
@@ -252,6 +351,22 @@ struct CompetencySetupView: View {
         }
     }
 
+    /// [v25.600 職能雷達 v1a-2] 已停用一列：〔恢復〕＋往左滑〔永久刪除〕（紅；不用 role: .destructive，免得列先被動畫拿掉）
+    private func archivedRow(_ row: CompetencyArchivedRow) -> some View {
+        CompSetupArchivedRow(title: row.title, kind: row.kindText + "・" + row.countText, disabled: readOnly,
+                             onRestore: { restore(row) })
+            .swipeActions(edge: .trailing, allowsFullSwipe: false) {
+                if !readOnly {
+                    Button {
+                        askDeleteForever(row)
+                    } label: {
+                        Label("永久刪除", systemImage: "trash")
+                    }
+                    .tint(.red)
+                }
+            }
+    }
+
     private func addButton(_ title: String, kind: CompSetupNameKind) -> some View {
         Button {
             openAdd(kind)
@@ -259,6 +374,31 @@ struct CompetencySetupView: View {
             Label(title, systemImage: "plus.circle.fill")
         }
         .disabled(readOnly)
+    }
+
+    // MARK: 說明框、確認框的按鈕
+
+    /// [v25.600 職能雷達 v1a-2] 「每一分的名字是照 1–5 設的。改成 1–10 後要重新設嗎？」（按〔改〕之後才問，已經過了 gate）
+    @ViewBuilder
+    private func namesQuestionActions(_ q: CompSetupNamesQuestion) -> some View {
+        ForEach(CompetencyMath.levelTemplates) { t in
+            Button("套用 " + t.title) { applyTemplate(t, q) }
+        }
+        Button("自己改…") { openNamesSheet(q.scaleId) }
+        Button("先只用數字", role: .destructive) { clearNames(q.scaleId) }
+        Button("先不改", role: .cancel) {}
+    }
+
+    @ViewBuilder
+    private func deleteForeverActions(_ row: CompetencyArchivedRow) -> some View {
+        Button("永久刪除", role: .destructive) { deleteForever(row) }
+        Button("取消", role: .cancel) {}
+    }
+
+    @ViewBuilder
+    private func orphanActions(_ o: CompetencyOrphanSummary) -> some View {
+        Button("清理", role: .destructive) { purgeOrphans(o) }
+        Button("取消", role: .cancel) {}
     }
 
     // MARK: 字（小函式；不在 body 裡組）
@@ -269,19 +409,40 @@ struct CompetencySetupView: View {
         return "\(n) 個系統"
     }
 
-    /// 「3 項：P&ID・緊急應變・值班技能」
-    private func axesLine(_ groupId: UUID) -> String {
-        let names: [String] = setup.axes(for: groupId).map { $0.displayName }
-        if names.isEmpty { return "還沒有學習項目" }
-        return "\(names.count) 項：" + names.joined(separator: "・")
+    /// [v25.600 職能雷達 v1a-2] 項目有短名時第二行「短名：團隊」
+    private func shortLine(_ it: CompetencyItem) -> String? {
+        guard let s = CompetencyMath.cleanShortName(it.shortName, max: CompetencyMath.itemShortMax) else { return nil }
+        return "短名：" + s
     }
 
-    /// 已停用的項目屬於哪裡
-    private func archivedKindText(_ it: CompetencyItem) -> String {
-        if it.groupId == CompetencySetupBook.traitGroupId { return "人格特質" }
-        guard let gid = it.groupId else { return "共用學習項目" }
-        let gname: String = setup.group(gid)?.displayName ?? "系統"
-        return gname + " 自己的項目"
+    /// [v25.600 職能雷達 v1a-2] 系統列右邊的短名（沒有 nil）
+    private func groupShortText(_ g: CompetencyGroup) -> String? {
+        CompetencyMath.cleanShortName(g.shortName, max: CompetencyMath.groupShortMax)
+    }
+
+    /// 人格特質／本職學能現在的範圍
+    private func range(of scaleId: String) -> CompetencyRange {
+        scaleId == CompetencySetupBook.traitScaleId ? setup.traitRange : setup.skillRange
+    }
+
+    /// [v25.600 職能雷達 v1a-2] 「只用數字」「能獨立・能教人…」
+    private func namesSummary(_ scaleId: String) -> String {
+        CompetencyMath.levelNamesSummary(setup.scale(scaleId), range: range(of: scaleId))
+    }
+
+    private var namesQuestionTitle: String {
+        guard let q = namesQuestion else { return "" }
+        return CompetencyMath.namesQuestionText(from: q.oldRange, to: q.newRange)
+    }
+
+    private var deleteTitle: String { pendingDelete?.deleteTitle ?? "" }
+
+    private var orphanTitle: String { pendingOrphans?.confirmTitle ?? "" }
+
+    /// 小提示：scaleId nil＝清理完的綠字；有值＝那一組的名字那一列下面的橘字
+    private func flashText(for scaleId: String?) -> String? {
+        guard let f = flash, f.scaleId == scaleId else { return nil }
+        return f.text
     }
 
     /// 同一份清單已經有的名字（擋重名；改名時扣掉自己）
@@ -327,6 +488,13 @@ struct CompetencySetupView: View {
         return out
     }
 
+    /// [v25.600 職能雷達 v1a-2] 新增共用學習項目「要加到哪些系統？」：啟用中的系統 ≥ 2 才問（0～1 個系統照 v1a-1）
+    private func systemChoices() -> [CompSetupSystemChoice] {
+        let systems: [CompetencyGroup] = setup.activeSystems
+        guard systems.count >= 2 else { return [] }
+        return systems.map { CompSetupSystemChoice(id: $0.id, name: $0.displayName) }
+    }
+
     // MARK: 動作（每一個寫入先擋唯讀與訂閱）
 
     /// 能不能寫：唯讀 → 不能（不跳訂閱）；沒訂閱 → 跳訂閱說明
@@ -349,32 +517,71 @@ struct CompetencySetupView: View {
         lifeStore.startCompetencyBlankSetup()
     }
 
+    /// 說明框〔改〕→ 寫範圍；[v25.600 職能雷達 v1a-2] 寫之前先算要不要問名字（舊範圍裡已經有名字、新範圍 ≤ 11 級），寫成功才問
     private func commitRange(_ scaleId: String, _ r: CompetencyRange) {
         guard gate() else { return }
+        let old: CompetencyRange = range(of: scaleId)
+        let ask: Bool = CompetencyMath.shouldAskNames(scale: setup.scale(scaleId), from: old, to: r)
+        let store: LifeStore = lifeStore
         DispatchQueue.main.async {
-            _ = lifeStore.setCompetencyRange(scaleId: scaleId, low: r.low, high: r.high)
+            let ok: Bool = store.setCompetencyRange(scaleId: scaleId, low: r.low, high: r.high)
+            if ok && ask {
+                askNames(CompSetupNamesQuestion(scaleId: scaleId, oldRange: old, newRange: r))
+            }
+        }
+    }
+
+    /// 說明框（alert）收起來之後才跳下一個（同一刻跳會被吃掉）
+    private func askNames(_ q: CompSetupNamesQuestion) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.45) {
+            namesQuestion = q
+            showNamesQuestion = true
+        }
+    }
+
+    /// 〔套用 OJT 五級〕等：照新範圍從最低分往上一級一個名字；級數不一樣時那一列下面一行說明
+    private func applyTemplate(_ t: CompetencyLevelTemplate, _ q: CompSetupNamesQuestion) {
+        let result: (names: [Int: String], note: String?) = CompetencyMath.applyTemplate(t, to: q.newRange)
+        let names: [Int: String] = result.names
+        let scaleId: String = q.scaleId
+        let store: LifeStore = lifeStore
+        DispatchQueue.main.async {
+            store.setCompetencyLevelNames(scaleId: scaleId, names: names)
+        }
+        if let note = result.note {
+            showFlash(CompSetupFlash(scaleId: scaleId, text: note))
+        }
+    }
+
+    /// 〔先只用數字〕：現在範圍裡的名字清掉（範圍外的、說明、別台的欄位原樣留著）
+    private func clearNames(_ scaleId: String) {
+        let store: LifeStore = lifeStore
+        DispatchQueue.main.async {
+            store.setCompetencyLevelNames(scaleId: scaleId, names: [:])
+        }
+    }
+
+    /// 〔自己改…〕：選單收起來之後才打開名字頁
+    private func openNamesSheet(_ scaleId: String) {
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.35) {
+            namesSheet = CompSetupNamesSheetRequest(scaleId: scaleId)
         }
     }
 
     private func openAdd(_ kind: CompSetupNameKind) {
         guard gate() else { return }
         let sug: [String] = kind == .addSystem ? systemSuggestions() : []
+        let systems: [CompSetupSystemChoice] = kind == .addShared ? systemChoices() : []
         nameRequest = CompSetupNameRequest(kind: kind, initialName: "", suggestions: sug,
-                                           takenNames: takenNames(for: kind))
+                                           takenNames: takenNames(for: kind), systems: systems, initialShort: "")
     }
 
     private func openRename(item it: CompetencyItem) {
         guard gate() else { return }
         let kind = CompSetupNameKind.renameItem(it.id)
+        let short: String = it.shortName ?? ""
         nameRequest = CompSetupNameRequest(kind: kind, initialName: it.name ?? "", suggestions: [],
-                                           takenNames: takenNames(for: kind))
-    }
-
-    private func openRename(group g: CompetencyGroup) {
-        guard gate() else { return }
-        let kind = CompSetupNameKind.renameSystem(g.id)
-        nameRequest = CompSetupNameRequest(kind: kind, initialName: g.name ?? "", suggestions: [],
-                                           takenNames: takenNames(for: kind))
+                                           takenNames: takenNames(for: kind), systems: [], initialShort: short)
     }
 
     private func moveTraits(_ from: IndexSet, _ to: Int) {
@@ -418,6 +625,66 @@ struct CompetencySetupView: View {
         lifeStore.setCompetencyGroupArchived(id, archived: false)
     }
 
+    private func restore(_ row: CompetencyArchivedRow) {
+        if row.isGroup {
+            restoreGroup(row.id)
+        } else {
+            restoreItem(row.id)
+        }
+    }
+
+    /// [v25.600 職能雷達 v1a-2] 往左滑〔永久刪除〕→ 第二次確認（寫出會一起刪幾格）
+    private func askDeleteForever(_ row: CompetencyArchivedRow) {
+        guard gate() else { return }
+        pendingDelete = row
+        showDeleteConfirm = true
+    }
+
+    private func deleteForever(_ row: CompetencyArchivedRow) {
+        guard !readOnly else { return }
+        let id: UUID = row.id
+        let isGroup: Bool = row.isGroup
+        let store: LifeStore = lifeStore
+        DispatchQueue.main.async {
+            if isGroup {
+                store.deleteCompetencySystemForever(id)
+            } else {
+                store.deleteCompetencyItemForever(id)
+            }
+        }
+    }
+
+    /// [v25.600 職能雷達 v1a-2] 〔清理已刪除同仁的評分〕：不擋訂閱（刪自己的資料），唯讀不能按
+    private func askPurge(_ o: CompetencyOrphanSummary) {
+        guard !readOnly else { return }
+        pendingOrphans = o
+        showOrphanConfirm = true
+    }
+
+    private func purgeOrphans(_ o: CompetencyOrphanSummary) {
+        guard !readOnly else { return }
+        let done: String = o.doneText
+        let store: LifeStore = lifeStore
+        DispatchQueue.main.async {
+            let n: Int = store.purgeCompetencyOrphans()
+            if n > 0 {
+                showFlash(CompSetupFlash(scaleId: nil, text: done))
+            }
+        }
+    }
+
+    /// 小提示幾秒後消失（照〔職能〕分頁 toast 的 Task 寫法）
+    private func showFlash(_ f: CompSetupFlash) {
+        flashTask?.cancel()
+        withAnimation(.easeInOut(duration: 0.2)) { flash = f }
+        let ns: UInt64 = f.scaleId == nil ? 3_000_000_000 : 6_000_000_000
+        flashTask = Task {
+            try? await Task.sleep(nanoseconds: ns)
+            guard !Task.isCancelled else { return }
+            withAnimation(.easeInOut(duration: 0.2)) { flash = nil }
+        }
+    }
+
     // MARK: 固定的字（一次寫成常數，不在 Text(...) 裡串接）
 
     private static let sampleIntro =
@@ -428,8 +695,45 @@ struct CompetencySetupView: View {
     private static let sampleIntroStarted =
         "可以直接在下面新增人格特質、共用學習項目與系統；或按〔用範例開始〕補上範例（已經有的不動）。"
 
+    private static let systemFooter =
+        "每個系統一張雷達；新增的系統會有全部共用學習項目。點一個系統可以改名、設短名、拿掉不評的共用項目、加這個系統自己的項目。"
+
+    private static let archivedFooter =
+        "停用的不畫、不評、不算平均；以前的分數都留著，恢復後全部回來。往左滑可以永久刪除："
+        + "永久刪除只在這裡有，以前的分數會一起刪掉、不能復原。"
+
+    private static let orphanFooter =
+        "刪掉部屬時，職能評分會先留著。確定那幾位同仁不會再回到名單（另一台也同步好了）再清。"
+
     private static let bottomNote =
         "項目全課共用一份。改名，以前的分數跟著新名字；停用，以前的評分都留著，可以恢復。"
+}
+
+// MARK: - [v25.600 職能雷達 v1a-2] 這一頁自己的小型別
+
+/// 改範圍按〔改〕之後要問的那一筆
+private struct CompSetupNamesQuestion: Equatable {
+    let scaleId: String
+    let oldRange: CompetencyRange
+    let newRange: CompetencyRange
+}
+
+/// 〔自己改…〕打開名字頁（sheet(item:)）
+private struct CompSetupNamesSheetRequest: Identifiable {
+    let id = UUID()
+    let scaleId: String
+}
+
+/// 幾秒後消失的一行字（scaleId nil＝清理完的綠字；有值＝那一組名字列下面的橘字）
+private struct CompSetupFlash: Equatable {
+    let scaleId: String?
+    let text: String
+}
+
+/// 新增共用學習項目「要加到哪些系統？」的一個系統
+private struct CompSetupSystemChoice: Identifiable, Equatable {
+    let id: UUID
+    let name: String
 }
 
 // MARK: - 一列（名字＋小字＋右邊灰字）
@@ -453,12 +757,42 @@ private struct CompSetupListRow: View {
             }
             Spacer(minLength: 8)
             if let t = trailing {
+                // [v25.600 職能雷達 v1a-2] 名字摘要可能很長：最多兩行、靠右
                 Text(t)
                     .font(.caption)
                     .foregroundStyle(.secondary)
+                    .lineLimit(2)
+                    .multilineTextAlignment(.trailing)
             }
         }
         .contentShape(Rectangle())
+    }
+}
+
+// MARK: - [v25.600 職能雷達 v1a-2] 預覽一列（空殼小雷達＋「3 項 → 三角形」＋超過 8 項的橘字）
+
+private struct CompSetupPreviewRow: View {
+    let row: CompetencyPreviewRow
+
+    var body: some View {
+        HStack(spacing: 12) {
+            CompetencyRadarThumb(axisCount: row.axisCount, tint: CompetencyPalette.tint(isTrait: row.isTrait))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(row.title)
+                Text(row.text)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if let w = row.warning {
+                    Text(w)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 2)
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -696,6 +1030,7 @@ private enum CompSetupNameKind: Equatable {
     case addShared
     case addSystem
     case renameItem(UUID)
+    /// v1a-2 起系統改名在系統頁；這一頁不再開這一種（留著不影響）
     case renameSystem(UUID)
 }
 
@@ -707,11 +1042,23 @@ private struct CompSetupNameRequest: Identifiable {
     let suggestions: [String]
     /// 同一份清單已經有的名字（擋重名）
     let takenNames: [String]
+    /// [v25.600 職能雷達 v1a-2] 新增共用學習項目、啟用中的系統 ≥ 2 才有（「要加到哪些系統？」）；其他是空的
+    var systems: [CompSetupSystemChoice] = []
+    /// [v25.600 職能雷達 v1a-2] 改項目名字時現在的短名
+    var initialShort: String = ""
 
     var isRename: Bool {
         switch kind {
         case .renameItem, .renameSystem: return true
         case .addTrait, .addShared, .addSystem: return false
+        }
+    }
+
+    /// [v25.600 職能雷達 v1a-2] 只有改項目名字時多一欄短名（人格特質、共用項目；系統自己的項目在系統頁）
+    var showsShortField: Bool {
+        switch kind {
+        case .renameItem: return true
+        case .addTrait, .addShared, .addSystem, .renameSystem: return false
         }
     }
 
@@ -738,7 +1085,8 @@ private struct CompSetupNameRequest: Identifiable {
         case .addTrait:
             return "排在人格特質最後；以前的評分這一項是「未評」，下次評分會標「新」。"
         case .addShared:
-            return "每個系統都會有這一項；分數還是每個系統各自一格。"
+            if systems.isEmpty { return "每個系統都會有這一項；分數還是每個系統各自一格。" }
+            return "勾了的系統會有這一項；分數還是每個系統各自一格。"
         case .addSystem:
             return "新增的系統會有全部共用學習項目，多一張雷達。"
         case .renameItem, .renameSystem:
@@ -753,14 +1101,19 @@ private struct CompSetupNameSheet: View {
     @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.dismiss) private var dismiss
     @State private var name: String
+    // [v25.600 職能雷達 v1a-2] 短名、沒勾的系統。要退回這一件：刪這兩行與用到的地方
+    @State private var short: String
+    @State private var skip: Set<UUID> = []
     @FocusState private var focused: Bool
 
     init(request: CompSetupNameRequest) {
         self.request = request
         _name = State(initialValue: request.initialName)
+        _short = State(initialValue: request.initialShort)
     }
 
     private var trimmed: String { name.trimmingCharacters(in: .whitespacesAndNewlines) }
+    private var trimmedShort: String { short.trimmingCharacters(in: .whitespacesAndNewlines) }
     private var isTaken: Bool {
         let t: String = trimmed.lowercased()
         return request.takenNames.contains { $0.lowercased() == t }
@@ -768,35 +1121,27 @@ private struct CompSetupNameSheet: View {
     private var unchanged: Bool {
         trimmed == request.initialName.trimmingCharacters(in: .whitespacesAndNewlines)
     }
+    private var shortUnchanged: Bool {
+        trimmedShort == request.initialShort.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+    /// 「要加到哪些系統？」全部沒勾（這一項哪裡都不評）→ 不能存
+    private var allSkipped: Bool {
+        !request.systems.isEmpty && request.systems.allSatisfy { skip.contains($0.id) }
+    }
     private var canSave: Bool {
         if trimmed.isEmpty || isTaken { return false }
-        if request.isRename && unchanged { return false }
+        if request.isRename && unchanged && shortUnchanged { return false }
+        if allSkipped { return false }
         return true
     }
 
     var body: some View {
         NavigationStack {
             Form {
-                Section {
-                    TextField(request.placeholder, text: $name)
-                        .focused($focused)
-                        .submitLabel(.done)
-                        .onSubmit { save() }
-                    if isTaken {
-                        Text("已經有「\(trimmed)」了")
-                            .font(.caption)
-                            .foregroundStyle(.orange)
-                    }
-                } footer: {
-                    Text(request.footer)
-                }
-                if !request.suggestions.isEmpty {
-                    Section {
-                        CompSetupChips(names: request.suggestions, onPick: { s in name = s })
-                    } header: {
-                        Text("建議（你機台填過的系統別）")
-                    }
-                }
+                nameSection
+                shortSection
+                systemsSection
+                suggestionSection
             }
             .navigationTitle(request.title)
             .navigationBarTitleDisplayMode(.inline)
@@ -816,28 +1161,117 @@ private struct CompSetupNameSheet: View {
         .presentationDetents([.medium, .large])
     }
 
+    private var nameSection: some View {
+        Section {
+            TextField(request.placeholder, text: $name)
+                .focused($focused)
+                .submitLabel(.done)
+                .onSubmit { save() }
+            if isTaken {
+                Text("已經有「\(trimmed)」了")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        } footer: {
+            Text(request.footer)
+        }
+    }
+
+    /// [v25.600 職能雷達 v1a-2] 項目短名（選填，最多 4 字；雷達 9～12 項時軸上寫這個）
+    @ViewBuilder
+    private var shortSection: some View {
+        if request.showsShortField {
+            Section {
+                TextField("短名（選填，最多 4 字）", text: $short)
+                    .onChange(of: short) { _, v in clipShort(v) }
+            } footer: {
+                Text("雷達有 9～12 項時，軸上寫短名；沒填就寫 ①②③…，下面每一列對得到全名。")
+            }
+        }
+    }
+
+    /// [v25.600 職能雷達 v1a-2] 新增共用學習項目：要加到哪些系統？（開著＝加；全部預設打勾）
+    @ViewBuilder
+    private var systemsSection: some View {
+        if !request.systems.isEmpty {
+            Section {
+                ForEach(request.systems) { s in
+                    Toggle(s.name, isOn: includeBinding(s.id))
+                }
+                if allSkipped {
+                    Text("至少勾一個系統")
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
+            } header: {
+                Text("要加到哪些系統？")
+            } footer: {
+                Text("沒勾的系統不評這一項（之後可以在系統頁勾回來）。")
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var suggestionSection: some View {
+        if !request.suggestions.isEmpty {
+            Section {
+                CompSetupChips(names: request.suggestions, onPick: { s in name = s })
+            } header: {
+                Text("建議（你機台填過的系統別）")
+            }
+        }
+    }
+
+    private func includeBinding(_ id: UUID) -> Binding<Bool> {
+        Binding(get: { !skip.contains(id) },
+                set: { on in setIncluded(id, on) })
+    }
+
+    private func setIncluded(_ id: UUID, _ on: Bool) {
+        if on {
+            skip.remove(id)
+        } else {
+            skip.insert(id)
+        }
+    }
+
+    /// 短名超過 4 字截掉
+    private func clipShort(_ v: String) {
+        let m: Int = CompetencyMath.itemShortMax
+        if v.count > m {
+            short = String(v.prefix(m))
+        }
+    }
+
     /// 完成：先關掉，下一個 runloop 才寫 store
     private func save() {
         guard canSave else { return }
         let n: String = trimmed
+        // nil＝短名不動
+        let s: String? = (request.showsShortField && !shortUnchanged) ? trimmedShort : nil
+        let skipped: Set<UUID> = skip
         let kind: CompSetupNameKind = request.kind
         let store: LifeStore = lifeStore
         dismiss()
         DispatchQueue.main.async {
-            apply(kind, name: n, store: store)
+            apply(kind, name: n, short: s, skip: skipped, store: store)
         }
     }
 
-    private func apply(_ kind: CompSetupNameKind, name n: String, store: LifeStore) {
+    private func apply(_ kind: CompSetupNameKind, name n: String, short s: String?, skip skipped: Set<UUID>, store: LifeStore) {
         switch kind {
         case .addTrait:
             store.addCompetencyItem(name: n, groupId: CompetencySetupBook.traitGroupId)
         case .addShared:
-            store.addCompetencyItem(name: n, groupId: nil)
+            // [v25.600 職能雷達 v1a-2] 沒勾的系統放進那個系統的「拿掉」清單（0～1 個系統時 skip 是空的＝跟 v1a-1 一樣）
+            store.addCompetencySharedItem(name: n, skipSystems: skipped)
         case .addSystem:
             store.addCompetencySystem(name: n)
         case .renameItem(let id):
             store.renameCompetencyItem(id, to: n)
+            if let s = s {
+                store.setCompetencyItemShortName(id, to: s)
+            }
         case .renameSystem(let id):
             store.renameCompetencyGroup(id, to: n)
         }
