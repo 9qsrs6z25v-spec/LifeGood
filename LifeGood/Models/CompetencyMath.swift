@@ -2530,6 +2530,7 @@ extension CompetencyMath {
         var achieved = 0
         var unrated = 0
         var levels: Double = 0
+        var bigRange = false   // [v25.603 職能雷達 v3] 有差距的格子裡有超過 11 級的範圍 → 「差 N 分」（CompetencyMath.gapUnit）
         var rows: [(row: CompetencyGapRow, order: Int)] = []
         var order = 0
         for card in cards {
@@ -2541,6 +2542,7 @@ extension CompetencyMath {
                 if ax.state == .unrated { unrated += 1 }
                 guard let gap = ax.targetGap, gap > 1e-9 else { continue }
                 levels += gap
+                if card.range.levelCount > 11 { bigRange = true }   // [v25.603 v3]
                 let detail: String = (ax.valueText ?? "") + " → " + (ax.targetValueText ?? "") + "（差 " + numberText(gap) + "）"
                 let row = CompetencyGapRow(id: card.id.uuidString + "|" + ax.id.uuidString, groupId: card.id, itemId: ax.id,
                                            title: card.title + "・" + ax.name, detail: detail, gap: gap)
@@ -2555,7 +2557,8 @@ extension CompetencyMath {
         var gapText: String = g.short + " 全部達標"
         if notMet > 0 {
             gapText = "離 " + g.short + " 還差 \(notMet) 格"
-            if levels > 1e-9 { gapText += "（差 " + numberText(levels) + " 級）" }
+            let unit: String = bigRange ? "分" : "級"   // [v25.603 v3] 超過 11 級寫「差 N 分」
+            if levels > 1e-9 { gapText += "（差 \(numberText(levels)) \(unit)）" }
         }
         return CompetencyTargetSummary(mode: mode, grade: g, chipTitle: chip, currentOptionTitle: curTitle,
                                        nextOptionTitle: nextTitle,
@@ -3956,6 +3959,7 @@ extension CompetencyMath {
     static func teamRisk(col: CompetencyTeamColumn, index ci: Int, rows: [CompetencyTeamRow], people: [CompetencyTeamPerson],
                          range: CompetencyRange, level: Int, trainer: Bool) -> CompetencyRiskEntry {
         let word: String = trainer ? "能教人" : "能獨立"
+        let unit: String = gapUnit(range)   // [v25.603 職能雷達 v3] 超過 11 級寫「差 N 分」
         let lt: Double = ratio(level, range)
         let span: Double = Double(range.high - range.low)
         var holders: [String] = []
@@ -3997,11 +4001,11 @@ extension CompetencyMath {
             s += "最接近：" + nearTexts.joined(separator: "、")
             let same: Bool = top.count == 1 || abs(top[0].gap - top[top.count - 1].gap) < 1e-9
             if top.count == 1 {
-                s += "（差 " + numberText(top[0].gap) + " 級）"
+                s += "（差 \(numberText(top[0].gap)) \(unit)）"
             } else if same {
-                s += "（都差 " + numberText(top[0].gap) + " 級）"
+                s += "（都差 \(numberText(top[0].gap)) \(unit)）"
             } else {
-                let gapTexts: [String] = top.map { (p) -> String in p.name + "差 " + numberText(p.gap) + " 級" }
+                let gapTexts: [String] = top.map { (p) -> String in "\(p.name)差 \(numberText(p.gap)) \(unit)" }
                 s += "（" + gapTexts.joined(separator: "、") + "）"
             }
         }
@@ -4196,5 +4200,232 @@ extension CompetencyMath {
         if saved == 0 { return "這次沒有評" }
         if saved >= total { return "\(total) 位都評好了" }
         return "評好 \(saved)／\(total) 位"
+    }
+}
+
+// MARK: - [v25.603 職能雷達 v3] 人才矩陣的縱軸（潛力｜本職學能｜人格特質）、兩種看法不一樣的人、「差 N 分」
+//（radar/judge_v3.md §A §0 第 7 條、§8 第 4 條、§C；radar/build/v3/brief.md §2；sim_v3.py 一個函式一個函式對照，↔ 後面是 sim 的名字）
+// • 縱軸的數＝這位在那一區「目前分數」（latestCells：每一格取最新那次有評的、範圍照評的時候的範圍換成比例 t）的平均 ×100，
+//   四捨五入到一位（整數寫整數）。不用達成率、不看職等。本職學能＝要學的、啟用中的系統，每個系統先平均、再每個系統一樣重
+//  （跟〔職能〕分頁摘要卡的本職學能同一套）；只算這個系統現在的軸（拿掉的共用項目、已停用的項目不算）；不適用、還沒評不算。
+// • 中線固定＝那一區 v2 門檻「能獨立」的比例 ×100（thresholds；沒設照比例：1–5 的 3 → 50）；不會因為換部門篩選整批換象限。
+// • 縱軸範圍照人才矩陣 domain() 的寫法（12% 邊距），只是把中線一起放進去算，所以中線一定在圖裡。象限照舊 >= 算上面。
+// • 潛力、主動性、綜合分數、ScoreWeights、績效互評的計算一行都不碰：主動性、潛力、兩條原本的中線都是 TalentMatrixView 的
+//   AxisContext 算好傳進來，這裡只拿來寫「兩種看法不一樣的人」的字。
+// • 超過 11 級（0–100 這種）差距寫「差 N 分」（v1b 差距清單 targetSummary、v2 單點風險 teamRisk 同一個規則：gapUnit）。
+// • 只在 App 裡：通知、小工具、手錶、鎖定畫面、靈動島一個字都不碰；沒有新的同步鍵、沒有新的模型欄位。字不用「他／她」。
+
+/// 人才矩陣散布圖的一位（主動性、潛力是 AxisContext 原本算好的值，照抄進來）
+struct CompMatrixPerson: Equatable, Identifiable {
+    let id: UUID
+    /// 名字（空白＝「這位同仁」；competencyTeamPeople 的規則）
+    let name: String
+    let proactivity: Int
+    let potential: Int
+}
+
+/// 「兩種看法不一樣的人」一列
+struct CompMatrixDiffRow: Equatable, Identifiable {
+    let id: UUID
+    let name: String
+    /// 用潛力看的象限「待加強」
+    let potentialQuadrant: String
+    /// 用這一區看的象限「潛力股」
+    let areaQuadrant: String
+    /// 「潛力看：待加強　本職學能看：潛力股」
+    let line: String
+    /// 「本職學能 58.3，在能獨立 50 以上；潛力 86，在中線 92 以下」
+    let reason: String
+}
+
+/// 縱軸是本職學能／人格特質時整張圖要的東西（LifeStore.competencyMatrixAxis 一次算好；TalentMatrixView 放進 AxisContext.comp）
+struct CompMatrixAxis: Equatable {
+    let area: CompetencyTeamArea
+    /// 有畫點的人：id → 縱軸的數（t×100、四捨五入到一位）。這一區一格都沒評的人不在裡面（不畫點）
+    let values: [UUID: Double]
+    /// 有畫點的人：id → 算了幾格（不適用、還沒評不算）
+    let counts: [UUID: Int]
+    /// 中線＝能獨立的比例 ×100（四捨五入到一位）
+    let mid: Double
+    /// 中線旁的字「能獨立（50）」
+    let midLabel: String
+    /// 縱軸範圍（12% 邊距、一定包含中線）
+    let range: ClosedRange<Double>
+    /// 「本職學能」「人格特質」
+    let axisName: String
+    /// 圖的縱軸字「本職學能（職能評分 0–100）」
+    let chartLabel: String
+    /// 圖下面一行「還沒評本職學能：張家瑋（1 位）」；都有評 nil
+    let unratedText: String?
+    /// 明細卡那一格：id → 「本職學能 58.3（評了 9 格）」「本職學能 還沒評」
+    let detailTexts: [UUID: String]
+    /// 明細卡頂上的膠囊：id → 「本職學能 58.3」「本職學能 —」
+    let capsuleTexts: [UUID: String]
+    /// 用潛力看的象限 ≠ 用這一區看的象限的人（照名單順序）
+    let diffRows: [CompMatrixDiffRow]
+    /// 有畫點、沒有不一樣的人：「兩種看法一樣」；一個點都沒畫 nil（卡片不出現）
+    let diffEmptyText: String?
+    /// 匯出前的確認「圖上有名字和本職學能分數，確定要分享嗎？」
+    let exportConfirmText: String
+
+    /// 「兩種看法不一樣的人」卡要不要出現（有畫點才出現）
+    var showsDiffCard: Bool { diffEmptyText != nil || !diffRows.isEmpty }
+}
+
+extension CompetencyMath {
+
+    // MARK: 縱軸能選哪幾區
+
+    /// ↔ mx_options：沒設過職能項目（isConfigured false）→ 空（不出現切換，畫面跟 v2 一模一樣）；
+    /// 設過的：有項目的區才列（本職學能＝有啟用、有項目的系統；人格特質＝人格有項目），照「本職學能、人格特質」的順序
+    static func matrixAxisOptions(setup: CompetencySetupBook) -> [CompetencyTeamArea] {
+        guard setup.isConfigured else { return [] }
+        var out: [CompetencyTeamArea] = []
+        if !teamGroups(setup: setup, area: .skill).isEmpty { out.append(.skill) }
+        if !teamGroups(setup: setup, area: .trait).isEmpty { out.append(.trait) }
+        return out
+    }
+
+    // MARK: 一位的數
+
+    /// ↔ mx_ratio：這位在這一區「目前分數」的平均比例＋算了幾格；一格都沒有 nil（不畫點）。
+    /// cells＝這位的 latestCells（〔職能〕分頁同一套）。本職學能：要學的、啟用中的系統每個先平均、再一樣重平均；人格特質：人格那一組
+    static func matrixRatio(setup: CompetencySetupBook, personId: UUID, cells: [CompetencyCellKey: CompetencyCellValue],
+                            area: CompetencyTeamArea) -> (t: Double, count: Int)? {
+        var groupTs: [Double] = []
+        var count = 0
+        for ga in teamGroups(setup: setup, area: area) where teamRequired(ga.group, personId: personId, setup: setup) {
+            var ts: [Double] = []
+            for item in ga.axes {
+                let key = CompetencyCellKey(groupId: ga.group.id, itemId: item.id)
+                if let t = cells[key]?.ratio { ts.append(t) }
+            }
+            guard !ts.isEmpty else { continue }
+            groupTs.append(ts.reduce(0, +) / Double(ts.count))
+            count += ts.count
+        }
+        guard !groupTs.isEmpty else { return nil }
+        let mean: Double = groupTs.reduce(0, +) / Double(groupTs.count)
+        return (t: mean, count: count)
+    }
+
+    /// ↔ mx_value：比例 → 縱軸的數（×100、四捨五入到一位；畫點、象限、字都用這個數，畫的跟寫的一樣）
+    static func matrixValue(_ t: Double) -> Double {
+        round1(t * 100)
+    }
+
+    /// ↔ mx_text：「50」「58.3」（整數寫整數、不是整數寫一位小數，不加 ≈）
+    static func matrixNumberText(_ x: Double) -> String {
+        plainNumberText(round1(x))
+    }
+
+    // MARK: 中線、範圍
+
+    /// ↔ mx_mid：中線＝這一區「能獨立」的比例 ×100（v2 thresholds：設過照設的、沒設照比例 0.5 最接近的一級；
+    /// 1–5 的 3 → 50、1–10 的 6 → 55.6、0–100 的 50 → 50）
+    static func matrixMid(setup: CompetencySetupBook, area: CompetencyTeamArea) -> Double {
+        let isTrait: Bool = area == .trait
+        let r: CompetencyRange = isTrait ? setup.traitRange : setup.skillRange
+        let scale: CompetencyScale? = setup.scale(isTrait ? CompetencySetupBook.traitScaleId : CompetencySetupBook.skillScaleId)
+        let th: CompetencyThresholds = thresholds(scale, range: r)
+        return matrixValue(ratio(th.independent, r))
+    }
+
+    /// ↔ mx_domain：縱軸範圍。照人才矩陣 domain() 的寫法（最小～最大、12% 邊距；一樣大時上下 5、下限不低於 0），
+    /// 只是先把中線放進去一起算，所以中線一定在圖裡；一個點都沒有＝只有中線（中線上下 5）
+    static func matrixDomain(_ values: [Double], mid: Double) -> ClosedRange<Double> {
+        let v: [Double] = values + [mid]
+        guard let lo = v.min(), let hi = v.max() else { return 0...100 }
+        if lo == hi { return max(0, lo - 5)...(hi + 5) }
+        let pad: Double = (hi - lo) * 0.12
+        return (lo - pad)...(hi + pad)
+    }
+
+    // MARK: 象限、字
+
+    /// ↔ mx_quadrant：象限名字（照 TalentMatrixView.quadrantLabel：上面＝中線以上、含等於；右邊＝主動性中線以上、含等於）
+    static func matrixQuadrant(hiY: Bool, hiX: Bool) -> String {
+        switch (hiY, hiX) {
+        case (true, true):   return "明星"
+        case (true, false):  return "潛力股"
+        case (false, true):  return "苦勞型"
+        case (false, false): return "待加強"
+        }
+    }
+
+    /// ↔ mx_unrated：「還沒評本職學能：張家瑋（1 位）」；超過 5 位「還沒評本職學能：A、B、C、D、E 等 7 位」；都有評 nil
+    static func matrixUnratedText(names: [String], area: CompetencyTeamArea) -> String? {
+        guard !names.isEmpty else { return nil }
+        let head: String = "還沒評" + area.title + "："
+        if names.count <= 5 {
+            return head + names.joined(separator: "、") + "（\(names.count) 位）"
+        }
+        let shown: [String] = Array(names.prefix(5))
+        return head + shown.joined(separator: "、") + " 等 \(names.count) 位"
+    }
+
+    /// ↔ mx_export_confirm：匯出前的確認（使用者自己按的分享可以有名字，但先提醒）
+    static func matrixExportConfirmText(_ area: CompetencyTeamArea) -> String {
+        "圖上有名字和" + area.title + "分數，確定要分享嗎？"
+    }
+
+    /// ↔ gap_unit：差距的單位（超過 11 級寫「分」、11 級以內寫「級」；v2 單點風險、v1b 差距清單同一個規則）
+    static func gapUnit(_ r: CompetencyRange) -> String {
+        r.levelCount > 11 ? "分" : "級"
+    }
+
+    // MARK: 整張圖
+
+    /// ↔ mx_axis：整張圖一次算好。people＝人才矩陣現在的名單（照順序）；cells＝每位的 latestCells；
+    /// xMid＝主動性中線、potentialMid＝潛力中線（AxisContext 原本的 xMid、yMid，只拿來寫「兩種看法不一樣的人」）
+    static func matrixAxis(setup: CompetencySetupBook, people: [CompMatrixPerson],
+                           cells: [UUID: [CompetencyCellKey: CompetencyCellValue]], area: CompetencyTeamArea,
+                           xMid: Double, potentialMid: Double) -> CompMatrixAxis {
+        let name: String = area.title
+        let mid: Double = matrixMid(setup: setup, area: area)
+        let midText: String = matrixNumberText(mid)
+        let potMidText: String = matrixNumberText(potentialMid)
+        var values: [UUID: Double] = [:]
+        var counts: [UUID: Int] = [:]
+        var details: [UUID: String] = [:]
+        var capsules: [UUID: String] = [:]
+        var unrated: [String] = []
+        var rows: [CompMatrixDiffRow] = []
+        var drawn: [Double] = []
+        for p in people {
+            guard let r = matrixRatio(setup: setup, personId: p.id, cells: cells[p.id] ?? [:], area: area) else {
+                unrated.append(p.name)
+                details[p.id] = name + " 還沒評"
+                capsules[p.id] = name + " —"
+                continue
+            }
+            let v: Double = matrixValue(r.t)
+            let vText: String = matrixNumberText(v)
+            values[p.id] = v
+            counts[p.id] = r.count
+            drawn.append(v)
+            details[p.id] = "\(name) \(vText)（評了 \(r.count) 格）"
+            capsules[p.id] = name + " " + vText
+            let hiX: Bool = Double(p.proactivity) >= xMid
+            let hiPot: Bool = Double(p.potential) >= potentialMid
+            let hiArea: Bool = v >= mid
+            guard hiPot != hiArea else { continue }
+            let q1: String = matrixQuadrant(hiY: hiPot, hiX: hiX)
+            let q2: String = matrixQuadrant(hiY: hiArea, hiX: hiX)
+            let areaSide: String = hiArea ? "以上" : "以下"
+            let potSide: String = hiPot ? "以上" : "以下"
+            let line: String = "潛力看：\(q1)　\(name)看：\(q2)"
+            let reason: String = "\(name) \(vText)，在能獨立 \(midText) \(areaSide)；潛力 \(p.potential)，在中線 \(potMidText) \(potSide)"
+            rows.append(CompMatrixDiffRow(id: p.id, name: p.name, potentialQuadrant: q1, areaQuadrant: q2,
+                                          line: line, reason: reason))
+        }
+        let emptyText: String? = drawn.isEmpty ? nil : (rows.isEmpty ? "兩種看法一樣" : nil)
+        return CompMatrixAxis(area: area, values: values, counts: counts, mid: mid,
+                              midLabel: "能獨立（\(midText)）",
+                              range: matrixDomain(drawn, mid: mid),
+                              axisName: name, chartLabel: name + "（職能評分 0–100）",
+                              unratedText: matrixUnratedText(names: unrated, area: area),
+                              detailTexts: details, capsuleTexts: capsules, diffRows: rows,
+                              diffEmptyText: emptyText, exportConfirmText: matrixExportConfirmText(area))
     }
 }

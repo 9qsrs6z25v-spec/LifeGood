@@ -340,6 +340,12 @@ struct TalentMatrixView: View {
     @State private var shareItem: MatrixShareURL?
     /// [v25.320] 分頁：0＝人才矩陣、1＝統計圖表
     @State private var tab = 0
+    /// [v25.603 職能雷達 v3] 縱軸：潛力｜本職學能｜人格特質（不記住：每次打開都從潛力開始，照〔含已轉出〕）
+    @State private var yAxis: TalentCompAxis = .potential
+    /// [v25.603 v3]〔看職能〕那位的〔職能〕分頁（sheet(item:)＋.appStores()）
+    @State private var compPerson: TalentCompPersonRequest?
+    /// [v25.603 v3] 縱軸是職能時，匯出前先問「圖上有名字和本職學能分數，確定要分享嗎？」
+    @State private var confirmCompExport = false
 
     /// 目前選取的部門（多選，持久化於 @AppStorage）
     private var selectedDeptIds: Set<UUID> {
@@ -392,6 +398,8 @@ struct TalentMatrixView: View {
         let potentialScores: [UUID: Int]
         let yRange: ClosedRange<Double>
         let yMid: Double
+        /// [v25.603 職能雷達 v3] 縱軸是本職學能／人格特質時才有（yRange、yMid 換成它的）；nil＝縱軸是潛力，跟以前一模一樣
+        var comp: CompMatrixAxis? = nil
     }
     private func makeAxisContext() -> AxisContext {
         let mentionCounts = lifeStore.mentionedCounts()
@@ -419,6 +427,89 @@ struct TalentMatrixView: View {
         ctx.potentialScores[m.id] ?? 0
     }
 
+    // MARK: [v25.603 職能雷達 v3] 縱軸切換（radar/judge_v3.md §C；radar/build/v3/brief.md §4 G1）
+    // 縱軸是潛力（或沒設過職能項目、或不是第一頁）＝makeAxisContext() 原封不動，下面幾支在 comp nil 時都回原本的值。
+    // 要退回這一件：body、exportContent 改回 makeAxisContext()，刪這一段與 brief §4 G1 列的那幾行
+
+    /// 主動性那幾項照抄 makeAxisContext()；縱軸是職能時 yRange、yMid 換成 LifeStore.competencyMatrixAxis 算好的（中線＝能獨立）
+    private func axisContext() -> AxisContext {
+        let base: AxisContext = makeAxisContext()
+        guard tab == 0, let area = yAxis.area, lifeStore.competencyMatrixOptions.contains(area) else { return base }
+        let comp: CompMatrixAxis = lifeStore.competencyMatrixAxis(members: members, area: area, proactivity: base.scores,
+                                                                  potential: base.potentialScores, xMid: base.xMid,
+                                                                  potentialMid: base.yMid)
+        return AxisContext(mentionCounts: base.mentionCounts, sideRoleCounts: base.sideRoleCounts,
+                           itemCredits: base.itemCredits, scores: base.scores, xRange: base.xRange, xMid: base.xMid,
+                           potentialScores: base.potentialScores, yRange: comp.range, yMid: comp.mid, comp: comp)
+    }
+
+    /// 縱軸的數：潛力＝潛力原值（跟以前一樣）；職能＝comp.values（沒評的人不畫，不會被問到）
+    private func yValue(_ m: Subordinate, _ ctx: AxisContext) -> Double {
+        if let c = ctx.comp { return c.values[m.id] ?? 0 }
+        return Double(potential(m, ctx))
+    }
+
+    /// 畫點的人：潛力＝members（跟以前一樣）；職能＝這一區有評的人（象限人數、四格 KPI 也只算這些人）
+    private func plotMembers(_ ctx: AxisContext) -> [Subordinate] {
+        guard let c = ctx.comp else { return members }
+        return members.filter { c.values[$0.id] != nil }
+    }
+
+    /// 圖例「高潛力・高主動」的「潛力」（職能時「本職學能」「人格特質」）
+    private func yWord(_ ctx: AxisContext) -> String {
+        ctx.comp?.axisName ?? "潛力"
+    }
+
+    /// 明細卡頂上那顆膠囊：潛力「潛力 86」（跟以前一樣）；職能「本職學能 58.3」
+    private func yCapsuleText(_ m: Subordinate, _ ctx: AxisContext) -> String {
+        if let c = ctx.comp { return c.capsuleTexts[m.id] ?? c.axisName }
+        return "潛力 \(m.potentialScore)"
+    }
+
+    /// 縱軸的字：潛力「潛力（評分系統）」（跟以前一樣）；職能「本職學能（職能評分 0–100）」
+    private func yAxisTitle(_ ctx: AxisContext) -> String {
+        ctx.comp?.chartLabel ?? "潛力（評分系統）"
+    }
+
+    /// 縱軸切換列的選項（沒設過職能項目＝空：不出現切換）
+    private var compAxisOptions: [TalentCompAxis] {
+        let areas: [CompetencyTeamArea] = lifeStore.competencyMatrixOptions
+        return areas.isEmpty ? [] : TalentCompAxis.options(areas)
+    }
+
+    /// 「兩種看法不一樣的人」點一列＝在圖上選那個人（打開原本的明細卡）
+    private func selectMember(_ id: UUID) {
+        guard let m = members.first(where: { $0.id == id }) else { return }
+        withAnimation(.spring(response: 0.34, dampingFraction: 0.82)) { selected = m }
+    }
+
+    /// 明細卡〔看職能〕：打開那位的〔職能〕分頁（只是看，不擋訂閱）
+    private func openCompetency(_ m: Subordinate) {
+        let n: String = m.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        compPerson = TalentCompPersonRequest(id: m.id, name: n.isEmpty ? "這位同仁" : n)
+    }
+
+    /// 工具列〔匯出 JPG〕：縱軸是潛力跟以前一樣直接匯出；是職能先問
+    @MainActor
+    private func requestExport(_ ctx: AxisContext) {
+        if ctx.comp == nil {
+            exportJPG()
+        } else {
+            confirmCompExport = true
+        }
+    }
+
+    /// 中線旁的字「能獨立（50）」（線本身就是原本那條 RuleMark(y: ctx.yMid)；這條只放字）
+    private func compMidRule(_ c: CompMatrixAxis) -> some ChartContent {
+        RuleMark(y: .value("能獨立", c.mid))
+            .foregroundStyle(Color.clear)
+            .annotation(position: .top, alignment: .leading, spacing: 2) {
+                Text(c.midLabel)
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(.secondary)
+            }
+    }
+
     /// [v25.598 轉組織 v5] 篩選選單列的部門：已併入的不列；現在勾著的已併入部門照列（才取消得掉）
     private var filterableDepartments: [Department] {
         let ids = selectedDeptIds
@@ -437,7 +528,7 @@ struct TalentMatrixView: View {
         // 每個 body 求值只算一次（含被標註加分的主動性分數 + X 軸中位數），
         // 供英雄卡 KPI、散布圖、象限圖例、明細卡共用，取代原本每處各自呼叫
         // lifeStore.mentionedCounts() 的重複全量掃描。
-        let ctx = makeAxisContext()
+        let ctx = axisContext()
         return NavigationStack {
             // [v2] ZStack：ScrollView 為底層主內容；breakdownCard 懸浮層疊加其上
             ZStack {
@@ -463,11 +554,19 @@ struct TalentMatrixView: View {
                         } else if tab == 3 {
                             CompetencyTeamView(members: members)   // [v25.602 職能雷達 v2] 部門篩選、〔含已轉出〕共用上面那一排
                         } else if tab == 0 {
+                            // [v25.603 職能雷達 v3] 縱軸切換（沒設過職能項目不出現，畫面跟 v2 一樣）
+                            if !compAxisOptions.isEmpty {
+                                TalentCompAxisPicker(selection: $yAxis, options: compAxisOptions)
+                            }
                             // [v2] 英雄摘要卡 + section header
                             summaryHeroCard(ctx)
                             chartSectionHeader
                             chart(ctx)
+                            if let u = ctx.comp?.unratedText { TalentCompUnratedLine(text: u) }   // [v25.603 v3]
                             quadrantLegend(ctx)
+                            if let c = ctx.comp, c.showsDiffCard {   // [v25.603 v3]
+                                TalentCompDiffCard(axis: c, onSelect: { selectMember($0) })
+                            }
                         } else {
                             TalentStatsView(members: members,
                                             proactivity: ctx.scores,
@@ -499,11 +598,19 @@ struct TalentMatrixView: View {
                 // 統計分頁的分享選單由 TalentStatsView 自帶（單張圖卡也有小分享鈕）
                 if tab == 0 {
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button { exportJPG() } label: { Label("匯出 JPG", systemImage: "square.and.arrow.up") }
+                        Button { requestExport(ctx) } label: { Label("匯出 JPG", systemImage: "square.and.arrow.up") }
                     }
                 }
             }
             .sheet(item: $shareItem) { item in ShareSheet(items: [item.url]).appStores() }
+            // [v25.603 v3]〔看職能〕sheet＋縱軸是職能時匯出前先問（按〔分享〕後下一輪才匯出）
+            .modifier(TalentCompMatrixSheets(compPerson: $compPerson, confirmExport: $confirmCompExport,
+                                             confirmText: ctx.comp?.exportConfirmText ?? "",
+                                             onExport: { Task { @MainActor in exportJPG() } }))
+            // [v25.603 v3] 換縱軸先收起明細卡（同部門篩選）
+            .onChange(of: yAxis) { _, _ in
+                selected = nil
+            }
             // 部門篩選變更後 members／ctx 會改用新篩選重新計算，若明細卡仍開著且
             // 選取的成員不在新篩選範圍內，卡片會顯示用 ?? 0 頂替的空分數、卻仍疊在畫面上，
             // 呈現自相矛盾的資料，因此篩選一變就先收起明細卡。
@@ -624,7 +731,7 @@ struct TalentMatrixView: View {
 
     /// 供 ImageRenderer 使用的靜態版面（不含互動）
     private var exportContent: some View {
-        let ctx = makeAxisContext()
+        let ctx = axisContext()
         return VStack(spacing: 14) {
             HStack {
                 Image(systemName: "chart.dots.scatter").foregroundStyle(.indigo)
@@ -637,6 +744,7 @@ struct TalentMatrixView: View {
             } else {
                 summaryHeroCard(ctx)
                 chart(ctx)
+                if let u = ctx.comp?.unratedText { TalentCompUnratedLine(text: u) }   // [v25.603 v3]
                 quadrantLegend(ctx)
             }
         }
@@ -749,15 +857,16 @@ struct TalentMatrixView: View {
     }
 
     // [v3] 象限人數（供英雄卡 + 圖例雙用，消除重複計算；ctx 已預算好分數與 X/Y 軸中位數）
-    private func starCount(_ ctx: AxisContext) -> Int        { members.filter { Double(proactivity($0, ctx)) >= ctx.xMid && Double(potential($0, ctx)) >= ctx.yMid }.count }
-    private func potentialCount(_ ctx: AxisContext) -> Int   { members.filter { Double(proactivity($0, ctx)) < ctx.xMid  && Double(potential($0, ctx)) >= ctx.yMid }.count }
-    private func hardWorkerCount(_ ctx: AxisContext) -> Int  { members.filter { Double(proactivity($0, ctx)) >= ctx.xMid && Double(potential($0, ctx)) < ctx.yMid  }.count }
-    private func needsImprovCount(_ ctx: AxisContext) -> Int { members.filter { Double(proactivity($0, ctx)) < ctx.xMid  && Double(potential($0, ctx)) < ctx.yMid  }.count }
+    // [v25.603 v3] members → plotMembers(ctx)、Double(potential) → yValue（縱軸是潛力時兩個都跟以前一樣）
+    private func starCount(_ ctx: AxisContext) -> Int        { plotMembers(ctx).filter { Double(proactivity($0, ctx)) >= ctx.xMid && yValue($0, ctx) >= ctx.yMid }.count }
+    private func potentialCount(_ ctx: AxisContext) -> Int   { plotMembers(ctx).filter { Double(proactivity($0, ctx)) < ctx.xMid  && yValue($0, ctx) >= ctx.yMid }.count }
+    private func hardWorkerCount(_ ctx: AxisContext) -> Int  { plotMembers(ctx).filter { Double(proactivity($0, ctx)) >= ctx.xMid && yValue($0, ctx) < ctx.yMid  }.count }
+    private func needsImprovCount(_ ctx: AxisContext) -> Int { plotMembers(ctx).filter { Double(proactivity($0, ctx)) < ctx.xMid  && yValue($0, ctx) < ctx.yMid  }.count }
 
     // [v3] 象限標籤 helper（依個人分數回傳名稱與對應色）
     private func quadrantLabel(_ m: Subordinate, _ ctx: AxisContext) -> (name: String, color: Color) {
         let hiX = Double(proactivity(m, ctx)) >= ctx.xMid
-        let hiY = Double(potential(m, ctx)) >= ctx.yMid
+        let hiY = yValue(m, ctx) >= ctx.yMid
         switch (hiY, hiX) {
         case (true, true):   return ("明星", .green)
         case (true, false):  return ("潛力股", .blue)
@@ -770,7 +879,7 @@ struct TalentMatrixView: View {
         // [v25.593 轉組織 v2]〔含已轉出〕開著時，已轉出的點、名字、明細卡用灰
         if OrgMoveIndex.isArchived(m.id) { return .gray }
         let hiX = Double(proactivity(m, ctx)) >= ctx.xMid
-        let hiY = Double(potential(m, ctx)) >= ctx.yMid
+        let hiY = yValue(m, ctx) >= ctx.yMid
         switch (hiY, hiX) {
         case (true, true):   return .green     // 高潛力高主動：明星
         case (true, false):  return .blue      // 高潛力低主動：潛力股
@@ -788,11 +897,14 @@ struct TalentMatrixView: View {
             RuleMark(y: .value("潛力中位", ctx.yMid))
                 .lineStyle(StrokeStyle(lineWidth: 1, dash: [4, 4]))
                 .foregroundStyle(Color(.separator))
+            if let c = ctx.comp {
+                compMidRule(c)   // [v25.603 v3] 中線旁「能獨立（50）」
+            }
 
-            ForEach(members) { m in
+            ForEach(plotMembers(ctx)) { m in
                 PointMark(
                     x: .value("主動性", proactivity(m, ctx)),
-                    y: .value("潛力", potential(m, ctx))
+                    y: .value(LocalizedStringKey(yWord(ctx)), yValue(m, ctx))
                 )
                 .symbolSize(140)
                 .foregroundStyle(pointColor(m, ctx))
@@ -818,7 +930,7 @@ struct TalentMatrixView: View {
             }
         }
         .chartXAxisLabel("主動性（日常：任務 / 會議完成、出勤）", alignment: .center)
-        .chartYAxisLabel("潛力（評分系統）")
+        .chartYAxisLabel(LocalizedStringKey(yAxisTitle(ctx)))
         .frame(height: 380)
         .padding(.horizontal)
         .padding(.vertical, 8)
@@ -852,10 +964,10 @@ struct TalentMatrixView: View {
             }
             .padding(.horizontal, 16).padding(.top, 14).padding(.bottom, 6)
 
-            legendRow(.green,  "明星",  "高潛力・高主動", count: starCount(ctx))
-            legendRow(.blue,   "潛力股", "高潛力・低主動", count: potentialCount(ctx))
-            legendRow(.orange, "苦勞型", "低潛力・高主動", count: hardWorkerCount(ctx))
-            legendRow(.red,    "待加強", "低潛力・低主動", count: needsImprovCount(ctx))
+            legendRow(.green,  "明星",  "高\(yWord(ctx))・高主動", count: starCount(ctx))
+            legendRow(.blue,   "潛力股", "高\(yWord(ctx))・低主動", count: potentialCount(ctx))
+            legendRow(.orange, "苦勞型", "低\(yWord(ctx))・高主動", count: hardWorkerCount(ctx))
+            legendRow(.red,    "待加強", "低\(yWord(ctx))・低主動", count: needsImprovCount(ctx))
 
             Spacer(minLength: 10)
         }
@@ -915,9 +1027,9 @@ struct TalentMatrixView: View {
         let rect = geo[anchor]
         var best: Subordinate?
         var bestDist = CGFloat.greatestFiniteMagnitude
-        for m in members {
+        for m in plotMembers(ctx) {
             guard let px = proxy.position(forX: proactivity(m, ctx)),
-                  let py = proxy.position(forY: potential(m, ctx)) else { continue }
+                  let py = proxy.position(forY: yValue(m, ctx)) else { continue }
             let p = CGPoint(x: rect.minX + px, y: rect.minY + py)
             let d = hypot(p.x - loc.x, p.y - loc.y)
             if d < bestDist { bestDist = d; best = m }
@@ -964,7 +1076,7 @@ struct TalentMatrixView: View {
                             .background(Color.blue.opacity(0.10))
                             .clipShape(Capsule())
                             .overlay(Capsule().stroke(Color.blue.opacity(0.22), lineWidth: 0.5))
-                        Text("潛力 \(m.potentialScore)")
+                        Text(yCapsuleText(m, ctx))
                             .font(.caption2.weight(.semibold))
                             .foregroundStyle(.indigo)
                             .padding(.horizontal, 7).padding(.vertical, 2.5)
@@ -989,6 +1101,11 @@ struct TalentMatrixView: View {
                 .buttonStyle(.plain)
             }
             .padding(.bottom, 12)
+
+            // [v25.603 v3] 縱軸是職能：「本職學能 58.3（評了 9 格）」〔看職能〕；潛力的分數拆解照舊在下面
+            if let c = ctx.comp {
+                TalentCompDetailRow(text: c.detailTexts[m.id] ?? c.axisName, onOpen: { openCompetency(m) })
+            }
 
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {

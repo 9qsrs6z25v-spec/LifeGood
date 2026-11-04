@@ -9972,3 +9972,28 @@ extension LifeStore {
         }
     }
 }
+
+// MARK: - [v25.603 職能雷達 v3] 人才矩陣的縱軸（潛力｜本職學能｜人格特質）
+//（radar/judge_v3.md §C；radar/build/v3/brief.md §2.3）只讀、不寫任何東西；沒有新的同步鍵、模型一個欄位都沒加。
+// 潛力、主動性一行都不算：TalentMatrixView 的 AxisContext 算好的原值照傳進來。名單的名字照 competencyTeamPeople（空白＝「這位同仁」）。
+
+extension LifeStore {
+    /// 縱軸能選哪幾區（空＝沒設過職能項目：不出現切換，人才矩陣跟 v2 一模一樣）
+    var competencyMatrixOptions: [CompetencyTeamArea] {
+        CompetencyMath.matrixAxisOptions(setup: competencySetup)
+    }
+
+    /// 縱軸是本職學能／人格特質時整張圖要的東西（TalentMatrixView.axisContext() 一次叫一次）。
+    /// members＝人才矩陣現在的名單；proactivity、potential、xMid、potentialMid＝AxisContext 原本的 scores、potentialScores、xMid、yMid
+    func competencyMatrixAxis(members: [Subordinate], area: CompetencyTeamArea, proactivity: [UUID: Int],
+                              potential: [UUID: Int], xMid: Double, potentialMid: Double) -> CompMatrixAxis {
+        let team: [CompetencyTeamPerson] = competencyTeamPeople(members)
+        let people: [CompMatrixPerson] = team.map { (p) -> CompMatrixPerson in
+            CompMatrixPerson(id: p.id, name: p.name, proactivity: proactivity[p.id] ?? 0, potential: potential[p.id] ?? 0)
+        }
+        var cells: [UUID: [CompetencyCellKey: CompetencyCellValue]] = [:]
+        for p in people { cells[p.id] = CompetencyMath.latestCells(competencySessions(of: p.id)) }
+        return CompetencyMath.matrixAxis(setup: competencySetup, people: people, cells: cells, area: area,
+                                         xMid: xMid, potentialMid: potentialMid)
+    }
+}
