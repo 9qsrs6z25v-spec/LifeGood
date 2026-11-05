@@ -21,6 +21,11 @@ import SwiftUI
 // [v25.591 轉組織 v1a-2] 「｜交接自 王小明」擴到兼任分身任務（OrgMoveIndex.receivedChip(task:)）、新會議與整場交出去的會議、
 // 議程（自己會議裡的、別人會議交給這位同仁的）、排班（交接過來的那幾天另成一段）；圖片同一顆紫膠囊，名字照樣進提醒。
 // 「交接時已逾期」只有任務、報告有。對照模擬：build/v1a-2/g4/sim_export_v1a2.py。
+//
+// [v25.604 職能雷達 v4a] 使用者原話：「部屬的匯出功能選項太複雜，不如分block予以匯出及時間選別就好」；敏感細節「變成區塊」、
+// 職能雷達「放進去當一個區塊」。選項頁只剩〔圖片｜文字〕、期間、區塊清單（SubExportPick／TeamExportPick）。
+// 組字（每一區怎麼寫）一個字都沒改；只多：拿掉的細項接成固定值（forExport）、依賴、〔一對一會議〕〔職能雷達〕兩個區塊、
+// 分享前提醒「含：…」。規格 radar/judge_v4a.md §C、radar/build/v4a/brief.md；對照模擬 radar/build/v4a/sim_v4a.py。
 
 // MARK: - 共用小型別
 
@@ -199,6 +204,11 @@ struct SubExportOptions: Equatable, Codable {
     /// [v25.590 轉組織 v1a-1] 時間軸〔只列接手之後〕：從交接單收到的機台，PM、警報、件數都從交到這位同仁手上那一刻起算
     ///（選項頁只有這位同仁有從交接單收到的機台才出現這一顆；25.588 就存在記住的那包裡，預設開）
     var timelineAfterHandover = true
+    /// [v25.604 v4a] 〔一對一會議〕區塊（敏感，出廠不勾）：沒勾＝名稱像一對一的會議照 isOneOnOneName 不出去（會議、完成項目的議程）；
+    /// 勾了全部帶（resolveExport）。舊版 App 不認得這個字、略過
+    var includeOneOnOne = false
+    /// [v25.604 v4a] 〔職能雷達〕區塊（出廠不勾）：期間最後一天當時最新的分數（CompetencyMath.exportModel）
+    var includeCompetency = false
 
     init() {}
 
@@ -206,6 +216,7 @@ struct SubExportOptions: Equatable, Codable {
         case includeBoard, boardBirthday, boardScores, blocks, period, customStart, customEnd
         case openItemsIgnorePeriod, includeMarks, includeNotes, leaveReason
         case taskAlarm, taskDereliction, taskDetails, completedKinds, othersAgenda, timelineAfterHandover
+        case includeOneOnOne, includeCompetency   // [v25.604 v4a]
     }
 
     init(from decoder: Decoder) throws {
@@ -237,6 +248,8 @@ struct SubExportOptions: Equatable, Codable {
         }
         othersAgenda = (try? c.decodeIfPresent(Bool.self, forKey: .othersAgenda)) ?? othersAgenda
         timelineAfterHandover = (try? c.decodeIfPresent(Bool.self, forKey: .timelineAfterHandover)) ?? timelineAfterHandover
+        includeOneOnOne = (try? c.decodeIfPresent(Bool.self, forKey: .includeOneOnOne)) ?? includeOneOnOne
+        includeCompetency = (try? c.decodeIfPresent(Bool.self, forKey: .includeCompetency)) ?? includeCompetency
     }
 
     func encode(to encoder: Encoder) throws {
@@ -258,6 +271,8 @@ struct SubExportOptions: Equatable, Codable {
         try c.encode(completedKinds.map { $0.rawValue }.sorted(), forKey: .completedKinds)
         try c.encode(othersAgenda, forKey: .othersAgenda)
         try c.encode(timelineAfterHandover, forKey: .timelineAfterHandover)
+        try c.encode(includeOneOnOne, forKey: .includeOneOnOne)
+        try c.encode(includeCompetency, forKey: .includeCompetency)
     }
 
     /// 讀記住的那一包；空字串、讀不懂都回出廠，不會當掉
@@ -282,6 +297,213 @@ struct SubExportOptions: Equatable, Codable {
     mutating func boardOnly() {
         includeBoard = true
         blocks = []
+    }
+}
+
+// MARK: - [v25.604 職能雷達 v4a] 區塊清單（選項頁只剩〔圖片｜文字〕、期間、這一張清單；judge_v4a §C1）
+//
+// • 清單的每一列＝SubExportPick；勾不勾直接讀寫 SubExportOptions 既有的欄位（看板、生日、分數、blocks、備註、事由、逾期與自訂分、
+//   缺失任務），只多兩個新欄位（includeOneOnOne、includeCompetency）。所以舊版存的 JSON（includeNotes=true、leaveReason=true…）
+//   打開就是勾的，寫回去也照舊欄位寫，舊版 App 讀得懂；SubExportBlock 一個 case 都沒加（組字、出圖的 switch 不用動）。
+// • 拿掉的細項（機台警報、內容與處理、完成項目三種、別人會議交給這位同仁的、還沒做完的不管期間都列、只列接手之後）在
+//   forExport() 接成固定值；記住的那一包照樣存原值、不洗掉。
+// • 依賴：勾了「請假事由」沒勾「請假」等，那一列灰、「要先勾請假」、不作用（forExport 當沒勾；不自動幫忙勾）。
+//   依賴的那幾個欄位本來就只在那幾區用（組字、出圖都是），所以「不作用」跟 v25.603 寫出來的字一樣（keycheck_v4a 逐行查）。
+
+enum SubExportPick: Hashable, Identifiable {
+    case board, boardBirthday, boardScores
+    case block(SubExportBlock)
+    case competency
+    case oneOnOne, leaveReason, notes, marks, dereliction
+
+    var id: String {
+        switch self {
+        case .board: return "board"
+        case .boardBirthday: return "boardBirthday"
+        case .boardScores: return "boardScores"
+        case .block(let b): return "block." + b.rawValue
+        case .competency: return "competency"
+        case .oneOnOne: return "oneOnOne"
+        case .leaveReason: return "leaveReason"
+        case .notes: return "notes"
+        case .marks: return "marks"
+        case .dereliction: return "dereliction"
+        }
+    }
+
+    /// 清單上的名字（也是分享前提醒「含：…」的字）
+    var label: String {
+        switch self {
+        case .board: return "上方看板（摘要卡）"
+        case .boardBirthday: return "看板的生日"
+        case .boardScores: return "看板的分數"
+        case .block(let b): return b.label
+        case .competency: return "職能雷達"
+        case .oneOnOne: return "一對一會議"
+        case .leaveReason: return "請假事由"
+        case .notes: return "備註"
+        case .marks: return "逾期與自訂分"
+        case .dereliction: return "缺失任務"
+        }
+    }
+
+    /// 敏感五個（出廠不勾、〔全選〕不動、分享前提醒點名「含：…」）
+    var isSensitive: Bool {
+        switch self {
+        case .oneOnOne, .leaveReason, .notes, .marks, .dereliction: return true
+        default: return false
+        }
+    }
+
+    /// 要先勾哪幾列（其中一列有勾就行）；空＝不用
+    var requires: [SubExportPick] {
+        switch self {
+        case .boardBirthday, .boardScores: return [.board]
+        case .leaveReason: return [.block(.leaves)]
+        case .oneOnOne: return [.block(.meetings), .block(.completed)]
+        case .marks, .dereliction: return [.block(.tasks), .block(.completed)]
+        default: return []
+        }
+    }
+
+    /// 「要先勾請假」「要先勾上方看板」「要先勾會議或完成項目」（不用＝nil）
+    var requiresText: String? {
+        let r: [SubExportPick] = requires
+        guard !r.isEmpty else { return nil }
+        let names: [String] = r.map { $0 == .board ? "上方看板" : $0.label }
+        return "要先勾" + names.joined(separator: "或")
+    }
+
+    /// 選項頁的小標與列（照這個順序；輸出照 SubExportBlock.allCases 的順序，不照這裡）
+    static let sections: [SubExportPickSection] = [
+        SubExportPickSection(id: "board", title: "看板", picks: [.board, .boardBirthday, .boardScores]),
+        SubExportPickSection(id: "active", title: "主動性",
+                             picks: [.block(.tasks), .block(.meetings), .block(.completed), .block(.leaves),
+                                     .block(.reports), .block(.sideRoles), .block(.mentioned)]),
+        SubExportPickSection(id: "potential", title: "潛力性",
+                             picks: [.block(.history), .block(.proCon), .block(.achievements), .block(.improvements),
+                                     .block(.faults), .block(.missOps)]),
+        SubExportPickSection(id: "duty", title: "執掌", picks: [.block(.equipment), .block(.timeline), .block(.shifts)]),
+        SubExportPickSection(id: "competency", title: "職能", picks: [.competency]),
+        SubExportPickSection(id: "sensitive", title: "敏感（出廠不勾）",
+                             picks: [.oneOnOne, .leaveReason, .notes, .marks, .dereliction])
+    ]
+
+    /// 清單上全部的列（照清單順序）
+    static var allPicks: [SubExportPick] { sections.flatMap { $0.picks } }
+    /// 敏感五個（照清單順序）
+    static let sensitivePicks: [SubExportPick] = [.oneOnOne, .leaveReason, .notes, .marks, .dereliction]
+}
+
+struct SubExportPickSection: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let picks: [SubExportPick]
+}
+
+/// 選項頁清單的一列（SubExportComposer.pickRows 算好；畫面只照著畫）
+struct SubExportPickRow: Identifiable, Equatable {
+    let pick: SubExportPick
+    let title: String
+    /// 名字下面的灰字（敏感區塊會帶出什麼、看板生日只有月日…；沒有＝nil）
+    let caption: String?
+    /// 「要先勾請假」「還沒有評分」：有＝那一列灰、不作用（照樣可以勾）
+    let blockedText: String?
+    /// 右邊件數（這段期間；nil＝不寫數字）
+    let count: Int?
+    /// 「台」「組」（空＝只寫數字）
+    let unit: String
+    let isOn: Bool
+
+    var id: String { pick.id }
+    var isBlocked: Bool { blockedText != nil }
+    /// 右邊的字：「6」「2 台」；0 件寫灰字「沒有」；nil＝不寫
+    var countText: String? {
+        guard let n = count else { return nil }
+        if n == 0 { return "沒有" }
+        return unit.isEmpty ? "\(n)" : "\(n) \(unit)"
+    }
+}
+
+struct SubExportPickSectionRows: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let rows: [SubExportPickRow]
+}
+
+extension SubExportOptions {
+    func isPicked(_ p: SubExportPick) -> Bool {
+        switch p {
+        case .board: return includeBoard
+        case .boardBirthday: return boardBirthday
+        case .boardScores: return boardScores
+        case .block(let b): return blocks.contains(b)
+        case .competency: return includeCompetency
+        case .oneOnOne: return includeOneOnOne
+        case .leaveReason: return leaveReason
+        case .notes: return includeNotes
+        case .marks: return includeMarks
+        case .dereliction: return taskDereliction
+        }
+    }
+
+    mutating func setPicked(_ p: SubExportPick, _ on: Bool) {
+        switch p {
+        case .board: includeBoard = on
+        case .boardBirthday: boardBirthday = on
+        case .boardScores: boardScores = on
+        case .block(let b):
+            if on { _ = blocks.insert(b) } else { _ = blocks.remove(b) }
+        case .competency: includeCompetency = on
+        case .oneOnOne: includeOneOnOne = on
+        case .leaveReason: leaveReason = on
+        case .notes: includeNotes = on
+        case .marks: includeMarks = on
+        case .dereliction: taskDereliction = on
+        }
+    }
+
+    /// 要先勾的那幾列有一列勾著（不用先勾＝true）
+    func requirementMet(_ p: SubExportPick) -> Bool {
+        let r: [SubExportPick] = p.requires
+        return r.isEmpty || r.contains { isPicked($0) }
+    }
+
+    /// 真的會作用：勾著、要先勾的也勾著
+    func isActive(_ p: SubExportPick) -> Bool {
+        isPicked(p) && requirementMet(p)
+    }
+
+    /// 〔全選〕：看板、主動性、潛力性、執掌、職能每一列都勾；敏感五個不動
+    mutating func pickAll() {
+        for p in SubExportPick.allPicks where !p.isSensitive { setPicked(p, true) }
+    }
+
+    /// 〔全不選〕：每一列都不勾（含敏感）
+    mutating func pickNone() {
+        for p in SubExportPick.allPicks { setPicked(p, false) }
+    }
+
+    /// 〔預設〕：回出廠的勾法（期間、記住的細項原值不動）
+    mutating func pickDefault() {
+        let f = SubExportOptions()
+        for p in SubExportPick.allPicks { setPicked(p, f.isPicked(p)) }
+    }
+
+    /// 匯出用的那一份（resolveExport 呼叫）：拿掉的細項接成固定值、要先勾的沒勾就當沒勾。記住的那一包不動。
+    /// 機台警報＝帶、內容與處理＝帶、完成項目三種都帶、別人會議交給這位同仁的＝不帶、還沒做完的不管期間都列＝是、只列接手之後＝是
+    func forExport() -> SubExportOptions {
+        var o = self
+        o.taskAlarm = true
+        o.taskDetails = true
+        o.completedKinds = Set(SubExportCompletedKind.allCases)
+        o.othersAgenda = false
+        o.openItemsIgnorePeriod = true
+        o.timelineAfterHandover = true
+        for p in SubExportPick.allPicks where !requirementMet(p) {
+            o.setPicked(p, false)
+        }
+        return o
     }
 }
 
@@ -394,6 +616,12 @@ struct SubExportSnapshot {
     var deptSuffix: String? = nil
     /// [v25.593 轉組織 v2] 已轉出（選項頁多〔在我這裡的時候〕、圖片版看板多一顆「已轉出」膠囊；export design §5.4）
     var isArchived: Bool { whileMineEndKey != nil }
+    /// [v25.604 v4a] 職能雷達區塊用（make 照抄一份；組字不碰 store）：設定、這位同仁的評分紀錄、職等、是不是已轉出
+    ///（〔職能〕分頁同一個判斷 OrgMoveIndex.isArchived）。沒設職能項目＝都是空的
+    var compSetup = CompetencySetupBook()
+    var compSessions: [CompetencySession] = []
+    var compGrades = CompetencyGradeContext.empty
+    var compArchived = false
 
     /// 抽一次快照。mentioned 由卡片算好傳進來（`mentionedItemsCache`；很貴，不在選項頁重掃，design §6.4-8）。
     @MainActor
@@ -603,6 +831,13 @@ struct SubExportSnapshot {
         // 交接單算的（OrgMoveIndex.archived），部屬身上沒有欄位。要退回這一件：刪這兩行與上面三個欄位
         snap.whileMineEndKey = OrgMovePlan.whileMineEndKey(personId: subordinateId)
         snap.deptSuffix = OrgMovePlan.exportDeptSuffix(personId: subordinateId)
+        // [v25.604 v4a] 職能雷達（設好職能項目才抄；分數在 resolve 照期間最後一天算）。要退回這一件：刪這個 if
+        if store.competencySetup.isConfigured {
+            snap.compSetup = store.competencySetup
+            snap.compSessions = store.competencySessions(of: subordinateId)
+            snap.compGrades = store.competencyGradeContext(for: subordinateId)
+            snap.compArchived = OrgMoveIndex.isArchived(subordinateId)
+        }
         return snap
     }
 
@@ -761,6 +996,8 @@ struct SubExportModel {
     var shiftRuns: [ShiftRun] = []
     /// 看板〔分數〕第一列：期間內的優點、缺點、成就、Miss、請假筆數
     var recordTally: [SubordinateRecordType: Int] = [:]
+    /// [v25.604 v4a] 職能雷達（設好職能項目才有；勾不勾都算，選項頁要知道有沒有評分）。出不出看 competencyWritten
+    var competency: CompetencyExportModel? = nil
 
     init(snapshot: SubExportSnapshot, options: SubExportOptions, rangeStart: Date?, rangeEnd: Date?,
          now: Date, calendar: Calendar, excludedMeetings: Set<UUID>) {
@@ -798,6 +1035,21 @@ struct SubExportModel {
 
     var selectedTotal: Int {
         SubExportBlock.allCases.reduce(0) { $0 + selectedCount($1) }
+    }
+
+    /// [v25.604 v4a] 圖片一列放幾張雷達卡
+    static let competencyColumns = 2
+
+    /// [v25.604 v4a] 這份真的會寫出職能雷達：勾了、那一天（含）以前有評分
+    var competencyWritten: Bool {
+        options.includeCompetency && (competency?.hasRatings ?? false)
+    }
+
+    /// [v25.604 v4a] 職能雷達在圖片裡佔幾列（兩張一列；分頁照列數算）
+    var competencyPageRows: Int {
+        guard competencyWritten, let c = competency else { return 0 }
+        let k: Int = SubExportModel.competencyColumns
+        return (c.cards.count + k - 1) / k
     }
 
     /// 這份請假的總時數
@@ -848,6 +1100,7 @@ struct SubExportModel {
                 n += rowCount(b)
             }
         }
+        n += competencyPageRows   // [v25.604 v4a] 職能雷達兩張一列。要退回這一件：刪這一行
         return n
     }
 
@@ -1423,6 +1676,15 @@ enum SubExportComposer {
             }
         }
         m.shiftRuns = runs
+
+        // [v25.604 v4a] 職能雷達：期間最後一天（今天以後＝今天；〔在我這裡的時候〕＝轉出那天）當時最新的分數。
+        // 要退回這一件：刪這個 if
+        if s.compSetup.isConfigured {
+            let day: String = CompetencyMath.exportThroughDay(rangeEnd: re, now: now, cal: cal)
+            m.competency = CompetencyMath.exportModel(setup: s.compSetup, subordinateId: s.subordinateId,
+                                                      archivedPerson: s.compArchived, sessions: s.compSessions,
+                                                      through: day, grades: s.compGrades)
+        }
         return m
     }
 
@@ -1475,6 +1737,11 @@ enum SubExportComposer {
             case .timeline: appendTimeline(&lines, m)
             case .shifts: appendShifts(&lines, m)
             }
+        }
+        // [v25.604 v4a] 職能雷達（勾了、有評分才寫；寫在每一區後面、「這段期間沒有」前面）。要退回這一件：刪這個 if
+        if m.competencyWritten, let c = m.competency {
+            lines.append("")
+            lines.append(contentsOf: competencyLines(c))
         }
         if !empty.isEmpty {
             lines.append("")
@@ -1750,6 +2017,8 @@ enum SubExportComposer {
                 parts.append(b.countLabel + " \(n)")
             }
         }
+        // [v25.604 v4a]「職能雷達 3 組」（還沒評分的不算）。要退回這一件：刪這一行
+        if m.competencyWritten, let c = m.competency { parts.append("職能雷達 \(c.cards.count) 組") }
         return parts.joined(separator: "・")
     }
 
@@ -1772,8 +2041,9 @@ enum SubExportComposer {
     /// §2.10：按鈕能不能按、底下那條寫什麼
     static func canExport(_ m: SubExportModel) -> (ok: Bool, reason: String) {
         let o = m.options
-        if !o.includeBoard && o.blocks.isEmpty { return (false, "至少選一樣") }
-        if !o.includeBoard && m.selectedTotal == 0 { return (false, "這段期間沒有東西可以匯出") }
+        // [v25.604 v4a] 只勾職能雷達也能匯出（還沒評分的不算）。要退回這一件：拿掉兩個 `&& !…` 條件
+        if !o.includeBoard && o.blocks.isEmpty && !o.includeCompetency { return (false, "至少選一樣") }
+        if !o.includeBoard && m.selectedTotal == 0 && !m.competencyWritten { return (false, "這段期間沒有東西可以匯出") }
         return (true, "")
     }
 
@@ -1903,6 +2173,9 @@ enum SubExportComposer {
         if m.selectedCount(.mentioned) > 0 { extra.append("被標註的項目（是別的同仁的事）") }
         if !extra.isEmpty { msg += "，還有你勾的：" + extra.joined(separator: "、") }
         msg += "。"
+        // [v25.604 v4a] 勾了哪些敏感區塊、職能雷達分數（每次都點名）。要退回這一件：刪這兩行
+        let inc = includedSensitive(m)
+        if !inc.isEmpty { msg += "含：" + inc.joined(separator: "、") + "。" }
         let others = otherNames(in: text, known: s.knownNames, subject: s.name)
         if !others.isEmpty { msg += "也會寫出" + namesPhrase(others) + "的名字。" }
         msg += "傳出去就收不回來了，請確認收的人適合看到。"
@@ -1969,6 +2242,120 @@ enum SubExportComposer {
         if !extra.isEmpty { msg += "，還有：" + extra.joined(separator: "、") }
         msg += "。傳出去就收不回來了。"
         return ("要分享這一件嗎？", msg)
+    }
+}
+
+// MARK: - [v25.604 職能雷達 v4a] 選項頁、匯出的入口；區塊清單；職能雷達的字；分享前提醒「含：…」
+
+extension SubExportComposer {
+
+    /// 選項頁、按〔匯出…〕一律走這一支（不要直接呼叫 resolve）：forExport()（固定值、依賴）＋
+    /// 會議範圍照〔一對一會議〕那一列（沒勾＝名稱像一對一的照 defaultExcludedMeetings 不出去；勾了全部帶）
+    static func resolveExport(_ s: SubExportSnapshot, _ o: SubExportOptions, now: Date,
+                              cal: Calendar = SubExportComposer.gregorian) -> SubExportModel {
+        let eff: SubExportOptions = o.forExport()
+        let excluded: Set<UUID> = eff.includeOneOnOne ? [] : defaultExcludedMeetings(s.meetings)
+        return resolve(s, eff, excludedMeetings: excluded, now: now, cal: cal)
+    }
+
+    /// 文字版的「職能雷達」那一段（標題一行、每張卡一行、目標一行）
+    static func competencyLines(_ c: CompetencyExportModel) -> [String] {
+        var out: [String] = [c.titleLine]
+        out.append(contentsOf: c.lines.map { $0.text })
+        if let t = c.targetLine { out.append(t) }
+        return out
+    }
+
+    /// 分享前提醒「含：請假事由、備註、職能雷達分數。」：勾了而且作用的敏感區塊（照清單順序）＋真的寫出來的職能雷達。
+    /// m＝resolveExport 的那一份（options 已經是 forExport 過的）
+    static func includedSensitive(_ m: SubExportModel) -> [String] {
+        let o: SubExportOptions = m.options
+        var out: [String] = SubExportPick.sensitivePicks.filter { o.isActive($0) }.map { $0.label }
+        if m.competencyWritten { out.append("職能雷達分數") }
+        return out
+    }
+
+    /// 選項頁的清單（小標＋每一列）。o＝畫面上勾的那一包（不是 forExport 過的）；m＝resolveExport(snapshot, o) 的那一份
+    static func pickRows(_ o: SubExportOptions, _ m: SubExportModel) -> [SubExportPickSectionRows] {
+        SubExportPick.sections.map { sec in
+            SubExportPickSectionRows(id: sec.id, title: sec.title, rows: sec.picks.map { pickRow($0, o, m) })
+        }
+    }
+
+    static func pickRow(_ p: SubExportPick, _ o: SubExportOptions, _ m: SubExportModel) -> SubExportPickRow {
+        var blocked: String? = o.requirementMet(p) ? nil : p.requiresText
+        var count: Int? = nil
+        var unit: String = ""
+        var caption: String? = nil
+        switch p {
+        case .board:
+            caption = "名字、職稱、部門、廠區、入職年資、件數小格"
+        case .boardBirthday:
+            caption = "只有月日，年份不出去"
+            if m.snapshot.birthdayText == nil { count = 0 }
+        case .boardScores:
+            caption = "主動性、潛力性、綜合（至今累計，不跟期間）"
+        case .block(let b):
+            count = b == .shifts ? m.shiftDays : m.rowCount(b)
+            unit = b == .equipment ? "台" : (b == .shifts ? "天" : "")
+            caption = blockCaption(b, o, m)
+        case .competency:
+            if let c = m.competency, c.hasRatings {
+                caption = c.subtitle
+                count = c.cards.count
+                unit = "組"
+            } else {
+                blocked = "還沒有評分"
+            }
+        case .oneOnOne:
+            caption = "名稱像一對一、面談的會議與裡面的議程"
+            count = oneOnOneCount(m)
+        case .leaveReason:
+            caption = "請假那一區多寫事由"
+            count = m.leaves.filter { !trim($0.content).isEmpty }.count
+        case .notes:
+            caption = "任務、議程、會議、報告、紀錄、升職的備註，可能 @ 到別的同仁"
+        case .marks:
+            caption = "任務逾期幾天、交接時已逾期、完成章（準時／超前／逾期）、自訂分"
+        case .dereliction:
+            caption = "未完成任務與完成項目裡的缺失任務"
+            count = derelictionCount(m)
+        }
+        return SubExportPickRow(pick: p, title: p.label, caption: caption, blockedText: blocked,
+                                count: count, unit: unit, isOn: o.isPicked(p))
+    }
+
+    /// 區塊那一列的灰字（沒有＝nil）
+    static func blockCaption(_ b: SubExportBlock, _ o: SubExportOptions, _ m: SubExportModel) -> String? {
+        switch b {
+        case .tasks: return "未完成；含機台警報、內容與處理"
+        case .meetings: return o.isActive(.oneOnOne) ? "含一對一會議" : "不含一對一會議（敏感區塊另外勾）"
+        case .completed: return "任務、議程、報告"
+        case .leaves:
+            let h: Double = m.leaveHours
+            return h > 0 ? hoursText(h) : nil
+        case .mentioned: return "是別的同仁的事"
+        case .timeline: return m.snapshot.equipmentSince.isEmpty ? nil : "從交接單收到的機台只列接手之後"
+        default: return nil
+        }
+    }
+
+    /// 〔一對一會議〕那一列的件數：名稱像一對一、這段期間有開過或還有沒做完議程的會議（跟 resolve 收會議同一個條件）
+    static func oneOnOneCount(_ m: SubExportModel) -> Int {
+        m.snapshot.meetings.filter { mt in
+            guard isOneOnOneName(mt.topic) else { return false }
+            if mt.itemContexts.contains(where: { !$0.item.isCompleted }) { return true }
+            return hadSession(mt, start: m.rangeStart, end: m.rangeEnd, now: m.now, cal: m.calendar)
+        }.count
+    }
+
+    /// 〔缺失任務〕那一列的件數：沒做完的缺失任務（不管期間）＋這段期間結案的
+    static func derelictionCount(_ m: SubExportModel) -> Int {
+        var n: Int = 0
+        for t in m.snapshot.tasks where t.isDereliction {
+            if !t.isCompleted || inRange(t.completedAt, m.rangeStart, m.rangeEnd, cal: m.calendar) { n += 1 }
+        }
+        return n
     }
 }
 
@@ -2484,7 +2871,218 @@ enum TeamExportComposer {
         if text.contains("⚠️ 缺失任務") { extra.append("缺失任務") }
         if oneOnOneWritten(m) { extra.append("一對一會議的議程") }
         if !extra.isEmpty { msg += "，還有你勾的：" + extra.joined(separator: "、") }
-        msg += "。傳出去就收不回來了，請確認收的人適合看到。"
+        // [v25.604 v4a] 勾了哪些敏感區塊（每次都點名）；原本一行「。傳出去…」拆成兩段，字一樣。要退回這一件：刪中間兩行、併回一行
+        msg += "。"
+        let inc = includedSensitive(m)
+        if !inc.isEmpty { msg += "含：" + inc.joined(separator: "、") + "。" }
+        msg += "傳出去就收不回來了，請確認收的人適合看到。"
         return ("要分享部屬總覽嗎？", msg)
+    }
+}
+
+// MARK: - [v25.604 職能雷達 v4a] 部屬總覽的區塊清單（judge_v4a §C2；部屬總覽不加職能區塊）
+//
+// • 只剩〔圖片｜文字〕、日子＋〔只看○○〕、這一張清單。勾不勾讀寫 TeamExportOptions 既有的欄位（includeBoard、blocks、
+//   includeOneOnOne、leaveReason、includeDereliction），舊 JSON 打開就是勾的。
+// • 拿掉的：任務種類、會議種類、完成項目三種 → forExport() 固定全帶；完成項目範圍（completedRange）照舊、畫在「完成項目」那一列。
+
+enum TeamExportPick: Hashable, Identifiable {
+    case board
+    case block(TeamExportBlock)
+    case oneOnOne, leaveReason, dereliction
+
+    var id: String {
+        switch self {
+        case .board: return "board"
+        case .block(let b): return "block." + b.rawValue
+        case .oneOnOne: return "oneOnOne"
+        case .leaveReason: return "leaveReason"
+        case .dereliction: return "dereliction"
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .board: return "上方看板（部屬總覽）"
+        case .block(let b): return b.label
+        case .oneOnOne: return "一對一會議"
+        case .leaveReason: return "請假事由"
+        case .dereliction: return "缺失任務"
+        }
+    }
+
+    var isSensitive: Bool {
+        switch self {
+        case .oneOnOne, .leaveReason, .dereliction: return true
+        default: return false
+        }
+    }
+
+    var requires: [TeamExportPick] {
+        switch self {
+        case .leaveReason: return [.block(.leaves)]
+        case .oneOnOne: return [.block(.meetings), .block(.completed)]
+        case .dereliction: return [.block(.tasks), .block(.completed)]
+        default: return []
+        }
+    }
+
+    var requiresText: String? {
+        let r: [TeamExportPick] = requires
+        guard !r.isEmpty else { return nil }
+        return "要先勾" + r.map { $0.label }.joined(separator: "或")
+    }
+
+    static let sections: [TeamExportPickSection] = [
+        TeamExportPickSection(id: "board", title: "看板", picks: [.board]),
+        TeamExportPickSection(id: "blocks", title: "區塊",
+                              picks: [.block(.leaves), .block(.reports), .block(.meetings), .block(.tasks),
+                                      .block(.completed)]),
+        TeamExportPickSection(id: "sensitive", title: "敏感（出廠不勾）", picks: [.oneOnOne, .leaveReason, .dereliction])
+    ]
+
+    static var allPicks: [TeamExportPick] { sections.flatMap { $0.picks } }
+    static let sensitivePicks: [TeamExportPick] = [.oneOnOne, .leaveReason, .dereliction]
+}
+
+struct TeamExportPickSection: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let picks: [TeamExportPick]
+}
+
+/// 部屬總覽清單的一列（TeamExportComposer.pickRows 算好）。「完成項目」那一列右邊另外放範圍的 segmented（選項頁畫）
+struct TeamExportPickRow: Identifiable, Equatable {
+    let pick: TeamExportPick
+    let title: String
+    let caption: String?
+    let blockedText: String?
+    let count: Int?
+    let isOn: Bool
+
+    var id: String { pick.id }
+    var isBlocked: Bool { blockedText != nil }
+    var countText: String? {
+        guard let n = count else { return nil }
+        return n == 0 ? "沒有" : "\(n)"
+    }
+    /// 「完成項目」那一列（右邊多〔當天｜這一週｜這個月｜全部〕）
+    var isCompleted: Bool { pick == .block(.completed) }
+}
+
+struct TeamExportPickSectionRows: Identifiable, Equatable {
+    let id: String
+    let title: String
+    let rows: [TeamExportPickRow]
+}
+
+extension TeamExportOptions {
+    func isPicked(_ p: TeamExportPick) -> Bool {
+        switch p {
+        case .board: return includeBoard
+        case .block(let b): return blocks.contains(b)
+        case .oneOnOne: return includeOneOnOne
+        case .leaveReason: return leaveReason
+        case .dereliction: return includeDereliction
+        }
+    }
+
+    mutating func setPicked(_ p: TeamExportPick, _ on: Bool) {
+        switch p {
+        case .board: includeBoard = on
+        case .block(let b):
+            if on { _ = blocks.insert(b) } else { _ = blocks.remove(b) }
+        case .oneOnOne: includeOneOnOne = on
+        case .leaveReason: leaveReason = on
+        case .dereliction: includeDereliction = on
+        }
+    }
+
+    func requirementMet(_ p: TeamExportPick) -> Bool {
+        let r: [TeamExportPick] = p.requires
+        return r.isEmpty || r.contains { isPicked($0) }
+    }
+
+    func isActive(_ p: TeamExportPick) -> Bool {
+        isPicked(p) && requirementMet(p)
+    }
+
+    /// 〔全選〕：看板、每一區都勾；敏感三個不動
+    mutating func pickAll() {
+        for p in TeamExportPick.allPicks where !p.isSensitive { setPicked(p, true) }
+    }
+
+    /// 〔全不選〕
+    mutating func pickNone() {
+        for p in TeamExportPick.allPicks { setPicked(p, false) }
+    }
+
+    /// 〔預設〕：回出廠的勾法（完成項目範圍、記住的細項原值不動）
+    mutating func pickDefault() {
+        let f = TeamExportOptions()
+        for p in TeamExportPick.allPicks { setPicked(p, f.isPicked(p)) }
+    }
+
+    /// 匯出用的那一份：任務種類、會議種類、完成項目三種固定全帶；要先勾的沒勾就當沒勾（記住的那一包不動）
+    func forExport() -> TeamExportOptions {
+        var o = self
+        o.taskKinds = Set(TeamTaskKind.allCases)
+        o.meetingKinds = Set(TeamMeetingKind.allCases)
+        o.completedKinds = Set(SubExportCompletedKind.allCases)
+        for p in TeamExportPick.allPicks where !requirementMet(p) {
+            o.setPicked(p, false)
+        }
+        return o
+    }
+}
+
+extension TeamExportComposer {
+
+    /// 選項頁、按〔匯出…〕一律走這一支（不要直接呼叫 resolve）：options 先 forExport()
+    static func resolveExport(subordinates: [Subordinate], onlyPersonId: UUID?, options o: TeamExportOptions,
+                              day: Date, now: Date, cal: Calendar, knownNames: [String]) -> TeamExportModel {
+        resolve(subordinates: subordinates, onlyPersonId: onlyPersonId, options: o.forExport(),
+                day: day, now: now, cal: cal, knownNames: knownNames)
+    }
+
+    /// 分享前提醒「含：一對一會議、請假事由、缺失任務。」（勾了而且作用的；m＝resolveExport 的那一份）
+    static func includedSensitive(_ m: TeamExportModel) -> [String] {
+        let o: TeamExportOptions = m.options
+        return TeamExportPick.sensitivePicks.filter { o.isActive($0) }.map { $0.label }
+    }
+
+    /// 選項頁的清單。o＝畫面上勾的那一包；m＝resolveExport 的那一份
+    static func pickRows(_ o: TeamExportOptions, _ m: TeamExportModel) -> [TeamExportPickSectionRows] {
+        TeamExportPick.sections.map { sec in
+            TeamExportPickSectionRows(id: sec.id, title: sec.title, rows: sec.picks.map { pickRow($0, o, m) })
+        }
+    }
+
+    static func pickRow(_ p: TeamExportPick, _ o: TeamExportOptions, _ m: TeamExportModel) -> TeamExportPickRow {
+        let blocked: String? = o.requirementMet(p) ? nil : p.requiresText
+        var count: Int? = nil
+        var caption: String? = nil
+        switch p {
+        case .board:
+            caption = "共幾人、當日請假、當日會議、待辦任務"
+        case .block(let b):
+            count = m.rowCount(b)
+            switch b {
+            case .leaves: caption = "這一天請假的人"
+            case .reports: caption = "本週＋待交；交過的在完成項目"
+            case .meetings: caption = "當日會議 \(m.dayMeetings.count)・未完成條目 \(m.meetingItems.count)"
+            case .tasks: caption = "當日任務 \(m.dayTasks.count)・未完成任務 \(m.openTasks.count)"
+            case .completed: caption = completedRangeText(m)
+            }
+        case .oneOnOne:
+            caption = "名稱像一對一、面談的會議與裡面的議程"
+        case .leaveReason:
+            caption = "請假那一區多寫事由"
+            count = m.leaves.filter { !SubExportComposer.trim($0.rec.content).isEmpty }.count
+        case .dereliction:
+            caption = "任務與完成項目裡的缺失任務"
+        }
+        return TeamExportPickRow(pick: p, title: p.label, caption: caption, blockedText: blocked,
+                                 count: count, isOn: o.isPicked(p))
     }
 }

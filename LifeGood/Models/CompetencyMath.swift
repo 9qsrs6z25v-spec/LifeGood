@@ -4429,3 +4429,153 @@ extension CompetencyMath {
                               diffEmptyText: emptyText, exportConfirmText: matrixExportConfirmText(area))
     }
 }
+
+// MARK: - [v25.604 職能雷達 v4a] 部屬匯出的「職能雷達」區塊（只在部屬卡片的匯出）
+//（radar/judge_v4a.md §C3；radar/build/v4a/brief.md §2；sim_v4a.py 一個函式一個函式對照，↔ 後面是 sim 的名字）
+// • 分數取「期間的最後一天」（今天以後＝今天；〔在我這裡的時候〕＝轉出那天）當時每一格最新的那一筆：只把那一天（含）以前的
+//   評分紀錄交給既有的 chartModel（＝latestCells(through:)）。要畫哪幾張卡、每張卡的軸照〔職能〕分頁（visibleGroups／cardAxes：
+//   不用學的系統不列、已停用的項目照分頁規則、已轉出的人照已轉出的規則）；0 項的卡不放。
+// • 不疊上一次：snapshotDay＝那張卡自己最後評的那天（標題「Gas System・10/30」、不算上一次）。
+// • 目標一律照「目前職等」疊（不看這台〔目標 ▾〕選單：給別人看的是現在的職等），寫「目標 E2：達標 10／12」。
+// • §13：不寫評語、不寫總評。只在使用者自己按的匯出裡；通知、小工具、手錶、鎖定畫面、靈動島一個字都不碰；沒有新的同步鍵、
+//   Competency.swift 一行都沒動。
+
+/// 文字版一張卡一行
+struct CompetencyExportLine: Equatable, Identifiable {
+    /// 組 id
+    let id: UUID
+    /// 「人格特質：團隊合作 4、領導力 3、學習能力 5（平均 4）」
+    let text: String
+}
+
+/// 部屬匯出「職能雷達」那一區（圖、文、選項頁共用；CompetencyMath.exportModel）
+struct CompetencyExportModel: Equatable {
+    /// 期間的最後一天「2026-10-30」（今天以後＝今天）
+    let throughDay: String
+    /// 那一天（含）以前最後一次有評分的日子（一格都沒評＝nil：這一區不出）
+    let ratedDay: String?
+    /// 出圖的卡（照〔職能〕分頁順序；0 項的卡不放；不疊上一次、有目標時疊目前職等的目標）
+    let cards: [CompetencyChartModel]
+    /// 每張卡同一個範圍才有（標題寫「1–5 分」；不一樣時每一行自己寫）
+    let commonRange: CompetencyRange?
+    /// 文字版每張卡一行（跟 cards 一對一、同順序）
+    let lines: [CompetencyExportLine]
+    /// 「【職能雷達】10/30 的評分（1–5 分）」
+    let titleLine: String
+    /// 圖片段標題的膠囊、選項頁那一列的灰字：「10/30 的評分・1–5 分」
+    let subtitle: String
+    /// 「目標 E2：達標 10／12」（沒職等、職等被刪、這個職等沒訂目標、一格都沒有目標＝nil）
+    let targetLine: String?
+    /// 圖片用的膠囊「E2 達標 10／12」（同 targetLine 的條件）
+    let targetChip: String?
+
+    var hasRatings: Bool { ratedDay != nil }
+}
+
+extension CompetencyMath {
+
+    /// ↔ export_through_day：期間的最後一天 → 日子字串（沒有尾、或尾在今天以後＝今天）。
+    /// 頭尾用 cal（匯出用的西曆、這台的時區）切日子；字串照評分紀錄存的寫法（Calendar.current 的年月日，時區跟 cal 一樣）
+    static func exportThroughDay(rangeEnd: Date?, now: Date, cal: Calendar) -> String {
+        let today: Date = cal.startOfDay(for: now)
+        var end: Date = today
+        if let e = rangeEnd {
+            let d: Date = cal.startOfDay(for: e)
+            if d < today { end = d }
+        }
+        var keyCal: Calendar = Calendar.current
+        keyCal.timeZone = cal.timeZone
+        return dayKey(end, calendar: keyCal)
+    }
+
+    /// ↔ export_day_text：「10/30」；跟期末不同年寫「2025/10/30」
+    static func exportDayText(_ key: String, through: String) -> String {
+        guard let p = parseDay(key), let q = parseDay(through) else { return key }
+        return p.y == q.y ? shortDay(key) : "\(p.y)/\(p.m)/\(p.d)"
+    }
+
+    /// ↔ export_cell_text：一格「4」「≈7.8」（換算過）「不適用」；沒評「—」
+    static func exportCellText(_ ax: CompetencyAxisModel) -> String {
+        switch ax.state {
+        case .unrated: return "—"
+        case .na: return "不適用"
+        case .rated: return ax.valueText ?? "—"
+        }
+    }
+
+    /// ↔ export_avg_text：這張卡的平均（現在的範圍、四捨五入到一位，整數寫整數：「4」「2.5」）；一格分數都沒有＝nil
+    static func exportAverageText(_ card: CompetencyChartModel) -> String? {
+        guard let a = card.averageRatio else { return nil }
+        return plainNumberText(round1(value(atRatio: a, card.range)))
+    }
+
+    /// ↔ export_line：「Gas System：P&ID 4、緊急應變 4、值班技能 4（平均 4）」
+    /// • 這張卡最後評的那天跟整區不一樣：「Gas System（4/30）：…」
+    /// • 各張卡範圍不一樣（showRange）：「（平均 4・0–100 分）」
+    /// • 一格都沒評：「（還沒評）」；評了但全部不適用：「（都不適用）」
+    static func exportLine(_ card: CompetencyChartModel, ratedDay: String?, through: String, showRange: Bool) -> String {
+        var head: String = card.title
+        if let d = card.latestDay, let r = ratedDay, d != r {
+            head += "（" + exportDayText(d, through: through) + "）"
+        }
+        let cells: [String] = card.axes.map { $0.name + " " + exportCellText($0) }
+        var tail: String = card.filledCount == 0 ? "還沒評" : "都不適用"
+        if let avg = exportAverageText(card) { tail = "平均 " + avg }
+        if showRange { tail += "・" + card.range.text + " 分" }
+        return head + "：" + cells.joined(separator: "、") + "（" + tail + "）"
+    }
+
+    /// ↔ export_model：部屬匯出的「職能雷達」那一區。through＝exportThroughDay 算好的期末那一天
+    static func exportModel(setup: CompetencySetupBook, subordinateId: UUID, archivedPerson: Bool,
+                            sessions: [CompetencySession], through day: String,
+                            grades: CompetencyGradeContext) -> CompetencyExportModel {
+        let upTo: [CompetencySession] = sessions.filter { $0.dayKey <= day }
+        let groups: [CompetencyGroup] = visibleGroups(setup: setup, subordinateId: subordinateId,
+                                                      archivedPerson: archivedPerson, sessions: upTo)
+        let table: [CompetencyTargetKey: CompetencyTarget] = targetTable(setup)
+        let pick: CompetencyGradeRef? = targetGrade(grades, mode: .current, table: table)
+        let chartTargets: CompetencyChartTargets? = pick.map { CompetencyChartTargets(grade: $0, table: table) }
+        let cells: [CompetencyCellKey: CompetencyCellValue] = latestCells(upTo)
+        var cards: [CompetencyChartModel] = []
+        for g in groups {
+            let ax = cardAxes(group: g, setup: setup, archivedPerson: archivedPerson, sessions: upTo)
+            guard !ax.axes.isEmpty else { continue }
+            let gid: UUID = g.id
+            let own: String? = ax.axes.compactMap { cells[CompetencyCellKey(groupId: gid, itemId: $0.id)]?.dayKey }.max()
+            let card: CompetencyChartModel = chartModel(group: g, axes: ax.axes, archivedIds: ax.archived, sessions: upTo,
+                                                        range: setup.range(forGroup: gid),
+                                                        scale: setup.scaleFor(group: gid),
+                                                        snapshotDay: own, targets: chartTargets)
+            cards.append(card)
+        }
+        let rated: String? = cards.compactMap { $0.latestDay }.max()
+        var common: CompetencyRange? = cards.first?.range
+        for c in cards where c.range != common {
+            common = nil
+            break
+        }
+        let showRange: Bool = common == nil
+        let lines: [CompetencyExportLine] = cards.map { c in
+            CompetencyExportLine(id: c.id, text: exportLine(c, ratedDay: rated, through: day, showRange: showRange))
+        }
+        var dayWord: String = "還沒有評分"
+        if let r = rated { dayWord = exportDayText(r, through: day) + " 的評分" }
+        var titleLine: String = "【職能雷達】" + dayWord
+        var subtitle: String = dayWord
+        if let r = common {
+            titleLine += "（" + r.text + " 分）"
+            subtitle += "・" + r.text + " 分"
+        }
+        let tTotal: Int = cards.map { $0.targetTotal }.reduce(0, +)
+        let tMet: Int = cards.map { $0.targetAchieved }.reduce(0, +)
+        var targetLine: String? = nil
+        var targetChip: String? = nil
+        if let g = pick, tTotal > 0 {
+            targetLine = "目標 " + g.short + "：達標 \(tMet)／\(tTotal)"
+            targetChip = g.short + " 達標 \(tMet)／\(tTotal)"
+        }
+        return CompetencyExportModel(throughDay: day, ratedDay: rated, cards: cards, commonRange: common,
+                                     lines: lines, titleLine: titleLine, subtitle: subtitle,
+                                     targetLine: targetLine, targetChip: targetChip)
+    }
+}

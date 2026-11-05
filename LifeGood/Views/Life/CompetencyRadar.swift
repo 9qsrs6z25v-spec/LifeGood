@@ -958,3 +958,90 @@ struct CompetencyRadarThumbBars: Shape {
         return p
     }
 }
+
+// MARK: - [v25.604 職能雷達 v4a] 匯出圖片用的固定寬雷達卡
+//（radar/judge_v4a.md §C3；radar/build/v4a/brief.md §4 G2-1）部屬匯出圖片的「職能雷達」段（SubExportCompetencyPair）一張一張用這個。
+// • 寬度由呼叫的人給死（兩欄各 182pt）：ImageRenderer 只畫一次、量不到寬度，CompetencyRadarChart 會掉到 fallback 300 超出欄寬，
+//   所以另寫 CompetencyRadarFixedChart：同一套 private layout／層，沒有 @State、onGeometryChange、.animation、.transition、.id。
+// • 不疊上一次（Previous 層傳 []、橫條 showPrevious: false、圖例 previous: nil）；有目標照 v1b 畫點線（模型裡有才有）。
+// • 填色固定 0.25（出圖一律淺色，decorate 也固定 .light）；軸名不換 ①②③（decorate 固定 .large 字級）。
+// • 不畫白卡底（外框由 PagedImageExporter 的白卡收），只畫細框；不寫評語（§13；CompetencyChartModel 也沒有評語欄位）。
+// • 既有型別、init、body 一行都沒動。要退回這一件：刪這一段（CompetencyChartExportCard、CompetencyRadarFixedChart）。
+
+/// 匯出圖片用的一張雷達卡：標題「Gas System・10/30」＋右邊「平均 4.0」、雷達（3～12 項）、圖例、角落小字、下面一排橫條
+/// width＝整張卡的寬（含內距 10×2）
+struct CompetencyChartExportCard: View {
+    let model: CompetencyChartModel
+    let width: CGFloat
+
+    /// 卡的內距
+    static let inset: CGFloat = 10
+
+    private var isRadar: Bool { model.style == .radar || model.style == .radarShort }
+    private var tint: Color { CompetencyPalette.tint(isTrait: model.isTrait) }
+    private var innerWidth: CGFloat { max(width - Self.inset * 2, 1) }
+    /// 有這次或有目標才寫圖例（同 CompetencyRadarCardContent）
+    private var showsLegend: Bool { model.legendCurrent != nil || model.legendTarget != nil }
+    private var legendAlignment: Alignment { isRadar ? .center : .leading }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            CompetencyRadarCardHeader(model: model)
+            if model.style == .empty {
+                CompetencyRadarEmptyNote()
+            } else {
+                content
+            }
+        }
+        .padding(Self.inset)
+        .frame(width: width, alignment: .leading)
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(Color(.separator).opacity(0.25), lineWidth: 1))
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        if isRadar {
+            CompetencyRadarFixedChart(model: model, width: innerWidth)
+        }
+        if showsLegend {
+            CompetencyRadarLegend(current: model.legendCurrent, previous: nil,
+                                  target: model.legendTarget, tint: tint)
+                .frame(maxWidth: .infinity, alignment: legendAlignment)
+        }
+        CompetencyRadarNotes(note: model.note, carriedNote: model.carriedNote)
+        CompetencyRadarBars(model: model, showPrevious: false, onTapAxis: nil, showsNote: false)
+    }
+}
+
+/// 固定寬的雷達本體（出圖專用）：層照 CompetencyRadarChart（格線 → 上一次（空）→ 目標 → 這次 → 圈旁小字 → 軸名），
+/// layout 直接用給的寬度算；不量寬度、不動畫、不疊上一次
+private struct CompetencyRadarFixedChart: View {
+    let model: CompetencyChartModel
+    let width: CGFloat
+
+    /// 出圖一律淺色：填色固定淺色那一檔
+    private static let fillOpacity: Double = 0.25
+    private static let lineHeight: CGFloat = 16
+
+    private var tint: Color { CompetencyPalette.tint(isTrait: model.isTrait) }
+    private var layout: CompetencyRadarLayout {
+        CompetencyRadarLayout(model: model, width: width, lineHeight: Self.lineHeight,
+                              numbered: false, showPrevious: false)
+    }
+
+    var body: some View {
+        let lay = layout
+        ZStack {
+            CompetencyRadarGridLayer(layout: lay)
+            CompetencyRadarPreviousLayer(points: [])
+            CompetencyRadarTargetLayer(points: lay.target)
+            CompetencyRadarCurrentLayer(layout: lay, tint: tint, fillOpacity: Self.fillOpacity,
+                                        drawsPolygon: model.drawsPolygon)
+            CompetencyRadarRingLabelLayer(labels: lay.ringLabels)
+            CompetencyRadarLabelLayer(labels: lay.labels)
+        }
+        .frame(width: width, height: lay.height)
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(model.accessibilityText)
+    }
+}

@@ -116,6 +116,11 @@ enum SubExportImage {
                 out.append(.row(v))
             }
         }
+        // [v25.604 v4a] 職能雷達（勾了、有評分才出；兩張一列，列數＝m.competencyPageRows）。要退回這一件：刪這個 if
+        if m.competencyWritten, let c = m.competency {
+            out.append(.sectionHeader(AnyView(SubExportCompetencyHeader(model: c))))
+            for v in competencyRows(c) { out.append(.row(v)) }
+        }
         let empty = SubExportComposer.emptyBlockLabels(m)
         if !empty.isEmpty {
             let note = "（這段期間沒有：" + empty.joined(separator: "、") + "）"
@@ -128,6 +133,24 @@ enum SubExportImage {
         }
         assert(rows == m.pageRowCount, "[v25.588] 出圖列數 \(rows) 跟 pageRowCount \(m.pageRowCount) 對不起來")
         #endif
+        return out
+    }
+
+    // MARK: [v25.604 v4a] 職能雷達段的列
+
+    /// [v25.604 v4a] 雷達卡一欄的寬：白卡左右外距 16×2、列內距 12×2、兩欄間距 10（430pt → 182pt）
+    static let competencyColumnWidth: CGFloat = (width - 32 - 24 - 10) / 2
+
+    /// [v25.604 v4a] c.cards 每 SubExportModel.competencyColumns 張一列（列數＝m.competencyPageRows）
+    @MainActor
+    private static func competencyRows(_ c: CompetencyExportModel) -> [AnyView] {
+        let k: Int = SubExportModel.competencyColumns
+        let n: Int = c.cards.count
+        var out: [AnyView] = []
+        for start in stride(from: 0, to: n, by: k) {
+            let chunk: [CompetencyChartModel] = Array(c.cards[start..<min(start + k, n)])
+            out.append(AnyView(SubExportCompetencyPair(cards: chunk, columnWidth: competencyColumnWidth)))
+        }
         return out
     }
 
@@ -1130,5 +1153,60 @@ struct SubExportEmptyNote: View {
             .font(.caption)
             .foregroundStyle(Color.secondary)
             .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+// MARK: - [v25.604 v4a] 職能雷達段（出圖專用、純靜態）
+//（radar/build/v4a/brief.md §4 G2-3）沒有 Button、@State、onAppear、動畫；字都取自 CompetencyExportModel（不自己組日期字）；
+// 不寫評語（§13）。雷達卡本身是 CompetencyRadar.swift 的 CompetencyChartExportCard（固定寬、不疊上一次）。
+
+/// 段標題：「▍⬡ 職能雷達　〔10/30 的評分・1–5 分〕」；有目標時下面一行膠囊「E2 達標 10／11」
+struct SubExportCompetencyHeader: View {
+    let model: CompetencyExportModel
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            SubExportSectionTitle(title: "職能雷達", icon: "hexagon", color: CompetencyPalette.system,
+                                  badge: model.subtitle)
+            if let chip = model.targetChip {
+                SubExportCompetencyTargetChip(text: chip)
+            }
+        }
+    }
+}
+
+/// 目標膠囊「E2 達標 10／11」（系統藍綠字、淡底）
+struct SubExportCompetencyTargetChip: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.caption.weight(.semibold))
+            .foregroundStyle(CompetencyPalette.system)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 3)
+            .background(CompetencyPalette.system.opacity(0.10), in: Capsule())
+            .padding(.leading, 14)
+    }
+}
+
+/// 一列兩張雷達卡（欄寬固定）；最後一列只有一張時左邊放、右邊留空
+struct SubExportCompetencyPair: View {
+    let cards: [CompetencyChartModel]
+    let columnWidth: CGFloat
+
+    private var blanks: Int { max(SubExportModel.competencyColumns - cards.count, 0) }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            ForEach(cards) { card in
+                CompetencyChartExportCard(model: card, width: columnWidth)
+            }
+            ForEach(0..<blanks, id: \.self) { _ in
+                Color.clear.frame(width: columnWidth, height: 1)
+            }
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
