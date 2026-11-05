@@ -12,7 +12,7 @@
 // 常數
 // ---------------------------------------------------------------------------
 /** 網頁版自己的版本（與 App 版本無關；改網頁不再動 App 版號） */
-const WEB_VERSION = '1.15';
+const WEB_VERSION = '1.16';
 const CONTAINER_ID = 'iCloud.com.lifegood.app';
 const ZONE_NAME = 'LifeGoodZone';
 const TOKEN_KEY = 'lifegood_ck_token';
@@ -50,9 +50,12 @@ const KV_KEYS = {
   // 組織重整（v1.15；App v25.598 起寫）：單一物件 { changes: [...], teams: [...] }，這裡只留 changes。
   // 只讀：算「已併入製造課」（照 App 的 OrgReorgIndex.mergedInto）；不顯示重整明細、全組交接單
   orgReorgs: 'life_org_reorgs_v1',
+  // 職能雷達（v1.16；App v25.599 起寫）：單一物件、日期是秒數，只讀（不跑 reviveDates；不顯示評語、總評、評分紀錄）
+  compSetup: 'life_competency_setup_v1',
+  compRatings: 'life_competency_ratings_v1',
 };
 /** 讀不到（沒有這筆、下載失敗、JSON 壞掉）當作沒有、不讓整個網頁讀不進來的鍵 */
-const OPTIONAL_KV = new Set(['wealthFacts', 'orgMoves', 'orgHandoffs', 'orgReorgs']);
+const OPTIONAL_KV = new Set(['wealthFacts', 'orgMoves', 'orgHandoffs', 'orgReorgs', 'compSetup', 'compRatings']);
 // JSONEncoder 預設把 Date 編成「距 2001-01-01 的秒數」；這些欄位名一律還原成 Date
 const DATE_KEYS = new Set([
   'date', 'dueDate', 'completedAt', 'endDate', 'joinDate', 'birthday', 'scheduledDate',
@@ -85,6 +88,8 @@ const Store = {
   orgMoves: [], orgHandoffs: [], orgIndex: null,
   // v1.15 組織重整：部門改名、合併、拆成兩個（changes）；mergedInto＝讀完算好的「已併入」查表（buildMergedIndex）
   orgReorgs: [], mergedInto: {},
+  // v1.16 職能雷達：App 那兩包原樣（讀不到、格式不對＝null＝沒有職能）
+  compSetup: null, compRatings: null,
   source: '', loadedAt: null, ctx: null,
 };
 let ckContainer = null;
@@ -226,6 +231,8 @@ function applyData(raw, source) {
       Store.orgReorgs = reviveDates(Array.isArray(list) ? list.filter((x) => x && typeof x === 'object') : []);
       continue;
     }
+    // v1.16 職能雷達：單一物件、不跑 reviveDates（日期留秒數比大小；archivedAt、clearedAt 不在 DATE_KEYS，混著轉會錯）
+    if (k === 'compSetup' || k === 'compRatings') { Store[k] = v && typeof v === 'object' && !Array.isArray(v) ? v : null; continue; }
     // life_profile / life_health_profile 是單一物件，其餘都是陣列
     Store[k] = (k === 'profile' || k === 'health')
       ? reviveDates(v && typeof v === 'object' && !Array.isArray(v) ? v : {})
@@ -971,6 +978,8 @@ function renderSubDetail(main, ctx, id, tab) {
   const eq = equipmentOf(s.id);
   const now = new Date();
   const tabs = [['tasks', `任務 ${(s.tasks || []).length}`], ['meetings', `會議 ${(s.meetings || []).length}`], ['reports', `報告 ${(s.weeklyReports || []).length}`], ['records', `紀錄 ${(s.records || []).filter((r) => r.type !== '請假').length}`], ['leave', `請假 ${(s.records || []).filter((r) => r.type === '請假').length}`], ['equipment', `執掌設備 ${eq.length}`], ['career', `升職歷程 ${(s.promotions || []).length}`]];
+  // v1.16 職能（有設定才出現；＝App 的「給對方看」那一份，不顯示評語、總評、評分紀錄）
+  if (compIsConfigured(Store.compSetup)) tabs.push(['competency', '職能']);
   let body = '';
   if (tab === 'tasks') {
     const open = (s.tasks || []).filter((t) => !t.isCompleted).sort((a, b) => (a.dueDate || a.date) - (b.dueDate || b.date));
@@ -1015,6 +1024,7 @@ function renderSubDetail(main, ctx, id, tab) {
     const ps = [...(s.promotions || [])].sort((a, b) => b.date - a.date);
     body = `<div class="card"><h3>升職歷程 <span class="count">${ps.length}</span></h3>${ps.map((p) => `<div class="task-row"><div class="tick">📈</div><div><div class="t-title">${esc(p.fromTitle || '—')} → ${esc(p.toTitle || '—')}</div><div class="t-meta">${fmtDate(p.date)}${p.note ? '・' + esc(p.note) : ''}</div></div><div></div></div>`).join('') || '<div class="empty">尚無升職紀錄</div>'}</div>`;
   }
+  if (tab === 'competency' && compIsConfigured(Store.compSetup)) body = compPersonTabHTML(s);
 
   main.innerHTML = `
     <div class="crumb"><a href="#/subs">部屬列表</a> › ${esc(s.name)}</div>
@@ -1048,6 +1058,572 @@ function renderSubDetail(main, ctx, id, tab) {
   main.querySelectorAll('.tabs button').forEach((btn) => btn.onclick = () => { location.hash = `#/sub/${s.id}/${btn.dataset.tab}`; });
 }
 
+// ---------------------------------------------------------------------------
+// 職能雷達（v1.16；移植自 App 的 CompetencyMath，對照 radar/build/v4b/sim_v4b.py）
+// 讀 life_competency_setup_v1／life_competency_ratings_v1（App v25.599 起寫；單一物件、日期是距 2001-01-01 的秒數，
+// 不經 reviveDates：秒數直接比大小）。只讀，不寫任何鍵。每一支前面 ↔ 是 sim／Swift 的名字。
+// 不顯示：每一格的評語、總評、評分紀錄、上一次、點一格的歷史（App §13：每一格的評語不做）。
+// ---------------------------------------------------------------------------
+const COMP_TRAIT_GID = 'C0A1D000-0000-4000-8000-000000000001'; // ↔ CompetencySetupBook.traitGroupId
+const COMP_CIRCLED = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩', '⑪', '⑫'];
+const COMP_AREA_TITLE = { skill: '本職學能', trait: '人格特質' };
+const compIsNum = (v) => typeof v === 'number' && isFinite(v);
+const compIsInt = (v) => Number.isInteger(v);
+const compStr = (v) => (typeof v === 'string' ? v : '');
+/** ↔ roundHalfUp／Double.rounded()（遠離零；Math.round 對負的 .5 不一樣） */
+function compRound(x) { return Math.sign(x) * Math.round(Math.abs(x)); }
+function compRatio(v, r) { const [lo, hi] = r; if (hi <= lo) return 0; return Math.min(Math.max((v - lo) / (hi - lo), 0), 1); } // ↔ ratio
+function compValueAt(t, r) { return r[0] + t * (r[1] - r[0]); } // ↔ value(atRatio:)
+function compConvert(v, a, b) { return compValueAt(compRatio(v, a), b); } // ↔ convert
+function compRound1(x) { return compRound(x * 10) / 10; } // ↔ round1
+/** ↔ oneDecimalText（不用 toFixed：照二進位進位，跟 Swift 不一樣） */
+function compOneDecimal(x) {
+  const tenths = compRound(Math.abs(x) * 10);
+  const s = `${Math.floor(tenths / 10)}.${tenths % 10}`;
+  return x < 0 && tenths !== 0 ? '-' + s : s;
+}
+function compIsWhole(x) { return Math.abs(x - compRound(x)) < 1e-9; } // ↔ isWhole
+function compIntText(x) { return String(compRound(x) + 0); } // + 0：-0 寫成 0
+function compNumberText(x) { return compIsWhole(x) ? compIntText(x) : '≈' + compOneDecimal(x); } // ↔ numberText
+function compPlainNumber(x) { return compIsWhole(x) ? compIntText(x) : compOneDecimal(x); } // ↔ plainNumberText
+function compRangeText(r) { return `${r[0]}–${r[1]}`; } // ↔ CompetencyRange.text
+function compLevelCount(r) { return r[1] - r[0] + 1; } // ↔ levelCount
+function compClamp(r, v) { return Math.min(Math.max(v, r[0]), r[1]); } // ↔ CompetencyRange.clamp
+function compRangeEq(a, b) { return a[0] === b[0] && a[1] === b[1]; }
+function compRangeValid(lo, hi) { return compIsInt(lo) && compIsInt(hi) && lo >= 0 && lo < hi && hi <= 100; } // ↔ isValid
+function compRangeSafe(lo, hi) { return compRangeValid(lo, hi) ? [lo, hi] : [1, 5]; } // ↔ CompetencyRange.safe
+/** ↔ parseDay（「2026-10-30」→ [2026, 10, 30]；壞掉回 null） */
+function compParseDay(k) {
+  if (typeof k !== 'string') return null;
+  const p = k.split('-');
+  if (p.length !== 3 || !p.every((x) => /^\s*[+-]?\d+\s*$/.test(x))) return null;
+  const [y, m, d] = p.map((x) => parseInt(x, 10));
+  if (!(m >= 1 && m <= 12 && d >= 1 && d <= 31)) return null;
+  return [y, m, d];
+}
+function compShortDay(k) { const p = compParseDay(k); return p ? `${p[1]}/${p[2]}` : k; } // ↔ shortDay
+
+// ---- App JSON 讀法（Competency.swift；只讀）----
+function compArr(book, key) {
+  const v = book && typeof book === 'object' && !Array.isArray(book) ? book[key] : undefined;
+  return Array.isArray(v) ? v.filter((x) => x && typeof x === 'object' && !Array.isArray(x)) : [];
+}
+function compScaleOf(setup, sid) { return compArr(setup, 'scales').find((s) => s.id === sid) || null; } // ↔ scale(_:)
+function compScaleRange(sc) { return sc ? compRangeSafe(sc.low, sc.high) : [1, 5]; } // ↔ CompetencyScale.range
+function compTraitRange(setup) { return compScaleRange(compScaleOf(setup, 'trait')); } // ↔ traitRange
+function compSkillRange(setup) { return compScaleRange(compScaleOf(setup, 'skill')); } // ↔ skillRange
+function compRangeForGroup(setup, gid) { return gid === COMP_TRAIT_GID ? compTraitRange(setup) : compSkillRange(setup); } // ↔ range(forGroup:)
+const compLive = (x) => x.deletedAt == null; // ↔ isLive
+const compActive = (x) => x.deletedAt == null && x.archivedAt == null; // ↔ isActive
+const compGroupIsTrait = (g) => g.kind === 'trait' || g.id === COMP_TRAIT_GID; // ↔ CompetencyGroup.isTrait
+const compItemShared = (i) => i.groupId == null; // ↔ CompetencyItem.isShared
+function compGroupName(g) { const n = compStr(g.name).trim(); return n || (compGroupIsTrait(g) ? '人格特質' : '未命名系統'); } // ↔ displayName
+function compItemName(i) { return compStr(i.name).trim() || '未命名項目'; } // ↔ CompetencyItem.displayName
+/** ↔ sortedItems／sortedGroups：order 沒有排最後 → createdAt → 代號 */
+function compOrderCmp(a, b) {
+  const oa = compIsNum(a.order) ? a.order : Infinity, ob = compIsNum(b.order) ? b.order : Infinity;
+  if (oa !== ob) return oa < ob ? -1 : 1;
+  const ca = compIsNum(a.createdAt) ? a.createdAt : -Infinity, cb = compIsNum(b.createdAt) ? b.createdAt : -Infinity;
+  if (ca !== cb) return ca < cb ? -1 : 1;
+  const ia = compStr(a.id), ib = compStr(b.id);
+  return ia < ib ? -1 : ia > ib ? 1 : 0;
+}
+function compSorted(list) { return [...list].sort(compOrderCmp); }
+function compGroupOf(setup, gid) { return compArr(setup, 'groups').find((g) => g.id === gid) || null; } // ↔ group(_:)
+function compTraitGroup(setup) { const g = compGroupOf(setup, COMP_TRAIT_GID); return g && compLive(g) ? g : null; } // ↔ traitGroup
+function compActiveSystems(setup) { return compSorted(compArr(setup, 'groups').filter((g) => compActive(g) && !compGroupIsTrait(g))); } // ↔ activeSystems
+function compTraitItems(setup) { return compSorted(compArr(setup, 'items').filter((i) => compActive(i) && i.groupId === COMP_TRAIT_GID)); } // ↔ traitItems
+function compSharedItems(setup) { return compSorted(compArr(setup, 'items').filter((i) => compActive(i) && compItemShared(i))); } // ↔ sharedItems
+function compOwnItems(setup, gid) { return compSorted(compArr(setup, 'items').filter((i) => compActive(i) && i.groupId === gid)); } // ↔ ownItems
+/** ↔ axes(for:)：人格特質＝人格的項目；系統＝共用項目（系統拿掉的不算）＋自己的項目 */
+function compAxesFor(setup, gid) {
+  if (gid === COMP_TRAIT_GID) return compTraitItems(setup);
+  const g = compGroupOf(setup, gid);
+  const hidden = new Set(g && Array.isArray(g.hiddenSharedItemIds) ? g.hiddenSharedItemIds : []);
+  return compSharedItems(setup).filter((i) => !hidden.has(i.id)).concat(compOwnItems(setup, gid));
+}
+/** ↔ skippedGroupIds（這位同仁不用學的系統） */
+function compSkipped(setup, pid) {
+  const a = compArr(setup, 'assignments').find((x) => x.id === pid);
+  if (!a || a.deletedAt != null) return new Set();
+  return new Set(Array.isArray(a.skippedGroupIds) ? a.skippedGroupIds : []);
+}
+/** ↔ isConfigured（有任一個沒刪的系統、或沒刪的非共用項目）；網頁版〔職能〕分頁、課的總覽出不出現 */
+function compIsConfigured(setup) {
+  return compArr(setup, 'items').some((i) => compLive(i) && !compItemShared(i)) ||
+    compArr(setup, 'groups').some((g) => compLive(g) && !compGroupIsTrait(g));
+}
+function compSessionStamp(s) { for (const k of ['updatedAt', 'deletedAt', 'createdAt']) if (compIsNum(s[k])) return s[k]; return -Infinity; } // ↔ CompetencySession.stamp
+const compByMe = (s) => s.raterKind == null || s.raterKind === 'me'; // ↔ isByMe
+function compSessionRange(s, gid) { return gid === COMP_TRAIT_GID ? compRangeSafe(s.traitLow, s.traitHigh) : compRangeSafe(s.skillLow, s.skillHigh); } // ↔ range(forGroup:)
+function compScoreCleared(sc) { if (!compIsNum(sc.clearedAt)) return false; return sc.clearedAt >= (compIsNum(sc.updatedAt) ? sc.updatedAt : -Infinity); } // ↔ isCleared
+const compScoreNA = (sc) => sc.na === true; // ↔ isNA
+const compScoreLive = (sc) => !compScoreCleared(sc) && (compIsInt(sc.value) || compScoreNA(sc)); // ↔ CompetencyScore.isLive
+/** ↔ CompetencyIndex.sessions(of:)：我評的、沒刪的；照日子、再照最後改的時間 */
+function compSessionsOf(ratings, pid) {
+  const list = compArr(ratings, 'sessions').filter((s) => s.subordinateId === pid && compLive(s) && compByMe(s));
+  return list.sort((a, b) => {
+    const da = compStr(a.dayKey), db = compStr(b.dayKey);
+    if (da !== db) return da < db ? -1 : 1;
+    const sa = compSessionStamp(a), sb = compSessionStamp(b);
+    return sa < sb ? -1 : sa > sb ? 1 : 0;
+  });
+}
+const compCellKey = (gid, iid) => `${gid}|${iid}`;
+/** ↔ latestCells：每一格最新有評的那一次（新日子勝；同一天比這一格的 updatedAt）；墓碑、別人評的、清掉的不算 */
+function compLatestCells(sessions) {
+  const out = new Map();
+  for (const s of sessions) {
+    if (!(compLive(s) && compByMe(s))) continue;
+    const day = compStr(s.dayKey);
+    for (const sc of Array.isArray(s.scores) ? s.scores : []) {
+      if (!sc || typeof sc !== 'object' || !compScoreLive(sc)) continue;
+      const gid = sc.groupId, iid = sc.itemId;
+      const na = compScoreNA(sc);
+      const cell = { gid, iid, value: na ? null : sc.value, na, range: compSessionRange(s, gid), dayKey: day,
+        stamp: compIsNum(sc.updatedAt) ? sc.updatedAt : compSessionStamp(s) };
+      const k = compCellKey(gid, iid);
+      const old = out.get(k);
+      if (old) {
+        if (old.dayKey > cell.dayKey) continue;
+        if (old.dayKey === cell.dayKey && old.stamp >= cell.stamp) continue;
+      }
+      out.set(k, cell);
+    }
+  }
+  return out;
+}
+function compCellRatio(c) { return c.value == null || c.na ? null : compRatio(c.value, c.range); } // ↔ CompetencyCellValue.ratio
+/** ↔ cellText（範圍改過照評分當時的範圍換算：「≈7.8」） */
+function compCellText(c, r) {
+  if (c.na) return '不適用';
+  if (c.value == null) return '未評';
+  if (compRangeEq(c.range, r)) return String(c.value);
+  return compNumberText(compConvert(c.value, c.range, r));
+}
+
+// ---- 雷達幾何、格線、畫法 ----
+function compAngle(i, n) { return -Math.PI / 2 + 2 * Math.PI * i / Math.max(n, 1); } // ↔ angle
+function compRadiusFraction(t) { return 0.12 + 0.88 * t; } // ↔ radiusFraction
+/** ↔ point：圓心 (0,0)、y 向下、第一軸正上方、順時針、半徑 r×(0.12＋0.88t) */
+function compPoint(t, i, n, r) {
+  const a = compAngle(i, n);
+  const rr = r * compRadiusFraction(t);
+  return { x: rr * Math.cos(a), y: rr * Math.sin(a) };
+}
+/** ↔ rings：級數 > 11 只畫 4 圈、四圈都寫分數；≤ 11 一級一圈、超過 6 級隔一圈淡、只有最外圈寫最高分 */
+function compRings(r) {
+  const n = compLevelCount(r);
+  if (n > 11) return [0.25, 0.5, 0.75, 1].map((t) => ({ t, faint: false, label: compPlainNumber(compValueAt(t, r)) }));
+  const out = [];
+  for (let i = 0; i < n; i++) {
+    const last = i === n - 1;
+    out.push({ t: n > 1 ? i / (n - 1) : 1, faint: n > 6 && !last && i % 2 === 1, label: last ? String(r[1]) : null });
+  }
+  return out;
+}
+/** ↔ chartStyle：1–2 項、13 項以上用橫條；9～12 項軸上寫短名 */
+function compChartStyle(n) { if (n <= 0) return 'empty'; if (n <= 2) return 'bars'; if (n <= 8) return 'radar'; if (n <= 12) return 'radarShort'; return 'bars'; }
+function compAxisLabel(item, i, style) { // ↔ axisLabel
+  if (style !== 'radarShort') return compItemName(item);
+  const s = compStr(item.shortName).trim();
+  if (s) return s;
+  return i < COMP_CIRCLED.length ? COMP_CIRCLED[i] : String(i + 1);
+}
+function compCleanShort(s, n) { const t = compStr(s).trim(); return t ? Array.from(t).slice(0, n).join('') : null; } // ↔ cleanShortName
+function compChipTitle(g) { return compGroupIsTrait(g) ? compGroupName(g) : (compCleanShort(g.shortName, 10) || compGroupName(g)); } // ↔ chipTitle
+
+// ---- 職等、目標（App v1b：那一格 → 那個系統 → 這一區每項，照目前職等）----
+function compGradeRefs(grades) { // ↔ gradeRefs
+  return (Array.isArray(grades) ? grades : []).filter((g) => g && typeof g === 'object').map((g) => {
+    const grade = compStr(g.grade).trim();
+    const raw = [compStr(g.grade), compStr(g.title)].filter((x) => x).join(' ').trim();
+    const label = raw || '未命名職等';
+    return { id: g.id, short: grade || label, label, grade };
+  });
+}
+/** ↔ targetKey（那一層的鍵；item 只在有 groupId 時算） */
+function compTargetKey(t) {
+  const g = t.gradeTitleId;
+  if (g == null) return null;
+  const scope = t.groupId != null ? (t.groupId === COMP_TRAIT_GID ? 'trait' : 'skill') : (t.scope === 'trait' ? 'trait' : 'skill');
+  const item = t.groupId == null ? null : t.itemId;
+  return { grade: g, k: [g, scope, t.groupId == null ? '' : t.groupId, item == null ? '' : item].join('|') };
+}
+function compTargetStamp(t) { for (const k of ['updatedAt', 'deletedAt']) if (compIsNum(t[k])) return t[k]; return -Infinity; } // ↔ CompetencyTarget.stamp
+/** ↔ targetTable：沒刪、有目標分；同一層取後改的、一樣新照代號大的 */
+function compTargetTable(setup) {
+  const map = new Map(), grades = new Set();
+  for (const t of compArr(setup, 'targets')) {
+    if (t.deletedAt != null || !compIsInt(t.level)) continue;
+    const key = compTargetKey(t);
+    if (!key) continue;
+    const old = map.get(key.k);
+    if (old) {
+      if (compTargetStamp(old) > compTargetStamp(t)) continue;
+      if (compTargetStamp(old) === compTargetStamp(t) && compStr(old.id) > compStr(t.id)) continue;
+    }
+    map.set(key.k, t);
+    grades.add(key.grade);
+  }
+  return { map, grades };
+}
+function compTargetRange(t, fallback) { return compRangeValid(t.low, t.high) ? [t.low, t.high] : fallback; } // ↔ targetRange
+/** ↔ resolveTarget（存的範圍換算到現在的範圍：照比例） */
+function compResolveTarget(table, gradeId, gid, iid, fallback) {
+  const scope = gid === COMP_TRAIT_GID ? 'trait' : 'skill';
+  const layers = [[[gradeId, scope, gid, iid].join('|'), 'cell'], [[gradeId, scope, gid, ''].join('|'), 'group'], [[gradeId, scope, '', ''].join('|'), 'area']];
+  for (const [k, layer] of layers) {
+    const t = table.map.get(k);
+    if (!t || !compIsInt(t.level)) continue;
+    const r = compTargetRange(t, fallback);
+    const level = compClamp(r, t.level);
+    return { level, range: r, layer, ratio: compRatio(level, r) };
+  }
+  return null;
+}
+function compTargetValue(rt, r) { return compRangeEq(rt.range, r) ? rt.level : compValueAt(rt.ratio, r); } // ↔ targetValue
+function compTargetValueText(rt, r) { return compRangeEq(rt.range, r) ? String(rt.level) : compNumberText(compTargetValue(rt, r)); } // ↔ targetValueText
+/** ↔ targetGrade(mode: .current)：目前職等、而且這個職等有設任何目標 */
+function compTargetGradeCurrent(refs, current, table) {
+  if (current == null) return null;
+  const pick = refs.find((g) => g.id === current);
+  if (!pick) return null;
+  return table.grades.has(pick.id) ? pick : null;
+}
+function compApplyTarget(ax, rt, c, r) { // ↔ applyTarget
+  const tt = rt.ratio;
+  const tx = compTargetValueText(rt, r);
+  ax.targetT = tt;
+  ax.targetValueText = tx;
+  if (c && c.na) return;
+  const tc = c ? compCellRatio(c) : null;
+  if (tc == null) { ax.targetMet = false; ax.targetText = '目標 ' + tx + '・未評'; return; }
+  if (tc >= tt - 1e-9) { ax.targetMet = true; ax.targetGap = 0; ax.targetText = '目標 ' + tx + ' ✓'; return; }
+  const gap = (tt - tc) * (r[1] - r[0]);
+  ax.targetMet = false;
+  ax.targetGap = gap;
+  ax.targetText = '目標 ' + tx + '・差 ' + compNumberText(gap);
+}
+
+// ---- 一張卡（App 給對方看那一份：不疊上一次；標題日子＝那張卡自己最後評的那天）----
+function compChartModel(g, axes, archivedIds, sessions, r, snapshotDay, targets) { // ↔ chartModel
+  const gid = g.id, n = axes.length, style = compChartStyle(n);
+  const now = compLatestCells(sessions);
+  const cur = axes.map((it) => now.get(compCellKey(gid, it.id)) || null);
+  const days = cur.filter((c) => c).map((c) => c.dayKey);
+  const latest = days.length ? days.reduce((a, b) => (b > a ? b : a)) : null;
+  const axModels = axes.map((it, i) => {
+    const c = cur[i];
+    const am = { id: it.id, name: compItemName(it), label: compAxisLabel(it, i, style),
+      state: c == null ? 'unrated' : (c.na ? 'na' : 'rated'), t: c ? compCellRatio(c) : null, valueText: c ? compCellText(c, r) : null,
+      archived: archivedIds.has(it.id), targetT: null, targetValueText: null, targetText: null, targetMet: null, targetGap: null };
+    if (targets && !archivedIds.has(it.id)) {
+      const rt = compResolveTarget(targets.table, targets.grade.id, gid, it.id, r);
+      if (rt) compApplyTarget(am, rt, c, r);
+    }
+    return am;
+  });
+  const ts = axModels.filter((a) => a.t != null).map((a) => a.t);
+  const avg = ts.length ? ts.reduce((a, b) => a + b, 0) / ts.length : null;
+  const dateLine = snapshotDay != null ? compShortDay(snapshotDay) : (latest != null ? '第一次評分' : '還沒評過');
+  const tAxes = axModels.filter((a) => a.targetT != null && a.state !== 'na' && !a.archived);
+  const hasTarget = axModels.some((a) => a.targetT != null);
+  return { id: gid, title: compGroupName(g), isTrait: compGroupIsTrait(g), style, range: [r[0], r[1]], rings: compRings(r),
+    headline: compGroupName(g) + '・' + dateLine,
+    averageText: avg != null ? '平均 ' + compOneDecimal(compRound1(compValueAt(avg, r))) : null,
+    latestDay: latest, drawsPolygon: ts.length >= 3 && (style === 'radar' || style === 'radarShort'), ratedCount: ts.length,
+    legendTarget: hasTarget && targets ? '目標 ' + targets.grade.short : null,
+    axes: axModels, targetTotal: tAxes.length, targetAchieved: tAxes.filter((a) => a.targetMet === true).length };
+}
+/** ↔ visibleGroups（已轉出的人：有分數的已停用系統照畫） */
+function compVisibleGroups(setup, pid, archived, sessions) {
+  const sk = compSkipped(setup, pid);
+  const ratedGroups = new Set([...compLatestCells(sessions).values()].map((c) => c.gid));
+  const out = [];
+  const tg = compTraitGroup(setup);
+  if (tg && (compTraitItems(setup).length || (archived && ratedGroups.has(tg.id)))) out.push(tg);
+  if (archived) {
+    for (const g of compSorted(compArr(setup, 'groups').filter((x) => compLive(x) && !compGroupIsTrait(x)))) {
+      if (ratedGroups.has(g.id) || (compActive(g) && !sk.has(g.id))) out.push(g);
+    }
+  } else {
+    for (const g of compActiveSystems(setup)) if (!sk.has(g.id)) out.push(g);
+  }
+  return out;
+}
+/** ↔ cardAxes（已轉出的人：已停用的項目有分數才接在後面） */
+function compCardAxes(setup, g, archived, sessions) {
+  const act = compAxesFor(setup, g.id);
+  if (!archived) return { axes: act, extra: new Set() };
+  const have = new Set(act.map((i) => i.id));
+  const rated = new Set([...compLatestCells(sessions).values()].filter((c) => c.gid === g.id).map((c) => c.iid));
+  const extra = compSorted(compArr(setup, 'items').filter((i) => compLive(i) && !have.has(i.id) && rated.has(i.id)));
+  return { axes: act.concat(extra), extra: new Set(extra.map((i) => i.id)) };
+}
+function compExportDayText(k, through) { // ↔ exportDayText（跟今天不同年寫「2025/10/30」）
+  const p = compParseDay(k), q = compParseDay(through);
+  if (!p || !q) return k;
+  return p[0] === q[0] ? compShortDay(k) : `${p[0]}/${p[1]}/${p[2]}`;
+}
+/** ↔ exportModel（今天那一份） */
+function compExportModel(setup, pid, archived, sessions, through, refs, current) {
+  const upTo = sessions.filter((s) => compStr(s.dayKey) <= through);
+  const table = compTargetTable(setup);
+  const pick = compTargetGradeCurrent(refs, current, table);
+  const targets = pick ? { grade: pick, table } : null;
+  const cells = compLatestCells(upTo);
+  const cards = [];
+  for (const g of compVisibleGroups(setup, pid, archived, upTo)) {
+    const ca = compCardAxes(setup, g, archived, upTo);
+    if (!ca.axes.length) continue;
+    const own = ca.axes.map((i) => cells.get(compCellKey(g.id, i.id))).filter((c) => c).map((c) => c.dayKey);
+    const ownDay = own.length ? own.reduce((a, b) => (b > a ? b : a)) : null;
+    cards.push(compChartModel(g, ca.axes, ca.extra, upTo, compRangeForGroup(setup, g.id), ownDay, targets));
+  }
+  const ratedDays = cards.filter((c) => c.latestDay).map((c) => c.latestDay);
+  const rated = ratedDays.length ? ratedDays.reduce((a, b) => (b > a ? b : a)) : null;
+  const tt = cards.reduce((a, c) => a + c.targetTotal, 0), tm = cards.reduce((a, c) => a + c.targetAchieved, 0);
+  return { cards, ratedDay: rated, targetLine: pick && tt > 0 ? `目標 ${pick.short}：達標 ${tm}／${tt}` : null };
+}
+function compShowTitle(name, refs, current) { // ↔ showTitle（「王小明・E2」；沒設職等、職等被刪只寫名字）
+  const who = compStr(name).trim() || '這位同仁';
+  const g = current ? refs.find((x) => x.id === current) : null;
+  return g ? who + '・' + g.short : who;
+}
+/** ↔ showModel（＝App 的「給對方看」那一份）。契約：nodecheck_v4b.js 直接叫 */
+function compPersonModel(setup, ratings, sub, grades, todayKey, archived) {
+  const refs = compGradeRefs(grades);
+  const pid = sub && sub.id;
+  const sessions = compSessionsOf(ratings, pid);
+  const ex = compExportModel(setup, pid, !!archived, sessions, todayKey, refs, sub ? sub.gradeTitleId : null);
+  return { configured: compIsConfigured(setup), title: compShowTitle(sub && sub.name, refs, sub ? sub.gradeTitleId : null),
+    ratedLine: ex.ratedDay ? '評分日 ' + compExportDayText(ex.ratedDay, todayKey) : null, cards: ex.cards, targetLine: ex.targetLine };
+}
+
+// ---- App v2：能獨立／能教人、課的總覽（teamModel 熱力表那一半）----
+function compExtraInt(obj, key) { // ↔ extraInt（extra 攤在同一層）
+  const v = obj ? obj[key] : undefined;
+  if (typeof v !== 'number' || !isFinite(v) || Math.abs(v) >= 1000000) return null;
+  return compRound(v);
+}
+function compExtraRange(obj, lk, hk) { const lo = compExtraInt(obj, lk), hi = compExtraInt(obj, hk); return lo != null && hi != null && compRangeValid(lo, hi) ? [lo, hi] : null; } // ↔ extraRange
+function compSuggestLevel(t, r) { return compClamp(r, r[0] + compRound(t * (r[1] - r[0]))); } // ↔ suggestLevel
+function compConvertLevel(v, a, b) { return compRangeEq(a, b) ? compClamp(b, v) : compClamp(b, compRound(compConvert(compClamp(a, v), a, b))); } // ↔ convertLevel
+/** ↔ thresholds（沒設照比例 0.5／0.75；設過的照 extra 存的範圍換） */
+function compThresholds(sc, r) {
+  const stored = compExtraRange(sc, 'thresholdLow', 'thresholdHigh') || r;
+  let ind = compSuggestLevel(0.5, r), tr = compSuggestLevel(0.75, r);
+  if (sc && compIsInt(sc.independentLevel)) ind = compConvertLevel(sc.independentLevel, stored, r);
+  if (sc && compIsInt(sc.trainerLevel)) tr = compConvertLevel(sc.trainerLevel, stored, r);
+  if (tr < ind) tr = ind;
+  return { independent: ind, trainer: tr };
+}
+function compTeamTier(t) { return Math.min(4, Math.max(0, Math.floor(t * 5 + 1e-9))); } // ↔ teamTier
+function compTeamAvgText(x) { // ↔ teamAverageText（「4.0」「4.33」）
+  const h = compRound(Math.abs(x) * 100);
+  const whole = Math.floor(h / 100), frac = h % 100;
+  const s = frac === 0 ? `${whole}.0` : frac % 10 === 0 ? `${whole}.${frac / 10}` : `${whole}.` + (frac < 10 ? `0${frac}` : `${frac}`);
+  return x < 0 && h !== 0 ? '-' + s : s;
+}
+function compTeamGroups(setup, area) { // ↔ teamGroups
+  const out = [];
+  if (area === 'trait') {
+    const tg = compTraitGroup(setup);
+    if (tg) { const ax = compAxesFor(setup, tg.id); if (ax.length) out.push([tg, ax]); }
+    return out;
+  }
+  for (const g of compActiveSystems(setup)) { const ax = compAxesFor(setup, g.id); if (ax.length) out.push([g, ax]); }
+  return out;
+}
+function compTeamRequired(setup, g, pid) { return compGroupIsTrait(g) || !compSkipped(setup, pid).has(g.id); } // ↔ teamRequired
+/** ↔ teamModel（熱力表、三列、紅框橘框）。people：[{id, name, gradeTitleId, archived}]；網頁版沒有暫時離開的資料（away 一律 false）。
+ *  契約：nodecheck_v4b.js 直接叫（todayKey 這一支用不到，留著對齊契約） */
+function compTeamModel(setup, ratings, people, grades, area, todayKey) { // eslint-disable-line no-unused-vars
+  const isTrait = area === 'trait';
+  const r = isTrait ? compTraitRange(setup) : compSkillRange(setup);
+  const th = compThresholds(compScaleOf(setup, isTrait ? 'trait' : 'skill'), r);
+  const indT = compRatio(th.independent, r), trT = compRatio(th.trainer, r);
+  const table = compTargetTable(setup);
+  const list = Array.isArray(people) ? people : [];
+  const ordered = list.filter((p) => !p.archived).concat(list.filter((p) => p.archived));
+  const cellsOf = new Map(ordered.map((p) => [p.id, compLatestCells(compSessionsOf(ratings, p.id))]));
+  const refs = new Map(compGradeRefs(grades).map((g) => [g.id, g]));
+  const groups = compTeamGroups(setup, area).filter(([g]) => ordered.some((p) => compTeamRequired(setup, g, p.id) ||
+    [...cellsOf.get(p.id).values()].some((c) => c.gid === g.id)));
+  const headers = [], columns = [], rowCells = new Map(ordered.map((p) => [p.id, []]));
+  let hasTargets = false;
+  for (const [g, ax] of groups) {
+    headers.push({ id: g.id, title: compChipTitle(g), fullTitle: compGroupName(g), isTrait: compGroupIsTrait(g), start: columns.length, count: ax.length });
+    for (const it of ax) {
+      let required = 0, ind = 0, tr = 0;
+      const ts = [];
+      for (const p of ordered) {
+        const req = compTeamRequired(setup, g, p.id);
+        const c = cellsOf.get(p.id).get(compCellKey(g.id, it.id));
+        let kind = 'unrated', text = '·', t = null, below = false;
+        if (!req) { kind = 'notRequired'; text = '—'; } else if (c) {
+          if (c.na) { kind = 'na'; text = '／'; } else if (compCellRatio(c) != null) { kind = 'value'; text = compCellText(c, r); t = compCellRatio(c); }
+        }
+        const gg = p.gradeTitleId;
+        if (!p.archived && gg && refs.has(gg) && req) {
+          const rt = compResolveTarget(table, gg, g.id, it.id, r);
+          if (rt) { hasTargets = true; if (t != null && t < rt.ratio - 1e-9) below = true; }
+        }
+        if (req && !p.archived) {
+          required++;
+          if (t != null) {
+            ts.push(t);
+            if (!p.away) { if (t >= indT - 1e-9) ind++; if (t >= trT - 1e-9) tr++; }
+          }
+        }
+        rowCells.get(p.id).push({ kind, text, tier: t != null ? compTeamTier(t) : null, belowTarget: below });
+      }
+      const avg = ts.length ? ts.reduce((a, b) => a + b, 0) / ts.length : null;
+      const has = required > 0, red = has && ind <= 1;
+      columns.push({ id: g.id + '|' + it.id, itemTitle: compCleanShort(it.shortName, 4) || compItemName(it), fullTitle: compGroupName(g) + '・' + compItemName(it),
+        requiredCount: required, independentCount: ind, trainerCount: tr,
+        independentText: has ? String(ind) : '—', trainerText: has ? String(tr) : '—',
+        averageText: avg != null ? compTeamAvgText(compValueAt(avg, r)) : '—', red, orange: has && !red && tr <= 1 });
+    }
+  }
+  const rows = ordered.map((p) => {
+    const gs = refs.get(p.gradeTitleId);
+    return { id: p.id, name: p.name, gradeShort: gs ? gs.short : null, archived: !!p.archived, cells: rowCells.get(p.id) };
+  });
+  let empty = null;
+  if (!compIsConfigured(setup)) empty = '還沒設定職能項目（設定 → 進階設定 → 部屬評分 → 職能項目）';
+  else if (!columns.length) empty = isTrait ? '人格特質還沒有項目' : '還沒有要學的系統項目';
+  return { area, range: [r[0], r[1]], thresholds: th, groups: headers, columns, rows,
+    independentLabel: `能獨立（≥ ${th.independent}）`, trainerLabel: `能教人（≥ ${th.trainer}）`,
+    legend: '— 不用學・· 未評・／ 不適用' + (hasTargets ? '・◤ 未達目標' : ''), emptyText: empty, hasTargets };
+}
+
+// ---- 畫面：部屬詳情〔職能〕分頁（＝App 的「給對方看」那一份）----
+/** 軸名太長（約 6 個中文字寬）時拆兩行、第二行還放不下用「…」（只是畫法；全名在下面每一軸那一列、滑過去也看得到） */
+function compLabelLines(label) {
+  const chars = Array.from(String(label ?? '')), MAX = 66;
+  const w = (ch) => (ch.codePointAt(0) > 0x2E7F ? 11 : 6.2);
+  const width = (list) => list.reduce((a, ch) => a + w(ch), 0);
+  const lines = [];
+  let cur = [];
+  for (const ch of chars) {
+    if (width(cur) + w(ch) > MAX && cur.length) {
+      if (lines.length === 1) { lines.push(cur.join('').trimEnd() + '…'); return lines; }
+      const sp = cur.lastIndexOf(' '); // 英文盡量在空白斷
+      if (ch !== ' ' && sp > 0) { lines.push(cur.slice(0, sp).join('').trimEnd()); cur = cur.slice(sp + 1); } else { lines.push(cur.join('').trimEnd()); cur = []; }
+      if (ch === ' ') continue;
+    }
+    cur.push(ch);
+  }
+  if (cur.length || !lines.length) lines.push(cur.join(''));
+  return lines;
+}
+/** 一張卡的 SVG 雷達（格線、放射線、目標點線、這次、軸名；> 11 級四圈寫數字）。style 'bars' 不畫 */
+function compRadarSVG(card) {
+  const n = card.axes.length;
+  if (!(card.style === 'radar' || card.style === 'radarShort') || n < 3) return '';
+  const R = 100, P = (t, i) => compPoint(t, i, n, R);
+  const f = (v) => (Math.round(v * 10) / 10).toString();
+  const pts = (list) => list.map((p) => `${f(p.x)},${f(p.y)}`).join(' ');
+  const ringsSVG = card.rings.map((rg) => `<polygon class="comp-ring${rg.faint ? ' comp-faint' : ''}" points="${pts(card.axes.map((a, i) => P(rg.t, i)))}"/>`).join('');
+  const spokes = card.axes.map((a, i) => { const p0 = P(0, i), p1 = P(1, i); return `<line class="comp-spoke" x1="${f(p0.x)}" y1="${f(p0.y)}" x2="${f(p1.x)}" y2="${f(p1.y)}"/>`; }).join('');
+  const ringLabels = card.rings.filter((rg) => rg.label != null).map((rg) => { const p = P(rg.t, 0); return `<text class="comp-ring-label" x="4" y="${f(p.y + 3)}">${esc(rg.label)}</text>`; }).join('');
+  // 目標：有目標的軸 ≥ 3 連成點線、不填色；< 3 只畫空心小點
+  const tv = card.axes.map((a, i) => (a.targetT != null ? P(a.targetT, i) : null)).filter((p) => p);
+  const target = tv.length >= 3 ? `<polygon class="comp-target" points="${pts(tv)}"/>`
+    : tv.map((p) => `<circle class="comp-target-dot" cx="${f(p.x)}" cy="${f(p.y)}" r="2.5"/>`).join('');
+  // 這次：有分數的軸 ≥ 3 才畫多邊形（跳過沒評的那一段畫虛線）；< 3 只畫點
+  const verts = card.axes.map((a, i) => (a.t != null ? { i, p: P(a.t, i) } : null)).filter((v) => v);
+  let current = '';
+  if (card.drawsPolygon && verts.length >= 3) {
+    current += `<polygon class="comp-fill" points="${pts(verts.map((v) => v.p))}"/>`;
+    current += verts.map((v, k) => {
+      const w = verts[(k + 1) % verts.length];
+      const gap = (((w.i - v.i) % n) + n) % n;
+      return `<line class="comp-edge${gap !== 1 ? ' comp-skip' : ''}" x1="${f(v.p.x)}" y1="${f(v.p.y)}" x2="${f(w.p.x)}" y2="${f(w.p.y)}"/>`;
+    }).join('');
+  }
+  current += verts.map((v) => `<circle class="comp-dot" cx="${f(v.p.x)}" cy="${f(v.p.y)}" r="3"/>`).join('');
+  const labels = card.axes.map((a, i) => {
+    const ang = compAngle(i, n), c = Math.cos(ang), s = Math.sin(ang), rr = R + 10;
+    const anchor = c > 0.15 ? 'start' : c < -0.15 ? 'end' : 'middle';
+    const lines = compLabelLines(a.label);
+    const up = (lines.length - 1) * 12; // 兩行時：上面的軸往上推一行、旁邊的推半行、下面的不推
+    const dy = (s < -0.5 ? -2 - up : s > 0.5 ? 10 : 4 - up / 2);
+    const x = f(rr * c);
+    const spans = lines.map((t, k) => `<tspan x="${x}"${k ? ' dy="12"' : ''}>${esc(t)}</tspan>`).join('');
+    return `<text class="comp-axis-label${a.state === 'rated' ? '' : ' comp-dim'}" x="${x}" y="${f(rr * s + dy)}" text-anchor="${anchor}"><title>${esc(a.name)}</title>${spans}</text>`;
+  }).join('');
+  return `<svg class="comp-radar ${card.isTrait ? 'comp-is-trait' : 'comp-is-system'}" viewBox="-170 -128 340 252" role="img" aria-label="${esc(card.title)} 雷達圖">
+    ${ringsSVG}${spokes}${target}${current}${ringLabels}${labels}</svg>`;
+}
+/** 每一軸一列：名字、分數（未評／不適用灰）、目標 ✓／差 N（達標綠）＋細比例條＋目標刻線 */
+function compAxisRowHTML(card, a) {
+  const key = card.style === 'radarShort' && a.label !== a.name ? `<span class="comp-key">${esc(a.label)}</span>` : '';
+  const val = a.state === 'rated' ? `<b>${esc(a.valueText)}</b>` : `<span class="muted">${esc(a.valueText || '未評')}</span>`;
+  const tgt = a.targetText ? `<span class="comp-tgt${a.targetMet ? ' comp-met' : ''}">${esc(a.targetText)}</span>` : '';
+  const bar = `<div class="comp-bar ${card.isTrait ? 'comp-is-trait' : 'comp-is-system'}">${a.t != null ? `<span style="width:${Math.round(a.t * 1000) / 10}%"></span>` : ''}${a.targetT != null ? `<i style="left:${Math.round(a.targetT * 1000) / 10}%"></i>` : ''}</div>`;
+  return `<div class="comp-row"><div class="comp-row-head"><span class="comp-name">${key}${esc(a.name)}</span><span class="comp-val">${val}</span>${tgt}</div>${bar}</div>`;
+}
+function compCardHTML(card) {
+  const legend = [card.latestDay ? `━ ${esc(compShortDay(card.latestDay))}` : '', card.legendTarget ? `┄ ${esc(card.legendTarget)}` : ''].filter((x) => x).join('　');
+  return `<div class="card comp-card"><h3>${esc(card.headline)}${card.averageText ? `<span class="comp-avg">${esc(card.averageText)}</span>` : ''}</h3>
+    ${compRadarSVG(card)}<div class="comp-rows">${card.axes.map((a) => compAxisRowHTML(card, a)).join('')}</div>
+    ${legend ? `<div class="legend-note">${legend}</div>` : ''}</div>`;
+}
+function compPersonTabHTML(s) {
+  const m = compPersonModel(Store.compSetup, Store.compRatings, s, Store.grades, ymdKey(new Date()), isArchivedId(s.id));
+  const line = m.ratedLine ? `<div class="muted small comp-rated">${esc(m.ratedLine)}</div>` : '<div class="muted small comp-rated">還沒有評分</div>';
+  const cards = m.cards.length ? `<div class="grid cols-2">${m.cards.map(compCardHTML).join('')}</div>` : '<div class="card"><div class="empty">沒有要評的職能項目</div></div>';
+  return `${line}${cards}<div class="legend-note">數字照 App 的規則算（範圍改過照評分當時的範圍換算、目標照目前職等）。網頁版只讀；不顯示評語、總評、評分紀錄。</div>`;
+}
+
+// ---- 畫面：人才矩陣頁「職能・課的總覽」（部門篩選、本職學能｜人格特質只放記憶體，不存）----
+const compUI = { area: 'skill', dept: 'all' };
+function compHeatTableHTML(m) {
+  const colCls = (c) => (c.red ? ' comp-red' : c.orange ? ' comp-orange' : '');
+  const head1 = m.groups.map((g) => `<th class="comp-group" colspan="${g.count}" title="${esc(g.fullTitle)}">${esc(g.title)}</th>`).join('');
+  const head2 = m.columns.map((c) => `<th class="comp-col comp-top${colCls(c)}" title="${esc(c.fullTitle)}">${esc(c.itemTitle)}</th>`).join('');
+  const rows = m.rows.map((r) => `<tr><td class="comp-who"><a href="#/sub/${encodeURIComponent(r.id)}/competency"><b>${esc(r.name)}</b></a>${r.gradeShort ? `<div class="muted small">${esc(r.gradeShort)}</div>` : ''}</td>${r.cells.map((x, ci) => {
+    const tier = x.tier != null ? ` comp-t${x.tier}` : '';
+    const mark = x.belowTarget ? '<span class="comp-mark" title="未達目標">◤</span>' : '';
+    return `<td class="comp-cell comp-k-${x.kind}${tier}${colCls(m.columns[ci] || {})}">${esc(x.text)}${mark}</td>`;
+  }).join('')}</tr>`).join('');
+  const sum = (label, key, last) => `<tr class="comp-sum"><td class="comp-who">${esc(label)}</td>${m.columns.map((c) => `<td class="comp-cell${colCls(c)}${last ? ' comp-bottom' : ''}${(key === 'independentText' && c.red) || (key === 'trainerText' && c.orange) ? ' comp-alert' : ''}">${esc(c[key])}</td>`).join('')}</tr>`;
+  return `<div class="table-wrap"><table class="tbl comp-heat${m.area === 'trait' ? ' comp-area-trait' : ''}"><thead>
+    <tr><th class="comp-who" rowspan="2">同仁</th>${head1}</tr><tr>${head2}</tr></thead><tbody>${rows}
+    ${sum(m.independentLabel, 'independentText', false)}${sum(m.trainerLabel, 'trainerText', false)}${sum('課平均', 'averageText', true)}</tbody></table></div>
+    <div class="legend-note">${esc(m.legend)}・紅框＝能獨立只剩一人・橘框＝能教人只剩一人（範圍 ${esc(compRangeText(m.range))} 分；只看在職的；網頁版沒有借調、支援的資料，人數不扣暫時離開的人）</div>`;
+}
+function compTeamSectionHTML() {
+  if (!compIsConfigured(Store.compSetup)) return '';
+  const depts = pickableDepts();
+  if (compUI.dept !== 'all' && !depts.some((d) => d.id === compUI.dept)) compUI.dept = 'all';
+  const people = activeSubs().filter((s) => compUI.dept === 'all' || s.departmentId === compUI.dept)
+    .map((s) => ({ id: s.id, name: (s.name || '').trim() || '這位同仁', gradeTitleId: s.gradeTitleId, archived: false }));
+  const m = compTeamModel(Store.compSetup, Store.compRatings, people, Store.grades, compUI.area, ymdKey(new Date()));
+  const opts = [['all', '全部部門']].concat(depts.map((d) => [d.id, d.name || d.code || '未命名部門']))
+    .map(([k, l]) => `<option value="${esc(k)}"${k === compUI.dept ? ' selected' : ''}>${esc(l)}</option>`).join('');
+  const body = !people.length ? '<div class="empty">這個部門沒有在職的部屬</div>' : m.emptyText ? `<div class="empty">${esc(m.emptyText)}</div>` : compHeatTableHTML(m);
+  return `<div class="card mt" id="comp-team"><h3>職能・課的總覽</h3>
+    <div class="row comp-tools"><select data-comp-dept aria-label="部門">${opts}</select>${filterChips('comparea', [['skill', '本職學能'], ['trait', '人格特質']], compUI.area)}</div>
+    ${body}</div>`;
+}
+function compBindTeam(main) {
+  const box = $('#comp-team', main);
+  if (!box) return;
+  const sel = $('select[data-comp-dept]', box);
+  if (sel) sel.onchange = () => { compUI.dept = sel.value; compRedrawTeam(main); };
+  bindChips(box, 'comparea', (v) => { compUI.area = v === 'trait' ? 'trait' : 'skill'; compRedrawTeam(main); });
+}
+function compRedrawTeam(main) {
+  const box = $('#comp-team', main);
+  if (!box) return;
+  box.outerHTML = compTeamSectionHTML();
+  compBindTeam(main);
+}
+
 // ---- 人才矩陣 -------------------------------------------------------------
 function median(arr) { if (!arr.length) return 0; const a = [...arr].sort((x, y) => x - y); const m = Math.floor(a.length / 2); return a.length % 2 ? a[m] : (a[m - 1] + a[m]) / 2; }
 function renderMatrix(main, ctx) {
@@ -1066,7 +1642,8 @@ function renderMatrix(main, ctx) {
       </div></div>
     <div class="card mt table-wrap"><table class="tbl"><thead><tr><th>姓名</th><th>部門</th><th class="num">潛力</th><th class="num">主動性</th><th class="num">綜合</th><th>象限</th></tr></thead><tbody>
       ${pts.sort((a, b) => b.total - a.total).map((p) => `<tr class="clickable" onclick="location.hash='#/sub/${p.s.id}'"><td><b>${esc(p.s.name)}</b></td><td>${esc(deptNameOf(p.s))}</td><td class="num">${scoreHTML(p.y)}</td><td class="num">${scoreHTML(p.x)}</td><td class="num">${scoreHTML(p.total)}</td><td>${p.x >= mx && p.y >= my ? '⭐ 明星' : p.y >= my ? '🌱 潛力股' : p.x >= mx ? '🔧 實幹型' : '👀 需關注'}</td></tr>`).join('')}
-    </tbody></table></div>`;
+    </tbody></table></div>${compTeamSectionHTML()}`;
+  compBindTeam(main); // v1.16「職能・課的總覽」（有設定才有）
   if (!window.Chart) return;
   const css = getComputedStyle(document.documentElement);
   const textColor = css.getPropertyValue('--text').trim() || '#000';

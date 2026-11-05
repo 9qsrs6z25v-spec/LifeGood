@@ -404,3 +404,73 @@ details.agenda summary { cursor: pointer; color: var(--indigo); font-weight: 700
 .rs-group td { background: var(--card2); font-weight: 800; }
 .rs-group td.rs-name, .rs-group td.rs-sum { background: var(--card2); box-shadow: -20px 0 0 var(--card2); }
 .rs-dot { display: inline-block; width: 9px; height: 9px; border-radius: 5px; margin-right: 5px; }
+
+/* 職能雷達（v1.16；部屬〔職能〕分頁、人才矩陣「職能・課的總覽」）。新 class 一律 comp- 開頭 */
+:root {
+  --comp-trait: #8c5cf5;
+  --comp-system: #298cc7;
+  --comp-rgb: 41, 140, 199;
+  --comp-a0: .10; --comp-a1: .22; --comp-a2: .36; --comp-a3: .52; --comp-a4: .70;
+}
+@media (prefers-color-scheme: dark) {
+  :root { --comp-a0: .20; --comp-a1: .32; --comp-a2: .46; --comp-a3: .62; --comp-a4: .80; }
+}
+.comp-rated { margin: 0 0 10px; }
+.comp-card h3 { display: flex; align-items: baseline; gap: 8px; }
+.comp-avg { margin-left: auto; font-size: 12px; font-weight: 700; color: var(--muted); }
+.comp-is-trait { color: var(--comp-trait); }
+.comp-is-system { color: var(--comp-system); }
+.comp-radar { display: block; width: 100%; max-width: 380px; height: auto; margin: 4px auto 10px; overflow: visible; }
+.comp-radar .comp-ring { fill: none; stroke: var(--line); stroke-width: 1; }
+.comp-radar .comp-ring.comp-faint { opacity: .45; }
+.comp-radar .comp-spoke { stroke: var(--line); stroke-width: .75; }
+.comp-radar .comp-target { fill: none; stroke: var(--text); stroke-opacity: .6; stroke-width: 1.5; stroke-dasharray: 1 3; stroke-linecap: round; stroke-linejoin: round; }
+.comp-radar .comp-target-dot { fill: none; stroke: var(--text); stroke-opacity: .6; stroke-width: 1; }
+.comp-radar .comp-fill { fill: currentColor; fill-opacity: .25; stroke: none; }
+.comp-radar .comp-edge { stroke: currentColor; stroke-width: 2; stroke-linecap: round; }
+.comp-radar .comp-edge.comp-skip { stroke-dasharray: 4 3; stroke-linecap: butt; }
+.comp-radar .comp-dot { fill: currentColor; }
+.comp-radar .comp-axis-label { fill: var(--text); font-size: 11px; font-weight: 600; }
+.comp-radar .comp-axis-label.comp-dim { fill: var(--muted); }
+.comp-radar .comp-ring-label { fill: var(--muted); font-size: 9px; }
+.comp-rows { display: flex; flex-direction: column; gap: 8px; }
+.comp-row-head { display: flex; align-items: baseline; gap: 8px; font-size: 13px; }
+.comp-row-head .comp-name { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.comp-key { display: inline-block; min-width: 1.6em; color: var(--muted); font-weight: 700; }
+.comp-val { font-variant-numeric: tabular-nums; }
+.comp-tgt { font-size: 12px; color: var(--muted); white-space: nowrap; }
+.comp-tgt.comp-met { color: var(--green); font-weight: 700; }
+.comp-bar { position: relative; height: 5px; margin-top: 3px; border-radius: 3px; background: var(--line); }
+.comp-bar span { position: absolute; left: 0; top: 0; bottom: 0; border-radius: 3px; background: currentColor; }
+.comp-bar i { position: absolute; top: -3px; bottom: -3px; width: 0; border-left: 2px dotted var(--text); opacity: .6; transform: translateX(-1px); }
+.comp-tools { gap: 8px; flex-wrap: wrap; align-items: center; margin: 4px 0 12px; }
+.comp-tools select { font: inherit; padding: 5px 8px; border-radius: 8px; border: 1px solid var(--line); background: var(--card); color: var(--text); }
+table.comp-heat { width: auto; }
+table.comp-heat.comp-area-trait { --comp-rgb: 140, 92, 245; }
+table.comp-heat th, table.comp-heat td { padding: 6px 4px; text-align: center; cursor: default; }
+table.comp-heat .comp-who { text-align: left; padding-left: 8px; padding-right: 12px; min-width: 84px; position: sticky; left: 0; z-index: 1; background: var(--card); }
+table.comp-heat .comp-group { color: var(--text); border-bottom: 1px solid var(--line); }
+table.comp-heat .comp-col { min-width: 44px; font-size: 11px; }
+.comp-cell { position: relative; font-variant-numeric: tabular-nums; font-weight: 700; min-width: 44px; }
+.comp-cell.comp-k-notRequired { background: var(--card2); color: var(--muted); font-weight: 400; }
+.comp-cell.comp-k-unrated, .comp-cell.comp-k-na { color: var(--muted); font-weight: 400; }
+.comp-cell.comp-t0 { background: rgba(var(--comp-rgb), var(--comp-a0)); }
+.comp-cell.comp-t1 { background: rgba(var(--comp-rgb), var(--comp-a1)); }
+.comp-cell.comp-t2 { background: rgba(var(--comp-rgb), var(--comp-a2)); }
+.comp-cell.comp-t3 { background: rgba(var(--comp-rgb), var(--comp-a3)); }
+.comp-cell.comp-t4 { background: rgba(var(--comp-rgb), var(--comp-a4)); }
+.comp-mark { position: absolute; top: 1px; right: 2px; font-size: 8px; line-height: 1; color: var(--red); }
+.comp-sum td { font-weight: 700; background: var(--card2); }
+.comp-sum td.comp-who { background: var(--card2); font-size: 12px; color: var(--muted); }
+.comp-sum td.comp-alert { color: var(--red); }
+.comp-orange .comp-alert, td.comp-orange.comp-alert { color: var(--orange); }
+.comp-red { box-shadow: inset 2px 0 0 var(--red), inset -2px 0 0 var(--red); }
+.comp-red.comp-top { box-shadow: inset 2px 0 0 var(--red), inset -2px 0 0 var(--red), inset 0 2px 0 var(--red); }
+.comp-red.comp-bottom { box-shadow: inset 2px 0 0 var(--red), inset -2px 0 0 var(--red), inset 0 -2px 0 var(--red); }
+.comp-orange { box-shadow: inset 2px 0 0 var(--orange), inset -2px 0 0 var(--orange); }
+.comp-orange.comp-top { box-shadow: inset 2px 0 0 var(--orange), inset -2px 0 0 var(--orange), inset 0 2px 0 var(--orange); }
+.comp-orange.comp-bottom { box-shadow: inset 2px 0 0 var(--orange), inset -2px 0 0 var(--orange), inset 0 -2px 0 var(--orange); }
+@media (max-width: 700px) {
+  table.comp-heat .comp-who { min-width: 72px; }
+  .comp-radar { max-width: 100%; }
+}

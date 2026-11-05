@@ -25,6 +25,12 @@ import SwiftUI
 // • 摘要卡下面「離 E2 目標的差距」白卡（由大到小，最多 6 列＋看全部）→ 點一列打開那一格的歷史（看不擋）。
 // • 評分紀錄那一列：那一張的職等跟現在不一樣多一行「那時 E2 工程師」。
 // • 通知、小工具、手錶、鎖定畫面一個字都不加（目標、達標也是）。
+//
+// [v25.605 職能雷達 v4b] 這一版加的（radar/build/v4b/brief.md §3 G1；要退回這一件：照 4097c29 的這個檔）：
+// • 摘要卡右上「…」最前面多〔給對方看〕（CompetencyMath.canShow：設好了、任一張卡有評分才出現；fullScreenCover(item:)
+//   打開 CompetencyShowView）與〔分享職能雷達…〕（既有的部屬匯出頁 SubordinateExportSheet，preset: .competencyOnly、
+//   mentioned: []；這次的勾法不寫進記住上次），分隔線後才是既有兩項。
+// • 兩個都只是看／使用者自己按的分享：不擋訂閱；這裡不寫 store；§13 評語照舊不顯示。
 
 struct SubordinateCompetencyTab: View {
     let subordinateId: UUID
@@ -49,6 +55,9 @@ struct SubordinateCompetencyTab: View {
     @State private var recordRequest: CompetencyRecordRequest?
     @State private var historyRequest: CompetencyCellHistoryRequest?
     @Environment(\.horizontalSizeClass) private var horizontalSizeClass
+    // [v25.605 職能雷達 v4b] 〔給對方看〕（fullScreenCover(item:)）、〔分享職能雷達…〕（sheet(item:)）。要退回這一件：刪這兩行
+    @State private var showRequest: CompetencyShowRequest?
+    @State private var shareRequest: CompTabShareRequest?
 
     private var isArchived: Bool { OrgMoveIndex.isArchived(subordinateId) }
 
@@ -100,6 +109,8 @@ struct SubordinateCompetencyTab: View {
         .modifier(CompTabHistorySheets(recordRequest: $recordRequest, historyRequest: $historyRequest))
         // [v25.601 職能雷達 v1b] 〔設定職等〕＝既有的部屬編輯表單（不另外寫職等）。要退回這一件：刪這一行
         .modifier(CompTabGradeSheet(request: $gradeEdit))
+        // [v25.605 職能雷達 v4b] 〔給對方看〕〔分享職能雷達…〕兩個 sheet 包在一個 modifier 裡。要退回這一件：刪這一行
+        .modifier(CompTabShowShareSheets(showRequest: $showRequest, shareRequest: $shareRequest))
         .premiumLockAlert(isPresented: $showPremiumAlert)
         .onDisappear { toastTask?.cancel() }
     }
@@ -123,7 +134,10 @@ struct SubordinateCompetencyTab: View {
                            targets: m.targets,
                            onPickMode: pickTargetMode,
                            onSetGrade: openGradeEdit,
-                           canSetGrade: canRate)
+                           canSetGrade: canRate,
+                           canShowToPerson: CompetencyMath.canShow(m),
+                           onShow: openShow,
+                           onShare: openShare)
         // [v25.601 職能雷達 v1b] 離目標的差距（由大到小；沒評的不列）。要退回這一件：刪這個 if
         if let t = m.targets, !t.gapRows.isEmpty {
             CompTabGapCard(title: CompTabGapCard.headerTitle(for: t), rows: t.gapRows, onOpen: openHistory)
@@ -198,6 +212,12 @@ struct SubordinateCompetencyTab: View {
     private func openSetup() {
         setupRequest = CompTabSetupRequest()
     }
+
+    /// [v25.605 v4b]〔給對方看〕只是看，不擋訂閱
+    private func openShow() { showRequest = CompetencyShowRequest(subordinateId: subordinateId) }
+
+    /// [v25.605 v4b]〔分享職能雷達…〕打開既有的部屬匯出頁、只勾職能雷達（不寫記住上次）；不擋訂閱
+    private func openShare() { shareRequest = CompTabShareRequest(subordinateId: subordinateId) }
 
     /// [v25.600 職能雷達 v1a-2] 點一格的歷史（看不擋；唯讀、已轉出也能看）
     private func openHistory(groupId: UUID, itemId: UUID) {
@@ -452,6 +472,10 @@ private struct CompTabSummaryCard: View {
     let onSetGrade: () -> Void
     /// 〔設定職等〕（已轉出、唯讀不出現；跟〔評分〕同條件）
     let canSetGrade: Bool
+    // [v25.605 職能雷達 v4b] 「…」最前面〔給對方看〕（canShow）〔分享職能雷達…〕。要退回這一件：刪這三行與 menu 裡那幾行
+    let canShowToPerson: Bool
+    let onShow: () -> Void
+    let onShare: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -474,6 +498,15 @@ private struct CompTabSummaryCard: View {
 
     private var menu: some View {
         Menu {
+            if canShowToPerson {
+                Button(action: onShow) {
+                    Label("給對方看", systemImage: "person.crop.rectangle")
+                }
+            }
+            Button(action: onShare) {
+                Label("分享職能雷達…", systemImage: "square.and.arrow.up")
+            }
+            Divider()
             if showsSkipItem {
                 Button(action: onSkip) {
                     Label("不用學的系統", systemImage: "minus.circle")
@@ -727,6 +760,31 @@ private struct CompTabHistorySheets: ViewModifier {
             }
             .sheet(item: $historyRequest) { r in
                 CompetencyCellHistorySheet(subordinateId: r.subordinateId, groupId: r.groupId, itemId: r.itemId)
+                    .appStores()
+            }
+    }
+}
+
+/// [v25.605 v4b]〔分享職能雷達…〕（sheet(item:)；每次新的 id）
+private struct CompTabShareRequest: Identifiable {
+    let id = UUID()
+    let subordinateId: UUID
+}
+
+/// [v25.605 v4b] 給對方看（fullScreenCover）＋分享職能雷達（既有匯出頁、preset）；都 .appStores()
+private struct CompTabShowShareSheets: ViewModifier {
+    @Binding var showRequest: CompetencyShowRequest?
+    @Binding var shareRequest: CompTabShareRequest?
+
+    func body(content: Content) -> some View {
+        content
+            .fullScreenCover(item: $showRequest) { r in
+                CompetencyShowView(subordinateId: r.subordinateId)
+                    .appStores()
+            }
+            .sheet(item: $shareRequest) { r in
+                SubordinateExportSheet(subordinateId: r.subordinateId, initialFormat: .image, mentioned: [],
+                                       preset: .competencyOnly)
                     .appStores()
             }
     }

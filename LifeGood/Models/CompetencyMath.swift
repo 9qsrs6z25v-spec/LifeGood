@@ -4579,3 +4579,217 @@ extension CompetencyMath {
                                      targetLine: targetLine, targetChip: targetChip)
     }
 }
+
+// MARK: - [v25.605 職能雷達 v4b] 給對方看、課的總覽分享（純函式；主控寫好，各組只呼叫、不准改）
+//（radar/judge_v4b.md §C1、§C3；radar/build/v4b/brief.md §2；sim_v4b.py 一個函式一個函式對照，↔ 後面是 sim 的名字）
+// • 給對方看＝部屬匯出「職能雷達」今天那一份（exportModel(through: 今天)）：不疊上一次、目標一律目前職等（不看這台〔目標 ▾〕選單）。
+//   上面只寫名字與職等，下面一句「評分日 10/30」。§13：沒有評語、總評。不給潛力、主動性、綜合分數、0–100、其他人。
+// • 課的總覽分享：照現在的區、部門篩選、〔含已轉出〕（＝畫面上那一份 CompetencyTeamModel）。文字一列一位、Tab 分隔；
+//   圖片照欄切，每張最多 12 欄（一組放得下就不拆開），名字欄每張都有。分享前提醒寫人數。
+// • 只在使用者自己按的分享裡；通知、小工具、手錶、鎖定畫面、靈動島一個字都不碰；沒有新的同步鍵、沒有新的模型欄位。
+
+/// 給對方看的整頁（CompetencyShowView 只照這個排）
+struct CompetencyShowModel: Equatable {
+    /// 「王小明・E2」（沒設職等、職等被刪只寫名字；名字空白「這位同仁」）
+    let title: String
+    /// 照〔職能〕分頁順序（0 項的卡不放）；不疊上一次、有目標時疊目前職等的目標
+    let cards: [CompetencyChartModel]
+    /// 「評分日 10/30」（跟今天不同年「評分日 2025/10/30」；一格都沒評 nil）
+    let ratedLine: String?
+
+    var hasRatings: Bool { ratedLine != nil }
+}
+
+/// 課的總覽分享的一張圖（熱力表照欄切；名字欄與能獨立／能教人／課平均三列每張都有）
+struct CompetencyHeatSharePage: Equatable, Identifiable {
+    /// 第幾張（0 起）
+    let id: Int
+    /// 這張畫 columns[start..<end]（每一列的 cells 也照這個位置取）
+    let start: Int
+    let end: Int
+    /// 這張的欄頭第一行（start 已經換成這張裡面的位置；一組被切開時兩張各一段）
+    let groups: [CompetencyTeamGroupHeader]
+    /// 「廠務課・本職學能・2026/11/5」；一張以上時後面「（1／2）」
+    let title: String
+}
+
+extension CompetencyMath {
+
+    // MARK: 給對方看（judge_v4b §C1）
+
+    /// ↔ show_title：「王小明・E2」（沒設職等、職等被刪只寫名字；名字空白「這位同仁」）
+    static func showTitle(name: String, grades: CompetencyGradeContext) -> String {
+        let n: String = name.trimmingCharacters(in: .whitespacesAndNewlines)
+        let who: String = n.isEmpty ? "這位同仁" : n
+        guard let cid = grades.currentId, let g = grades.grades.first(where: { $0.id == cid }) else { return who }
+        return who + "・" + g.short
+    }
+
+    /// ↔ show_model：給對方看的整頁＝exportModel(through: 今天) 的卡片＋名字職等＋「評分日 10/30」
+    static func showModel(setup: CompetencySetupBook, subordinateId: UUID, name: String, archivedPerson: Bool,
+                          sessions: [CompetencySession], today: String,
+                          grades: CompetencyGradeContext) -> CompetencyShowModel {
+        let ex: CompetencyExportModel = exportModel(setup: setup, subordinateId: subordinateId,
+                                                    archivedPerson: archivedPerson, sessions: sessions,
+                                                    through: today, grades: grades)
+        var line: String? = nil
+        if let r = ex.ratedDay { line = "評分日 " + exportDayText(r, through: today) }
+        return CompetencyShowModel(title: showTitle(name: name, grades: grades), cards: ex.cards, ratedLine: line)
+    }
+
+    /// ↔ can_show：〔職能〕分頁「…」〔給對方看〕出不出現（設好了、任一張卡有評分）
+    static func canShow(_ m: CompetencyTabModel) -> Bool {
+        m.configured && m.cards.contains { $0.latestDay != nil }
+    }
+
+    // MARK: 課的總覽分享（judge_v4b §C3）
+
+    /// 圖片每張最多幾欄（名字欄不算）
+    static let heatShareMaxColumns: Int = 12
+
+    /// ↔ heat_selected_ids：人才矩陣記住的部門篩選（@AppStorage("talentMatrixDeptFilter")，逗號分隔 UUID；這裡只讀）
+    static func heatShareSelectedIds(_ raw: String) -> Set<UUID> {
+        Set(raw.split(separator: ",").compactMap { UUID(uuidString: String($0)) })
+    }
+
+    /// ↔ heat_dept_name：部門名字（空的寫代號、再空寫「未命名部門」；跟人才矩陣 deptName 一樣）
+    static func heatShareDeptName(name: String, code: String) -> String {
+        name.isEmpty ? (code.isEmpty ? "未命名部門" : code) : name
+    }
+
+    /// ↔ heat_scope：「全部部門」「廠務課」「2 個部門」（跟人才矩陣的部門膠囊 selectedDeptName 一樣）
+    static func heatShareScope(selectedIds: Set<UUID>, names: [UUID: String]) -> String {
+        if selectedIds.isEmpty { return "全部部門" }
+        if selectedIds.count == 1, let only = selectedIds.first, let n = names[only] { return n }
+        return "\(selectedIds.count) 個部門"
+    }
+
+    /// ↔ heat_day_text：「2026/11/5」
+    static func heatShareDayText(_ key: String) -> String {
+        guard let p = parseDay(key) else { return key }
+        return "\(p.y)/\(p.m)/\(p.d)"
+    }
+
+    /// ↔ heat_title：圖片「廠務課・本職學能・2026/11/5」；文字（withRange）「廠務課・本職學能（1–5 分）・2026/11/5」。
+    /// 表上有已轉出的人（〔含已轉出〕開著）時部門後面多「・含已轉出」（跟人才矩陣匯出的右上一樣）
+    static func heatShareTitle(_ m: CompetencyTeamModel, scope: String, today: String, withRange: Bool) -> String {
+        var s: String = scope
+        if m.rows.contains(where: { $0.archived }) { s += "・含已轉出" }
+        s += "・" + m.area.title
+        if withRange { s += "（" + m.range.text + " 分）" }
+        return s + "・" + heatShareDayText(today)
+    }
+
+    /// ↔ heat_clean：一格的字不能有 Tab、換行（貼到試算表會跑格）
+    static func heatShareClean(_ s: String) -> String {
+        s.replacingOccurrences(of: "\t", with: " ")
+            .replacingOccurrences(of: "\r", with: " ")
+            .replacingOccurrences(of: "\n", with: " ")
+    }
+
+    /// ↔ heat_col_title：文字版欄頭「Gas P&ID」（系統的短名或名字＋項目短名或名字）；人格特質只寫項目「團隊合作」
+    static func heatShareColumnTitle(_ m: CompetencyTeamModel, index ci: Int) -> String {
+        guard ci >= 0, ci < m.columns.count else { return "" }
+        let col: CompetencyTeamColumn = m.columns[ci]
+        guard let h = m.groups.first(where: { ci >= $0.start && ci < $0.start + $0.count }), !h.isTrait else {
+            return col.itemTitle
+        }
+        return h.title + " " + col.itemTitle
+    }
+
+    /// ↔ heat_row_label：「王小明 E2」「林志豪 E2（已轉出）」（沒設職等只寫名字；名字空白「這位同仁」）
+    static func heatShareRowLabel(_ r: CompetencyTeamRow) -> String {
+        let n: String = r.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        var s: String = n.isEmpty ? "這位同仁" : n
+        if let g = r.gradeShort { s += " " + g }
+        if r.archived { s += "（已轉出）" }
+        return s
+    }
+
+    /// ↔ heat_text：文字版。一列一位、Tab 分隔（貼到試算表就是一張表）；格子的字＝熱力表的字
+    ///（沒評「·」、不用學「—」、不適用「／」、換算過「≈7.8」）；最後能獨立／能教人／課平均三列
+    static func heatShareText(_ m: CompetencyTeamModel, scope: String, today: String) -> String {
+        var lines: [String] = [heatShareClean(heatShareTitle(m, scope: scope, today: today, withRange: true))]
+        var head: [String] = [""]
+        for ci in m.columns.indices {
+            head.append(heatShareClean(heatShareColumnTitle(m, index: ci)))
+        }
+        lines.append(head.joined(separator: "\t"))
+        for r in m.rows {
+            var cells: [String] = [heatShareClean(heatShareRowLabel(r))]
+            for ci in m.columns.indices {
+                cells.append(ci < r.cells.count ? r.cells[ci].text : "")
+            }
+            lines.append(cells.joined(separator: "\t"))
+        }
+        let ind: [String] = ["能獨立"] + m.columns.map { $0.independentText }
+        let tr: [String] = ["能教人"] + m.columns.map { $0.trainerText }
+        let avg: [String] = ["課平均"] + m.columns.map { $0.averageText }
+        lines.append(ind.joined(separator: "\t"))
+        lines.append(tr.joined(separator: "\t"))
+        lines.append(avg.joined(separator: "\t"))
+        return lines.joined(separator: "\n")
+    }
+
+    /// ↔ heat_pages：圖片照欄切。每張最多 maxColumns 欄；一組放得下就整組放同一張（放不下換下一張），
+    /// 一組比 maxColumns 還多才把那一組拆開。一張以上時標題後面「（1／2）」。沒有欄＝空陣列
+    static func heatSharePages(_ m: CompetencyTeamModel, title: String,
+                               maxColumns: Int = heatShareMaxColumns) -> [CompetencyHeatSharePage] {
+        let cap: Int = max(1, maxColumns)
+        let total: Int = m.columns.count
+        var spans: [(start: Int, end: Int)] = []
+        var curStart: Int = 0
+        var curEnd: Int = 0
+        for g in m.groups {
+            var s: Int = max(0, min(g.start, total))
+            let e: Int = max(s, min(g.start + g.count, total))
+            if e == s { continue }
+            if curEnd > curStart && (curEnd - curStart) + (e - s) > cap {
+                spans.append((start: curStart, end: curEnd))
+                curStart = s
+                curEnd = s
+            }
+            if curEnd == curStart {
+                curStart = s
+                curEnd = s
+            }
+            while e - s > cap - (curEnd - curStart) {
+                let take: Int = cap - (curEnd - curStart)
+                curEnd = s + take
+                spans.append((start: curStart, end: curEnd))
+                s += take
+                curStart = s
+                curEnd = s
+            }
+            curEnd = e
+        }
+        if curEnd > curStart { spans.append((start: curStart, end: curEnd)) }
+        let n: Int = spans.count
+        var out: [CompetencyHeatSharePage] = []
+        for (i, sp) in spans.enumerated() {
+            var hs: [CompetencyTeamGroupHeader] = []
+            for h in m.groups {
+                let a: Int = max(h.start, sp.start)
+                let b: Int = min(h.start + h.count, sp.end)
+                guard b > a else { continue }
+                hs.append(CompetencyTeamGroupHeader(id: h.id, title: h.title, fullTitle: h.fullTitle, isTrait: h.isTrait,
+                                                    start: a - sp.start, count: b - a))
+            }
+            let t: String = n > 1 ? title + "（\(i + 1)／\(n)）" : title
+            out.append(CompetencyHeatSharePage(id: i, start: sp.start, end: sp.end, groups: hs, title: t))
+        }
+        return out
+    }
+
+    /// ↔ heat_warning：分享前提醒（每次都問；〔取消〕〔分享〕）：「圖上有 3 位同仁的名字和職能分數，確定要分享嗎？」
+    static func heatShareWarning(_ m: CompetencyTeamModel, image: Bool) -> (title: String, message: String) {
+        let place: String = image ? "圖上" : "文字裡"
+        return ("分享課的總覽", place + "有 \(m.rows.count) 位同仁的名字和職能分數，確定要分享嗎？")
+    }
+
+    /// ↔ heat_file_name：「課的總覽_20261105_1020.jpg」；一張以上「課的總覽_20261105_1020_2.jpg」（不放名字、部門）。
+    /// stamp＝SubExportComposer.fileStamp(now, cal: SubExportComposer.gregorian)
+    static func heatShareFileName(stamp: String, page: Int, pages: Int) -> String {
+        "課的總覽_" + stamp + (pages > 1 ? "_\(page + 1)" : "") + ".jpg"
+    }
+}

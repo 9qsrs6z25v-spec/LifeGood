@@ -454,5 +454,58 @@
     { id: id(), title: '富邦意外險', date: ymd(2022, 3, 1), category: '成就', note: '保額 500 萬', financeSubCategory: '保險', insuranceCompany: '富邦人壽', insuranceType: '意外', policyNumber: 'FB-2022-0301', premiumAmount: 6200, beneficiary: '陳怡君' },
   );
 
-  window.LIFEGOOD_DEMO = { subs, depts, orgPeople, grades, equipment, milestones, cards, personalEvents, expenses, incomes, currencyRates, insurances, stocks, vehicles, realEstates, profile, familyMembers, pets, familyTasks, relationships, ballots, health };
+  // ---- 職能雷達（網頁版 v1.16；App 寫進 iCloud 的 life_competency_setup_v1／life_competency_ratings_v1 長相）----
+  // 設備課四位：王小明（E5）、陳怡君（E3）、林志豪（E2）、張家瑋（E2，不用學 Gas、Chemical，還沒評）。
+  // 熱力表數字＝App 職能雷達 v2 的例子（10/30 那一次；王小明另外 4/30 一次）。只有分數：不寫每一格的評語、不寫總評。
+  const G_E2 = id();
+  grades.push({ id: G_E2, grade: 'E2', title: '助理工程師', performanceWeight: 1 });
+  const K = mkSub('陳怡君', '工程師', D_EQ, G1, { joinDate: ymd(2022, 8, 1) });
+  const L = mkSub('林志豪', '助理工程師', D_EQ, G_E2, { joinDate: ymd(2024, 3, 4) });
+  const M = mkSub('張家瑋', '助理工程師', D_EQ, G_E2, { joinDate: ymd(2025, 9, 1) });
+  subs.push(K, L, M);
+  for (const x of [K, L, M]) {
+    orgPeople.push({ id: id(), name: x.name, jobTitle: x.jobTitle, departmentId: D_EQ, relationship: '', note: '', children: [], relations: [], dateAdded: x.joinDate, isInactive: false, linkedSubordinateId: x.id, gradeTitleId: x.gradeTitleId, works: [] });
+  }
+  const C_TRAIT = 'C0A1D000-0000-4000-8000-000000000001'; // App 的人格特質組固定代號
+  const C_GAS = id(), C_SLU = id(), C_CHE = id();
+  const C_T1 = id(), C_T2 = id(), C_T3 = id(), C_PID = id(), C_EMG = id(), C_DUT = id();
+  const cSet = ymd(2026, 10, 1, 12), cTgt = ymd(2026, 10, 2, 12);
+  const compSetup = {
+    formatVersion: 1,
+    scales: [{ id: 'trait', low: 1, high: 5, updatedAt: cSet }, { id: 'skill', low: 1, high: 5, updatedAt: cSet }],
+    groups: [
+      { id: C_TRAIT, kind: 'trait', name: '人格特質', order: 0, createdAt: cSet },
+      { id: C_GAS, kind: 'system', name: 'Gas System', shortName: 'Gas', order: 1, createdAt: cSet },
+      { id: C_SLU, kind: 'system', name: 'Slurry System', shortName: 'Slurry', order: 2, createdAt: cSet },
+      { id: C_CHE, kind: 'system', name: 'Chemical System', shortName: 'Chemical', order: 3, createdAt: cSet },
+    ],
+    items: [
+      { id: C_T1, groupId: C_TRAIT, name: '團隊合作', order: 0 }, { id: C_T2, groupId: C_TRAIT, name: '領導力', order: 1 },
+      { id: C_T3, groupId: C_TRAIT, name: '學習能力', order: 2 },
+      // 共用項目（每個系統都有）：沒有 groupId
+      { id: C_PID, name: 'P&ID', order: 0 }, { id: C_EMG, name: '緊急應變', shortName: '緊急', order: 1 }, { id: C_DUT, name: '值班技能', shortName: '值班', order: 2 },
+    ],
+    targets: [[G_E2, 3], [G1, 4], [G2, 4]].flatMap(([gid, level]) => ['trait', 'skill'].map((scope) => (
+      { id: id(), gradeTitleId: gid, scope, level, low: 1, high: 5, updatedAt: cTgt }))),
+    assignments: [{ id: M.id, skippedGroupIds: [C_GAS, C_CHE], updatedAt: cTgt }],
+  };
+  const C_SYS = [C_PID, C_EMG, C_DUT], C_TR = [C_T1, C_T2, C_T3];
+  const cSession = (pid, dayKey, at, rows) => ({
+    id: id(), subordinateId: pid, dayKey, traitLow: 1, traitHigh: 5, skillLow: 1, skillHigh: 5, createdAt: at, updatedAt: at,
+    scores: rows.flatMap(([gid, items, vals]) => items.map((iid, i) => ({ groupId: gid, itemId: iid, value: vals[i], updatedAt: at }))),
+  });
+  const c1030 = ymd(2026, 10, 30, 12), c0430 = ymd(2026, 4, 30, 12);
+  const cHeat = (pid, tr, gas, slu, che) => cSession(pid, '2026-10-30', c1030, [[C_TRAIT, C_TR, tr], [C_GAS, C_SYS, gas], [C_SLU, C_SYS, slu], [C_CHE, C_SYS, che]]);
+  const compRatings = {
+    formatVersion: 1,
+    sessions: [
+      cHeat(A.id, [4, 3, 4], [4, 4, 4], [4, 3, 3], [3, 2, 2]),
+      cHeat(K.id, [5, 4, 4], [4, 5, 5], [4, 4, 5], [5, 4, 4]),
+      cHeat(L.id, [3, 3, 4], [4, 4, 3], [3, 4, 4], [3, 2, 3]),
+      // 王小明 4/30 那一次（網頁版不疊上一次，只是讓「最新的那一次」有得比）
+      cSession(A.id, '2026-04-30', c0430, [[C_TRAIT, C_TR, [3, 3, 3]], [C_GAS, C_SYS, [2, 3, 3]], [C_SLU, C_SYS, [3, 3, 2]], [C_CHE, C_SYS, [2, 1, 1]]]),
+    ],
+  };
+
+  window.LIFEGOOD_DEMO = { subs, depts, orgPeople, grades, equipment, milestones, cards, personalEvents, expenses, incomes, currencyRates, insurances, stocks, vehicles, realEstates, profile, familyMembers, pets, familyTasks, relationships, ballots, health, compSetup, compRatings };
 })();

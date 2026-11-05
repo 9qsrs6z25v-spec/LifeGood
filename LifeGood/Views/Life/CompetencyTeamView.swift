@@ -8,6 +8,9 @@ import SwiftUI
 //   private struct（CompTeam… 前綴），不在 body 裡寫長運算式。
 // • 看不擋訂閱；〔一次評全課〕（CompetencyTeamBatchButton，G4）擋訂閱。這個檔不寫任何 store。
 // • 名字、分數只在 App 裡：通知、小工具、手錶、鎖定畫面、靈動島一個字都不加；這一版不做分享匯出（v4）。
+//   [v25.605 v4b] 熱力表右上〔分享…〕（先選〔圖片｜文字〕→ 提醒「圖上有 N 位同仁的名字和職能分數…」→ 分享面板）：使用者自己按的分享，
+//   看不擋訂閱；照畫面上那一份 model（列照 m.rows，不照排序）；部門字讀人才矩陣的 talentMatrixDeptFilter（只讀、不寫）。
+//   規則在 CompetencyMath.heatShare…，提醒／面板在 CompetencyTeamTools（CompetencyHeatShareFlow），圖在 CompetencyTeamShareImage。
 // • 字不用「他／她」：用名字或「這位同仁」。
 // • 熱力表不用 Grid／Table／LazyHGrid：固定的名字欄 VStack＋ScrollView(.horizontal) 裡「一組一個 VStack（組名＋一欄一個 VStack）」，
 //   一欄一個 VStack 紅框橘框才能整欄框住；名字欄與格子用同一組 @ScaledMetric 常數（CompTeamMetrics）才對得齊。
@@ -33,6 +36,10 @@ struct CompetencyTeamView: View {
     /// 〔看某某〕按下去時先記在這裡，風險 sheet 真的關好（onDismiss）才開那位的〔職能〕
     /// （G1 審查修：原本 asyncAfter(0.35) 固定等，關的動畫還沒跑完就開下一張會被 SwiftUI 丟掉；照 OrganizationView openPendingOrgMove 的做法）
     @State private var pendingPerson: CompTeamPersonRequest?
+    /// [v25.605 職能雷達 v4b] 課的總覽分享：按〔分享…〕那一刻抓的一份（提醒和內容同一份）
+    @State private var heatShare: CompetencyHeatShareRequest?
+    /// [v25.605 v4b] 人才矩陣記住的部門篩選（同一個鍵；這裡只讀，標題的部門字用）
+    @AppStorage("talentMatrixDeptFilter") private var deptFilterRaw: String = ""
 
     private var model: CompetencyTeamModel {
         lifeStore.competencyTeamModel(members: members, area: area)
@@ -55,6 +62,7 @@ struct CompetencyTeamView: View {
         .modifier(CompTeamSheets(riskRequest: $riskRequest, personRequest: $personRequest,
                                  historyRequest: $historyRequest, onOpenPerson: openPerson,
                                  onRiskDismissed: riskDismissed))
+        .modifier(CompetencyHeatShareFlow(request: $heatShare))
     }
 
     private var areaPicker: some View {
@@ -70,6 +78,11 @@ struct CompetencyTeamView: View {
     @ViewBuilder
     private func content(_ m: CompetencyTeamModel) -> some View {
         CompTeamCardsGrid(cards: m.cards, onTap: { card in openRisk(card, model: m) })
+        // [v25.605 v4b] 熱力表右上〔分享…〕（只在有欄時：emptyText 那一支沒有）
+        HStack {
+            Spacer(minLength: 0)
+            CompetencyHeatShareMenu(onPick: { image in startHeatShare(m, image: image) })
+        }
         CompTeamTable(model: m, rows: sortedRows(m), sortColumnId: activeSortId(m), descending: descending,
                       onTapHeader: tapHeader, onTapCell: tapCell)
         Text(m.legend)
@@ -104,6 +117,25 @@ struct CompetencyTeamView: View {
             sortColumnId = columnId
             descending = true
         }
+    }
+
+    // MARK: [v25.605 v4b] 課的總覽分享（使用者自己按的分享，不擋訂閱；不寫 store）
+
+    /// 按下去那一刻抓一份（部門字照人才矩陣的篩選，只讀）。分享的是 m.rows 原本的順序（排序只是看）
+    private func startHeatShare(_ m: CompetencyTeamModel, image: Bool) {
+        let today: String = CompetencyMath.dayKey(Date())
+        var names: [UUID: String] = [:]
+        for d in lifeStore.departments {
+            names[d.id] = CompetencyMath.heatShareDeptName(name: d.name, code: d.code)
+        }
+        let selected: Set<UUID> = CompetencyMath.heatShareSelectedIds(deptFilterRaw)
+        let scope: String = CompetencyMath.heatShareScope(selectedIds: selected, names: names)
+        let title: String = CompetencyMath.heatShareTitle(m, scope: scope, today: today, withRange: false)
+        let text: String = CompetencyMath.heatShareText(m, scope: scope, today: today)
+        let pages: [CompetencyHeatSharePage] = CompetencyMath.heatSharePages(m, title: title)
+        let w = CompetencyMath.heatShareWarning(m, image: image)
+        heatShare = CompetencyHeatShareRequest(image: image, model: m, text: text, pages: pages,
+                                               title: w.title, message: w.message)
     }
 
     // MARK: 點格子、卡片、〔看某某〕（只是看，不擋訂閱）

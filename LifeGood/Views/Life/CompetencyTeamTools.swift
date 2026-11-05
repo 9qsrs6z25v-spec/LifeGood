@@ -825,3 +825,139 @@ struct CompetencySelfMoveHint: View {
         }
     }
 }
+
+// MARK: - [v25.605 職能雷達 v4b] 課的總覽分享（radar/judge_v4b.md §C3；radar/build/v4b/brief.md §4 G2；只加不刪）
+//
+// • 熱力表右上〔分享…〕＝先選〔圖片｜文字〕（CompetencyHeatShareMenu）→ 按下去那一刻 CompetencyTeamView 抓一份 CompetencyHeatShareRequest
+//  （提醒和內容同一份）→ CompetencyHeatShareFlow：提醒〔取消〕〔分享〕→ 下一拍出圖／組字 → 分享面板（sheet(item:)＋.appStores()）。
+// • 看不擋訂閱（使用者自己按的分享）；這一段不寫 store、不寫人才矩陣的部門篩選。四張卡、單點風險、找人、課平均雷達、兩人疊圖不進分享。
+// • 字不用「他／她」。要退回這一件：刪這一段，CompetencyTeamView 拿掉〔分享…〕那幾行。
+
+/// 按〔分享…〕那一刻抓好的一份（提醒和內容同一份）
+struct CompetencyHeatShareRequest: Identifiable {
+    let id = UUID()
+    /// true＝圖片、false＝文字
+    let image: Bool
+    let model: CompetencyTeamModel
+    let text: String
+    let pages: [CompetencyHeatSharePage]
+    /// 提醒的標題、內文（CompetencyMath.heatShareWarning）
+    let title: String
+    let message: String
+}
+
+/// 熱力表右上〔分享…〕＝先選〔圖片｜文字〕
+struct CompetencyHeatShareMenu: View {
+    /// true＝圖片
+    let onPick: (Bool) -> Void
+
+    var body: some View {
+        Menu {
+            Button { onPick(true) } label: { Label("圖片", systemImage: "photo") }
+            Button { onPick(false) } label: { Label("文字", systemImage: "doc.plaintext") }
+        } label: {
+            Label("分享…", systemImage: "square.and.arrow.up")
+                .font(.subheadline.weight(.semibold))
+                .frame(minHeight: 44)
+                .contentShape(Rectangle())
+        }
+        .accessibilityLabel("分享課的總覽")
+    }
+}
+
+/// 出圖失敗、有幾張出不來的那一句
+private struct CompTeamShareNotice: Identifiable {
+    let id = UUID()
+    let title: String
+    let message: String
+}
+
+/// 提醒〔取消〕〔分享〕→ 下一拍出圖／組字 → 分享面板；出圖中蓋一層「正在產生圖片…」。不寫 store
+struct CompetencyHeatShareFlow: ViewModifier {
+    @Binding var request: CompetencyHeatShareRequest?
+
+    @State private var busy = false
+    @State private var payload: SubExportSharePayload?
+    @State private var notice: CompTeamShareNotice?
+    /// 有幾張出不來：分享面板關掉之後才說（照部屬匯出）
+    @State private var laterNotice: CompTeamShareNotice?
+
+    private var askShown: Binding<Bool> {
+        Binding(get: { request != nil }, set: { if !$0 { request = nil } })
+    }
+
+    private var noticeShown: Binding<Bool> {
+        Binding(get: { notice != nil }, set: { if !$0 { notice = nil } })
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .overlay { busyLayer }
+            .alert(request?.title ?? "", isPresented: askShown, presenting: request) { r in
+                Button("取消", role: .cancel) { }
+                Button("分享") { DispatchQueue.main.async { run(r) } }
+            } message: { r in
+                Text(r.message)
+            }
+            .sheet(item: $payload, onDismiss: { payloadDismissed() }) { p in
+                ShareSheet(items: p.items).appStores()
+            }
+            .alert(notice?.title ?? "", isPresented: noticeShown, presenting: notice) { _ in
+                Button("好", role: .cancel) { }
+            } message: { n in
+                Text(n.message)
+            }
+    }
+
+    @ViewBuilder
+    private var busyLayer: some View {
+        if busy {
+            ZStack {
+                RoundedRectangle(cornerRadius: 16)
+                    .fill(Color.black.opacity(0.12))
+                ProgressView("正在產生圖片…")
+                    .padding(20)
+                    .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
+            }
+            .accessibilityElement(children: .combine)
+        }
+    }
+
+    /// 文字：直接開面板；圖片：先蓋「正在產生圖片…」、讓那一層畫出來再一張一張畫
+    private func run(_ r: CompetencyHeatShareRequest) {
+        // 上一次面板沒開成時留下的「有 N 張出不來」不要跑到這一次（審查補）
+        laterNotice = nil
+        guard r.image else {
+            payload = SubExportSharePayload(items: [r.text])
+            return
+        }
+        guard !busy else { return }
+        Task { @MainActor in
+            busy = true
+            await Task.yield()
+            try? await Task.sleep(nanoseconds: 50_000_000)
+            let res: SubExportRenderResult = CompetencyHeatShareImage.render(r.model, pages: r.pages, now: Date())
+            busy = false
+            finish(res)
+        }
+    }
+
+    private func finish(_ res: SubExportRenderResult) {
+        if res.urls.isEmpty {
+            notice = CompTeamShareNotice(title: "出圖失敗", message: "出圖失敗，請再試一次。")
+            return
+        }
+        if res.urls.count < res.expected {
+            let miss: Int = res.expected - res.urls.count
+            laterNotice = CompTeamShareNotice(title: "有 \(miss) 張出不來", message: "有 \(miss) 張出不來，已略過；可以再分享一次試試。")
+        }
+        payload = SubExportSharePayload(items: res.urls.map { $0 as Any })
+    }
+
+    /// 分享面板關好了：有幾張出不來才說（下一個 runloop）
+    private func payloadDismissed() {
+        guard let n = laterNotice else { return }
+        laterNotice = nil
+        DispatchQueue.main.async { notice = n }
+    }
+}

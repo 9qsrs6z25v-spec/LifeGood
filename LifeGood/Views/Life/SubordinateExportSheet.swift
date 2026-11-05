@@ -26,6 +26,26 @@ import Combine
 // 圖片分頁卡（每頁幾項、全部一張）、「還沒做完的不管期間都列」開關、部屬總覽的任務種類／會議種類／完成項目三種／報告卡。
 // 每頁幾項照 @AppStorage("export_items_per_page") 自動分頁（這頁不能改）。規格 radar/build/v4a/brief.md §3。
 
+// MARK: - [v25.605 職能雷達 v4b] 帶一包勾法進來（〔職能〕分頁「…」〔分享職能雷達…〕；radar/judge_v4b.md §C2）
+
+/// 從別的地方打開部屬匯出頁時預先勾好的樣子。這次照它勾、**不寫進記住上次**（sub_export_options_v1 不動）；
+/// 選項頁上照樣可以再改（改了也不寫）。要退回這一件：刪這個型別與 SubordinateExportSheet 的 preset 那幾行
+struct SubExportPreset: Equatable {
+    let id: String
+
+    /// 只勾「職能雷達」（上方看板也不勾）、期間＝全部（職能雷達取今天的分數）
+    static let competencyOnly = SubExportPreset(id: "competencyOnly")
+
+    /// 照這包勾：先全不選、再勾要的；期間照這包。記住的細項原值照 base 留著（forExport 匯出時一樣接固定值）
+    func applied(to base: SubExportOptions) -> SubExportOptions {
+        var o: SubExportOptions = base
+        o.pickNone()
+        o.setPicked(.competency, true)
+        o.period = .all
+        return o
+    }
+}
+
 // MARK: - 部屬卡片的選項頁
 
 /// 部屬卡片的選項頁。SubordinateDetailView：
@@ -40,6 +60,9 @@ struct SubordinateExportSheet: View {
     let initialFormat: SubExportFormat
     /// 卡片算好的被標註清單（很貴，不在這裡重掃）
     let mentioned: [SubordinateItemRef]
+    /// [v25.605 職能雷達 v4b] 從〔職能〕分頁〔分享職能雷達…〕進來：這次照這包勾、**不寫進記住上次**（nil＝跟 v25.604 一模一樣）。
+    /// 要退回這一件：刪這一行、init 的 preset 參數、saveOptions 的 guard、firstLoad 的 preset 那一行
+    let preset: SubExportPreset?
 
     @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.dismiss) private var dismiss
@@ -79,10 +102,13 @@ struct SubordinateExportSheet: View {
     }
 
     /// 明確寫出 init：G1 會加 private @State，合成的 memberwise init 會跟著變 private，卡片就叫不到
-    init(subordinateId: UUID, initialFormat: SubExportFormat, mentioned: [SubordinateItemRef]) {
+    /// [v25.605 v4b] 多一個有預設值的 preset（既有的 SubordinateExportSheet(subordinateId:initialFormat:mentioned:) 照樣編得過）
+    init(subordinateId: UUID, initialFormat: SubExportFormat, mentioned: [SubordinateItemRef],
+         preset: SubExportPreset? = nil) {
         self.subordinateId = subordinateId
         self.initialFormat = initialFormat
         self.mentioned = mentioned
+        self.preset = preset
         _format = State(initialValue: initialFormat)
     }
 
@@ -117,7 +143,7 @@ struct SubordinateExportSheet: View {
             .interactiveDismissDisabled(busy != nil)
             .onAppear { firstLoad() }
             .onDisappear { debouncer.cancel() }
-            .onChange(of: options) { _, new in optionsJSON = new.json() }
+            .onChange(of: options) { _, new in saveOptions(new) }
             .onReceive(lifeStore.objectWillChange) { _ in scheduleRefresh() }
     }
 
@@ -273,8 +299,15 @@ struct SubordinateExportSheet: View {
     private func firstLoad() {
         guard !loaded else { return }
         loaded = true
-        options = SubExportOptions.load(optionsJSON)
+        let saved: SubExportOptions = SubExportOptions.load(optionsJSON)
+        options = preset?.applied(to: saved) ?? saved   // [v25.605 v4b] 帶勾法進來：照它勾（記住的那包不動）
         refresh()
+    }
+
+    /// 記住上次（這台的 JSON）。[v25.605 v4b] 帶勾法進來的（preset 不是 nil）這次怎麼勾都不寫
+    private func saveOptions(_ o: SubExportOptions) {
+        guard preset == nil else { return }
+        optionsJSON = o.json()
     }
 
     /// 抽一次快照（主執行緒）。回傳這一次的快照，按〔匯出…〕時直接用這一份（不等 @State 下一拍）。
