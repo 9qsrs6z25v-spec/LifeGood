@@ -13,6 +13,9 @@ struct ChangelogEntry: Identifiable {
 /// 慣例：**每次改版在最上面新增一筆**（新到舊）。
 enum Changelog {
     static let entries: [ChangelogEntry] = [
+        ChangelogEntry(version: "25.610", build: 1363, date: "2026/11/08", notes: [
+            "【修正】「Apple Pay 自動記帳」設定頁的第 5 步照實際捷徑畫面改字（你問「這樣設定對嗎」「交易只有這幾個變數」）：加入「記一筆支出」後三個欄位都會先帶整筆〔交易〕，要各點一下改成裡面的那一項——「記一筆支出」後面的〔交易〕選「數量」（就是金額）、「商家」選「商家」、「卡片」選「卡片或票卡」。功能沒變。",
+        ]),
         ChangelogEntry(version: "25.609", build: 1362, date: "2026/11/07", notes: [
             "【修正】25.608 上傳時被 App Store Connect 退件（ITMS-90626：捷徑動作的說明文字不能有「Apple」這個字）。「記一筆支出」的說明改成「感應付款時，把金額、商家、卡片記成 LifeGood 的一筆變動支出（在背景記，不打開 App）」，功能一樣、設定步驟一樣。25.608 的內容全部在這一版。",
         ]),
