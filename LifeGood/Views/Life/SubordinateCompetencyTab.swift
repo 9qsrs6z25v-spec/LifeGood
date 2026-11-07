@@ -31,6 +31,15 @@ import SwiftUI
 //   打開 CompetencyShowView）與〔分享職能雷達…〕（既有的部屬匯出頁 SubordinateExportSheet，preset: .competencyOnly、
 //   mentioned: []；這次的勾法不寫進記住上次），分隔線後才是既有兩項。
 // • 兩個都只是看／使用者自己按的分享：不擋訂閱；這裡不寫 store；§13 評語照舊不顯示。
+//
+// [v25.606 職能雷達 v5a] 這一版加的（radar/build/v5a/brief.md §3 G1；要退回這一件：照 8ee35e6 的這個檔）：
+// • 摘要卡「…」分隔線後多〔帶訓者〕（打開 CompetencyMentorView）〔記帶訓者的評分…〕（有帶訓者才有；一位一列的子選單；
+//   既有的評分畫面、request.rater 帶著），兩個都擋訂閱；已轉出、唯讀不出現。
+// • 每張雷達卡標題下一行「帶訓者：陳怡君」＋膠囊〔帶訓者（陳怡君 11/2）〕：只是看、不擋訂閱、不記住（@State）。
+// • 摘要卡多一行「跟帶訓者差 2 級以上：Gas 值班技能（你 4、陳怡君 2）」（有才寫）。
+// • 評分紀錄多帶訓者記的那幾列（「・陳怡君（帶訓者）」）；點進去帶 raterKey 開那一張的明細。
+// • 目前分數、上一次、達標、熱力表、匯出不碰帶訓者評：tabModel 照舊只傳 competencySessions(of:)；帶訓者那一份另外算
+//  （CompetencyMath.tabMentorModel）。§13 評語照舊不顯示。
 
 struct SubordinateCompetencyTab: View {
     let subordinateId: UUID
@@ -58,6 +67,9 @@ struct SubordinateCompetencyTab: View {
     // [v25.605 職能雷達 v4b] 〔給對方看〕（fullScreenCover(item:)）、〔分享職能雷達…〕（sheet(item:)）。要退回這一件：刪這兩行
     @State private var showRequest: CompetencyShowRequest?
     @State private var shareRequest: CompTabShareRequest?
+    // [v25.606 職能雷達 v5a]〔帶訓者〕（sheet(item:)）；疊帶訓者開著的組（只是看，不記住）。要退回這一件：刪這兩行
+    @State private var mentorRequest: CompetencyMentorRequest?
+    @State private var mentorOverlayOn: Set<UUID> = []
 
     private var isArchived: Bool { OrgMoveIndex.isArchived(subordinateId) }
 
@@ -111,6 +123,8 @@ struct SubordinateCompetencyTab: View {
         .modifier(CompTabGradeSheet(request: $gradeEdit))
         // [v25.605 職能雷達 v4b] 〔給對方看〕〔分享職能雷達…〕兩個 sheet 包在一個 modifier 裡。要退回這一件：刪這一行
         .modifier(CompTabShowShareSheets(showRequest: $showRequest, shareRequest: $shareRequest))
+        // [v25.606 職能雷達 v5a]〔帶訓者〕頁（帶訓者評的評分畫面用上面既有的 ratingRequest）。要退回這一件：刪這一行
+        .modifier(CompTabMentorSheets(request: $mentorRequest))
         .premiumLockAlert(isPresented: $showPremiumAlert)
         .onDisappear { toastTask?.cancel() }
     }
@@ -119,6 +133,8 @@ struct SubordinateCompetencyTab: View {
 
     @ViewBuilder
     private func configuredContent(_ m: CompetencyTabModel, canRate: Bool) -> some View {
+        // [v25.606 職能雷達 v5a] 帶訓者那一份（tabModel 的數字一個都不動）
+        let mm: CompetencyTabMentorModel = mentorModel(m)
         let hasSystems = !lifeStore.competencySetup.activeSystems.isEmpty
         CompTabSummaryCard(summary: m.summary,
                            neverRated: m.neverRated,
@@ -137,21 +153,36 @@ struct SubordinateCompetencyTab: View {
                            canSetGrade: canRate,
                            canShowToPerson: CompetencyMath.canShow(m),
                            onShow: openShow,
-                           onShare: openShare)
+                           onShare: openShare,
+                           mentorDiffLine: mm.diffLine,
+                           showsMentorItem: canRate,
+                           mentorChoices: canRate ? mm.choices : [],
+                           onMentors: openMentors,
+                           onRateMentor: rateMentor)
         // [v25.601 職能雷達 v1b] 離目標的差距（由大到小；沒評的不列）。要退回這一件：刪這個 if
         if let t = m.targets, !t.gapRows.isEmpty {
             CompTabGapCard(title: CompTabGapCard.headerTitle(for: t), rows: t.gapRows, onOpen: openHistory)
         }
-        cardsBlock(m)
+        cardsBlock(m, mm)
         if hasSystems {
             CompTabSkippedLine(text: m.skippedLineText,
                                canEdit: canRate,
                                onEdit: openSkipSheet)
         }
         // [v25.600 職能雷達 v1a-2] 評分紀錄（judge §4.3④；§13 不顯示評語）。要退回這一件：刪這個 if
-        if !m.records.isEmpty {
-            CompTabRecordsCard(records: m.records, onOpen: openRecord)
+        if !mm.records.isEmpty {
+            CompTabRecordsCard(records: mm.records, onOpen: openRecord)
         }
+    }
+
+    /// [v25.606 職能雷達 v5a] 〔職能〕分頁帶訓者那一份：卡片標題下一行、疊帶訓者、看法不一樣、評分紀錄合併。
+    /// tabModel 照舊只看我評的（sessions 不換）；帶訓者評只從 competencyMentorSessions(of:) 進來
+    private func mentorModel(_ m: CompetencyTabModel) -> CompetencyTabMentorModel {
+        CompetencyMath.tabMentorModel(tab: m,
+                                      setup: lifeStore.competencySetup,
+                                      subordinateId: subordinateId,
+                                      mentorSessions: lifeStore.competencyMentorSessions(of: subordinateId),
+                                      roster: lifeStore.competencyMentorRoster)
     }
 
     // MARK: [v25.600 職能雷達 v1a-2] 雷達卡：iPad 兩欄、iPhone 一欄（judge §4.10）。要退回這一件：換回 ForEach＋padding
@@ -159,29 +190,37 @@ struct SubordinateCompetencyTab: View {
     private var isRegularWidth: Bool { horizontalSizeClass == .regular }
 
     @ViewBuilder
-    private func cardsBlock(_ m: CompetencyTabModel) -> some View {
+    private func cardsBlock(_ m: CompetencyTabModel, _ mm: CompetencyTabMentorModel) -> some View {
         if isRegularWidth {
             LazyVGrid(columns: CompTabGrid.columns, alignment: .center, spacing: 16) {
                 ForEach(m.cards) { card in
-                    chartCard(card)
+                    chartCard(card, mm)
                         .frame(maxWidth: 360)
                 }
             }
             .padding(.horizontal)
         } else {
             ForEach(m.cards) { card in
-                chartCard(card)
+                chartCard(card, mm)
                     .padding(.horizontal)
             }
         }
     }
 
     /// 一張雷達卡；點下面橫條那一列 → 那一格的歷史（看不擋）
-    private func chartCard(_ card: CompetencyChartModel) -> CompetencyChartCard {
+    /// [v25.606 v5a] 標題下「帶訓者：陳怡君」＋膠囊；膠囊開著＝灰色虛線換成帶訓者的（整頁〔上一次〕關著也照畫）
+    private func chartCard(_ card: CompetencyChartModel, _ mm: CompetencyTabMentorModel) -> CompetencyChartCard {
         let groupId: UUID = card.id
-        return CompetencyChartCard(model: card, showPrevious: showPrevious, onTapAxis: { itemId in
+        let on: Set<UUID> = mentorOverlayOn
+        let overlaid: Bool = on.contains(groupId) && mm.overlays[groupId] != nil
+        let tap: (UUID) -> Void = { itemId in
             openHistory(groupId: groupId, itemId: itemId)
-        })
+        }
+        return CompetencyChartCard(model: CompetencyMath.displayCard(card, model: mm, overlayOn: on),
+                                   showPrevious: showPrevious || overlaid,
+                                   onTapAxis: tap,
+                                   mentorBar: CompetencyMath.mentorBar(for: card, model: mm, overlayOn: on),
+                                   onToggleMentor: { toggleMentorOverlay(groupId) })
     }
 
     // MARK: 動作（看不擋、動手才擋）
@@ -219,14 +258,36 @@ struct SubordinateCompetencyTab: View {
     /// [v25.605 v4b]〔分享職能雷達…〕打開既有的部屬匯出頁、只勾職能雷達（不寫記住上次）；不擋訂閱
     private func openShare() { shareRequest = CompTabShareRequest(subordinateId: subordinateId) }
 
+    /// [v25.606 v5a]〔帶訓者〕（擋訂閱；已轉出、唯讀不出現）
+    private func openMentors() {
+        guard subscription.isPremium else { showPremiumAlert = true; return }
+        mentorRequest = CompetencyMentorRequest(subordinateId: subordinateId)
+    }
+
+    /// [v25.606 v5a]〔記帶訓者的評分…〕（擋訂閱）：既有的評分畫面、帶訓者模式
+    private func rateMentor(_ c: CompetencyRaterChoice) {
+        guard subscription.isPremium else { showPremiumAlert = true; return }
+        ratingRequest = CompetencyRatingRequest(subordinateId: subordinateId, rater: c)
+    }
+
+    /// [v25.606 v5a] 卡片膠囊〔帶訓者（陳怡君 11/2）〕：只是看，不擋訂閱、不記住
+    private func toggleMentorOverlay(_ groupId: UUID) {
+        if mentorOverlayOn.contains(groupId) {
+            mentorOverlayOn.remove(groupId)
+        } else {
+            mentorOverlayOn.insert(groupId)
+        }
+    }
+
     /// [v25.600 職能雷達 v1a-2] 點一格的歷史（看不擋；唯讀、已轉出也能看）
     private func openHistory(groupId: UUID, itemId: UUID) {
         historyRequest = CompetencyCellHistoryRequest(subordinateId: subordinateId, groupId: groupId, itemId: itemId)
     }
 
     /// [v25.600 職能雷達 v1a-2] 評分紀錄一列 → 那一天的明細（看不擋；〔改分數〕〔改日期〕〔刪除〕在明細頁擋）
-    private func openRecord(_ dayKey: String) {
-        recordRequest = CompetencyRecordRequest(subordinateId: subordinateId, dayKey: dayKey)
+    /// [v25.606 v5a] 帶訓者記的那一列帶 raterKey（我評的 nil＝跟 v25.605 一模一樣）
+    private func openRecord(_ row: CompetencyRecordRow) {
+        recordRequest = CompetencyRecordRequest(subordinateId: subordinateId, dayKey: row.dayKey, raterKey: row.raterKey)
     }
 
     /// [v25.601 v1b] 〔目標 E2 ▾〕選單（只是看，不擋訂閱）
@@ -476,6 +537,12 @@ private struct CompTabSummaryCard: View {
     let canShowToPerson: Bool
     let onShow: () -> Void
     let onShare: () -> Void
+    // [v25.606 職能雷達 v5a]「跟帶訓者差 2 級以上：…」一行；「…」〔帶訓者〕〔記帶訓者的評分…〕。要退回這一件：刪這五行與 mentorDiffView、menu 裡那兩段
+    let mentorDiffLine: String?
+    let showsMentorItem: Bool
+    let mentorChoices: [CompetencyRaterChoice]
+    let onMentors: () -> Void
+    let onRateMentor: (CompetencyRaterChoice) -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -487,6 +554,7 @@ private struct CompTabSummaryCard: View {
                 .foregroundStyle(summary.stale ? Color.orange : Color.secondary)
             tiles
             targetLines
+            mentorDiffView
             bottomRow
             previousDayLine
         }
@@ -507,6 +575,21 @@ private struct CompTabSummaryCard: View {
                 Label("分享職能雷達…", systemImage: "square.and.arrow.up")
             }
             Divider()
+            // [v25.606 v5a]〔帶訓者〕〔記帶訓者的評分…〕（都擋訂閱；已轉出、唯讀不出現）
+            if showsMentorItem {
+                Button(action: onMentors) {
+                    Label("帶訓者", systemImage: "person.2")
+                }
+            }
+            if !mentorChoices.isEmpty {
+                Menu {
+                    ForEach(mentorChoices) { c in
+                        Button(Self.choiceTitle(c)) { onRateMentor(c) }
+                    }
+                } label: {
+                    Label("記帶訓者的評分…", systemImage: "square.and.pencil")
+                }
+            }
             if showsSkipItem {
                 Button(action: onSkip) {
                     Label("不用學的系統", systemImage: "minus.circle")
@@ -555,6 +638,28 @@ private struct CompTabSummaryCard: View {
     private var targetLines: some View {
         if let t = targets {
             CompTabTargetLines(targets: t, canSetGrade: canSetGrade, onSetGrade: onSetGrade)
+        }
+    }
+
+    /// [v25.606 v5a]〔記帶訓者的評分…〕子選單一列：「陳怡君」；已不在名冊「陳怡君（已不在名冊）」
+    private static func choiceTitle(_ c: CompetencyRaterChoice) -> String {
+        c.missing ? c.name + CompetencyMath.mentorMissingNote : c.name
+    }
+
+    /// [v25.606 v5a]「跟帶訓者差 2 級以上：Gas 值班技能（你 4、陳怡君 2）」（沒有不畫）
+    @ViewBuilder
+    private var mentorDiffView: some View {
+        if let d = mentorDiffLine {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Image(systemName: "person.2")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .accessibilityHidden(true)
+                Text(d)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
         }
     }
 
@@ -755,7 +860,7 @@ private struct CompTabHistorySheets: ViewModifier {
     func body(content: Content) -> some View {
         content
             .sheet(item: $recordRequest) { r in
-                CompetencyRecordDetailView(subordinateId: r.subordinateId, dayKey: r.dayKey)
+                CompetencyRecordDetailView(subordinateId: r.subordinateId, dayKey: r.dayKey, raterKey: r.raterKey)
                     .appStores()
             }
             .sheet(item: $historyRequest) { r in
@@ -790,10 +895,24 @@ private struct CompTabShowShareSheets: ViewModifier {
     }
 }
 
+/// [v25.606 職能雷達 v5a]〔帶訓者〕頁（sheet(item:)＋.appStores()）
+private struct CompTabMentorSheets: ViewModifier {
+    @Binding var request: CompetencyMentorRequest?
+
+    func body(content: Content) -> some View {
+        content
+            .sheet(item: $request) { r in
+                CompetencyMentorView(subordinateId: r.subordinateId)
+                    .appStores()
+            }
+    }
+}
+
 /// 最下面「評分紀錄（N）」白卡：每列一天（新的在前），點了開明細。不是 List，所以不做往左滑（刪除在明細頁）。
 private struct CompTabRecordsCard: View {
     let records: [CompetencyRecordRow]
-    let onOpen: (String) -> Void
+    /// [v25.606 v5a] 整列傳出去（帶訓者那幾列要帶 raterKey）
+    let onOpen: (CompetencyRecordRow) -> Void
 
     @State private var showAll = false
 
@@ -816,7 +935,7 @@ private struct CompTabRecordsCard: View {
             }
             .padding(.bottom, 4)
             ForEach(rows) { row in
-                CompTabRecordButton(row: row, onOpen: onOpen)
+                CompTabRecordButton(row: row, onOpen: { _ in onOpen(row) })
                 if row.id != lastId || more {
                     Divider()
                 }
@@ -875,6 +994,12 @@ private struct CompTabRecordTexts: View {
             HStack(spacing: 0) {
                 Text(row.dayText)
                     .font(.subheadline.weight(.semibold))
+                // [v25.606 職能雷達 v5a] 帶訓者記的那一列「・陳怡君（帶訓者）」。要退回這一件：刪這個 if
+                if let w = row.raterText {
+                    Text("・" + w)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                }
                 if let c = row.countText {
                     Text("・" + c)
                         .font(.subheadline)

@@ -961,3 +961,90 @@ struct CompetencyHeatShareFlow: ViewModifier {
         DispatchQueue.main.async { notice = n }
     }
 }
+
+// MARK: - [v25.606 職能雷達 v5a] 課的總覽最下面「帶訓中」（radar/judge_v5a.md §C3；radar/build/v5a/brief.md §5 G3 9；只加不刪）
+//
+// • 一位帶訓者一行：「陳怡君 →」＋每位學的人一顆按鈕「王小明（Gas）」；點學的人＝開那位的〔職能〕（CompetencyTeamView.openLearner，
+//   既有的 CompTeamPersonSheet；只是看、不擋訂閱）。字、順序全部照 CompetencyMath.mentoringLines（學的人只列在職的；
+//   帶訓者有部屬 id 但不在名冊不列，名冊外的人照列）。沒有任何一行時整段不畫。
+// • 熱力表、四張卡、課平均雷達都不加帶訓者評（這一版）。這一段不寫 store。字不用「他／她」。
+
+/// 課的總覽最下面「帶訓中」（lines 空＝什麼都不畫）
+struct CompetencyTeamMentoringSection: View {
+    let lines: [CompetencyMentoringLine]
+    /// 點學的人（id、名字）
+    let onOpen: (UUID, String) -> Void
+
+    var body: some View {
+        if !lines.isEmpty {
+            CompTeamToolCard {
+                VStack(alignment: .leading, spacing: 12) {
+                    CompetencyTeamMentoringTitle()
+                    ForEach(lines) { line in
+                        CompetencyTeamMentoringLineView(line: line, onOpen: onOpen)
+                    }
+                }
+            }
+        }
+    }
+}
+
+/// 「帶訓中」標題（person.2）
+private struct CompetencyTeamMentoringTitle: View {
+    var body: some View {
+        Label("帶訓中", systemImage: "person.2")
+            .font(.headline)
+            .accessibilityAddTraits(.isHeader)
+    }
+}
+
+/// 一位帶訓者：「陳怡君 →」＋每位學的人一顆按鈕
+private struct CompetencyTeamMentoringLineView: View {
+    let line: CompetencyMentoringLine
+    let onOpen: (UUID, String) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(line.mentorName + " →")
+                .font(.footnote.weight(.semibold))
+                .accessibilityHidden(true)
+            ForEach(line.learners) { learner in
+                CompetencyTeamMentoringLearnerButton(mentorName: line.mentorName, learner: learner, onOpen: onOpen)
+            }
+        }
+    }
+}
+
+/// 學的人一顆按鈕「王小明（Gas、Slurry）›」（VoiceOver「陳怡君帶王小明，Gas、Slurry」）
+private struct CompetencyTeamMentoringLearnerButton: View {
+    let mentorName: String
+    let learner: CompetencyMentoringLearner
+    let onOpen: (UUID, String) -> Void
+
+    private var spoken: String {
+        mentorName + "帶" + learner.name + "，" + learner.groupsText
+    }
+
+    var body: some View {
+        Button {
+            onOpen(learner.id, learner.name)
+        } label: {
+            HStack(spacing: 6) {
+                Text(learner.text)
+                    .font(.footnote)
+                    .multilineTextAlignment(.leading)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
+            }
+            .frame(maxWidth: .infinity, minHeight: 44, alignment: .leading)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(spoken)
+        .accessibilityHint("打開這位同仁的職能")
+    }
+}

@@ -113,6 +113,8 @@ struct CompetencyAxisModel: Equatable, Identifiable {
     var targetMet: Bool? = nil
     /// 差幾級（現在範圍；達標 0；沒評、不適用 nil）
     var targetGap: Double? = nil
+    /// [v25.606 職能雷達 v5a] 疊帶訓者時橫條那一列多一行「帶訓者 3」「帶訓者 未評」「帶訓者 不適用」（沒疊 nil；applyingMentorOverlay 才填）
+    var mentorText: String? = nil
 }
 
 /// 格線一圈
@@ -1299,6 +1301,9 @@ struct CompetencyRecordRow: Equatable, Identifiable {
     let accessibilityText: String
     /// [v25.601 v1b] 那一張的職等跟現在不一樣：「那時 E2 工程師」（一樣、沒有 nil）
     var gradeNote: String? = nil
+    /// [v25.606 職能雷達 v5a] 帶訓者記的那一列才有：CompetencyMath.sessionRaterKey（打開明細用）、「陳怡君（帶訓者）」（我評的 nil）
+    var raterKey: String? = nil
+    var raterText: String? = nil
 }
 
 /// 一次評分的明細（唯讀雷達畫當時的樣子）
@@ -1330,6 +1335,8 @@ struct CompetencyHistoryRow: Equatable, Identifiable {
     let valueText: String
     /// 「原 1–5 的 4（當時：能教人）」「能教人」；沒有 nil
     let detailText: String?
+    /// [v25.606 職能雷達 v5a] 帶訓者記的那一次才有「陳怡君」（那一張存的名字；我評的 nil）
+    var raterText: String? = nil
 }
 
 /// 點一格的歷史：每一分的名字那一排（有名字才有）
@@ -4791,5 +4798,749 @@ extension CompetencyMath {
     /// stamp＝SubExportComposer.fileStamp(now, cal: SubExportComposer.gregorian)
     static func heatShareFileName(stamp: String, page: Int, pages: Int) -> String {
         "課的總覽_" + stamp + (pages > 1 ? "_\(page + 1)" : "") + ".jpg"
+    }
+}
+
+// MARK: - [v25.606 職能雷達 v5a] 帶訓者、帶訓者評（純函式；主控寫好，各組只呼叫、不准改）
+//（radar/judge_v5a.md §C；radar/build/v5a/brief.md §2；sim_v5a.py 一個函式一個函式對照，↔ 後面是 sim 的名字）
+// • 帶訓者存在 CompetencyAssignment.mentors（v1a 就宣告了；一位同仁一筆、整筆照 stamp 合併）：一組一位，換人＝蓋掉。
+// • 帶訓者評＝同一包 life_competency_ratings_v1 裡 raterKind "mentor" 的 session（raterId＝帶訓者的部屬 id，名冊外的人 nil；
+//   raterName＝記的時候的名字）。App 只有主管一個人用：帶訓者評＝主管把帶訓者說的分數記下來。
+// • 既有的每一支（latestCells、recordRows、sessionOn、sessionDetails、moveSessionProblem、cellHistory、cellTrend、teamLastDay）
+//   都只看 isByMe，CompetencyIndex 也只收 isByMe：帶訓者評一格都進不去「目前分數」「上一次」「熱力表」「課平均」「人才矩陣縱軸」
+//  「匯出」「給對方看」與網頁版（舊版 App 一樣）。tabModel 的 lastDay 不看 isByMe：呼叫端一定傳 competencySessions(of:)（我評的）。
+// • 要用既有規則算帶訓者那一份時：先 mentorAsMine（只把 raterKind 拿掉的複本）再丟進既有函式。
+//   **mentorAsMine 的結果只准在這一段與評分畫面帶訓者模式裡用：不准存（存檔走 LifeStore.saveCompetencyMentorSession，裡面蓋回
+//   stampingMentor）、不准跟我評的混在一起傳進既有函式。**
+// • §13：不寫評語；帶訓者模式不寫總評。字不用「他／她」：名字、「這位同仁」、「帶訓者」。
+// • 通知、小工具、手錶、鎖定畫面、靈動島一個字都不加。
+
+/// 一位帶訓者（同一位帶好幾組合成一個；〔記帶訓者的評分…〕、評分畫面帶訓者模式用）
+struct CompetencyRaterChoice: Equatable, Hashable, Identifiable {
+    /// ↔ mentor_key：「id:<部屬 id 大寫>」；名冊外的人「name:<名字>」
+    let id: String
+    /// 帶訓者是哪位部屬（名冊外 nil）
+    let mentorId: UUID?
+    /// 顯示的名字（在名冊＝現在的名字；不在＝快照；改舊紀錄＝那一張存的名字）
+    let name: String
+    /// 這位帶的組（照設定順序；評分畫面只列這幾組）
+    let groupIds: [UUID]
+    /// 有 mentorId、但已經不在名冊（離職、轉出、刪除）
+    let missing: Bool
+}
+
+/// 帶訓者頁一列（一組）
+struct CompetencyMentorRow: Equatable, Identifiable {
+    /// 組 id
+    let id: UUID
+    /// 「Gas System」「人格特質」
+    let title: String
+    let isTrait: Bool
+    /// 現在的帶訓者（沒有 nil）
+    let mentor: CompetencyMentor?
+    /// 「陳怡君・從 5/4」「李師傅・從 5/4」「還沒有」
+    let mentorText: String
+    /// 「（已不在名冊）」（灰字；沒有 nil）
+    let missingNote: String?
+    /// 〔記這位帶訓者的評分〕打開評分畫面用（這位帶的每一組；沒有帶訓者 nil）
+    let rater: CompetencyRaterChoice?
+}
+
+/// 雷達卡疊帶訓者：那一組現在的帶訓者每一格最新的分數（latestCells 同一套）
+struct CompetencyMentorOverlay: Equatable, Identifiable {
+    /// 組 id
+    let id: UUID
+    let rater: CompetencyRaterChoice
+    /// 只有這一組、現在的軸
+    let cells: [CompetencyCellKey: CompetencyCellValue]
+    let latestDay: String
+    /// 膠囊「帶訓者（陳怡君 11/2）」
+    let chipTitle: String
+    /// 圖例「陳怡君 11/2」
+    let legend: String
+}
+
+/// 「跟帶訓者差 2 級以上」一格
+struct CompetencyMentorDiff: Equatable, Identifiable {
+    /// 「組|項目」
+    let id: String
+    let groupId: UUID
+    let itemId: UUID
+    /// 「Gas 值班技能」「人格 領導力」
+    let title: String
+    /// 「4」「≈7.8」（現在的範圍）
+    let mineText: String
+    let mentorText: String
+    let mentorName: String
+    /// 比例差 |t 你 − t 帶訓者|
+    let gap: Double
+    /// 那一區超過 11 級
+    let bigRange: Bool
+    /// 「Gas 值班技能（你 4、陳怡君 2）」
+    let text: String
+}
+
+/// 課的總覽「帶訓中」一位學的人
+struct CompetencyMentoringLearner: Equatable, Identifiable {
+    let id: UUID
+    let name: String
+    /// 「Gas、Slurry」
+    let groupsText: String
+    /// 「王小明（Gas、Slurry）」
+    let text: String
+}
+
+/// 課的總覽「帶訓中」一行（一位帶訓者）
+struct CompetencyMentoringLine: Equatable, Identifiable {
+    /// ＝帶訓者的 mentor_key
+    let id: String
+    let mentorName: String
+    let learners: [CompetencyMentoringLearner]
+    /// 「陳怡君 → 王小明（Gas、Slurry）、林志豪（Chemical）」
+    let text: String
+}
+
+/// 系統頁「誰在帶誰」一列（一位學的人）
+struct CompetencySystemMentorRow: Equatable, Identifiable {
+    /// 學的人
+    let id: UUID
+    let learnerName: String
+    /// 「帶訓者：陳怡君・從 5/4」
+    let mentorText: String
+    /// 「（已不在名冊）」（沒有 nil）
+    let missingNote: String?
+}
+
+/// 雷達卡標題下一行＋〔疊帶訓者〕膠囊（CompetencyChartCard(mentorBar:) 照這個畫；〔職能〕分頁才傳）
+struct CompetencyCardMentorBar: Equatable {
+    /// 「帶訓者：陳怡君」「帶訓者：陳怡君（已不在名冊）」
+    let line: String
+    /// 膠囊上的字「帶訓者（陳怡君 11/2）」；這位帶訓者沒評過這一組 nil（沒有膠囊）
+    let chipTitle: String?
+    /// 膠囊開著（灰色虛線＝帶訓者）
+    let isOn: Bool
+}
+
+/// 〔職能〕分頁帶訓者那一份（SubordinateCompetencyTab 的 body 一次叫一次：let mm = mentorModel）
+struct CompetencyTabMentorModel: Equatable {
+    /// 組 id → 標題下一行「帶訓者：陳怡君」（有帶訓者才有）
+    let cardLines: [UUID: String]
+    /// 組 id → 疊帶訓者（這位帶訓者評過這一組才有）
+    let overlays: [UUID: CompetencyMentorOverlay]
+    let diffs: [CompetencyMentorDiff]
+    /// 摘要卡一行「跟帶訓者差 2 級以上：Gas 值班技能（你 4、陳怡君 2）」（沒有 nil）
+    let diffLine: String?
+    /// 〔記帶訓者的評分…〕可以選的（空＝這一項不出現）
+    let choices: [CompetencyRaterChoice]
+    /// 評分紀錄：我的（tabModel.records 原樣）＋帶訓者記的（新的日子在前；同一天我的在前）
+    let records: [CompetencyRecordRow]
+    /// 有任何一組設了帶訓者
+    let hasMentors: Bool
+
+    static let empty = CompetencyTabMentorModel(cardLines: [:], overlays: [:], diffs: [], diffLine: nil, choices: [],
+                                                records: [], hasMentors: false)
+}
+
+extension CompetencyMath {
+
+    // MARK: 常數、名字
+
+    /// CompetencySession.raterKind（v1a 先留的那個字）
+    static let raterMentor: String = "mentor"
+    /// 名冊外的人自己打的名字最多 10 字
+    static let mentorNameMax: Int = 10
+    static let mentorMissingNote: String = "（已不在名冊）"
+    /// 看法不一樣：≤ 11 級差 2 級以上；> 11 級比例差 0.25 以上；摘要卡最多列 3 格
+    static let mentorDiffLevels: Double = 2
+    static let mentorDiffRatio: Double = 0.25
+    static let mentorDiffMax: Int = 3
+
+    /// ↔ is_mentor_session
+    static func isMentorSession(_ s: CompetencySession) -> Bool {
+        s.raterKind == raterMentor
+    }
+
+    /// ↔ clean_mentor_name：去空白、最多 10 字、空的 nil
+    static func cleanMentorName(_ s: String?) -> String? {
+        cleanShortName(s, max: mentorNameMax)
+    }
+
+    /// ↔ rater_key：有部屬 id「id:<大寫 id>」；名冊外「name:<去空白的名字>」
+    static func raterKey(mentorId: UUID?, name: String?) -> String {
+        if let id = mentorId { return "id:" + id.uuidString }
+        return "name:" + (name ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// ↔ mentor_key
+    static func mentorKey(_ m: CompetencyMentor) -> String {
+        raterKey(mentorId: m.mentorId, name: m.mentorName)
+    }
+
+    /// ↔ session_rater_key：一張帶訓者評是哪一位記的
+    static func sessionRaterKey(_ s: CompetencySession) -> String {
+        raterKey(mentorId: s.raterId, name: s.raterName)
+    }
+
+    /// ↔ rater_label：「陳怡君（帶訓者）」
+    static func raterLabel(_ name: String) -> String {
+        name + "（帶訓者）"
+    }
+
+    // MARK: 帶訓者（設定那一包）
+
+    /// ↔ mentors_of：這位同仁現在的帶訓者（Assignment 沒墓碑才算；一組只取第一筆；沒有組、名字和 id 都沒有、是自己的都不算）
+    static func mentors(setup: CompetencySetupBook, subordinateId: UUID) -> [CompetencyMentor] {
+        guard let a = setup.allAssignments.first(where: { $0.id == subordinateId }), a.deletedAt == nil else { return [] }
+        var seen: Set<UUID> = []
+        var out: [CompetencyMentor] = []
+        for m in a.mentors ?? [] {
+            guard let gid = m.groupId, !seen.contains(gid) else { continue }
+            if let mid = m.mentorId, mid == subordinateId { continue }
+            let n: String = (m.mentorName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            guard m.mentorId != nil || !n.isEmpty else { continue }
+            seen.insert(gid)
+            out.append(m)
+        }
+        return out
+    }
+
+    /// ↔ mentor_for：這一組現在的帶訓者
+    static func mentor(setup: CompetencySetupBook, subordinateId: UUID, groupId: UUID) -> CompetencyMentor? {
+        mentors(setup: setup, subordinateId: subordinateId).first { $0.groupId == groupId }
+    }
+
+    /// ↔ mentor_name：在名冊（roster＝在職的部屬 id → 名字）用現在的名字；不在用快照；都沒有「帶訓者」
+    static func mentorName(_ m: CompetencyMentor, roster: [UUID: String]) -> String {
+        if let id = m.mentorId, let n = roster[id] {
+            let t: String = n.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !t.isEmpty { return t }
+        }
+        let s: String = (m.mentorName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return s.isEmpty ? "帶訓者" : s
+    }
+
+    /// ↔ mentor_missing：有部屬 id、但不在名冊（名冊外自己打名字的不算）
+    static func mentorMissing(_ m: CompetencyMentor, roster: [UUID: String]) -> Bool {
+        guard let id = m.mentorId else { return false }
+        return roster[id] == nil
+    }
+
+    /// ↔ mentor_since：「從 5/4」；跟今天不同年「從 2025/5/4」；沒有、日子壞掉 nil
+    static func mentorSinceText(_ key: String?, today: String) -> String? {
+        guard let k = key, let p = parseDay(k) else { return nil }
+        if let t = parseDay(today), t.y == p.y { return "從 " + shortDay(k) }
+        return "從 \(p.y)/\(p.m)/\(p.d)"
+    }
+
+    /// ↔ mentor_text：「陳怡君・從 5/4」「李師傅」
+    static func mentorText(_ m: CompetencyMentor, roster: [UUID: String], today: String) -> String {
+        let n: String = mentorName(m, roster: roster)
+        guard let s = mentorSinceText(m.startKey, today: today) else { return n }
+        return n + "・" + s
+    }
+
+    /// ↔ mentor_card_line：〔職能〕分頁雷達卡標題下一行「帶訓者：陳怡君」「帶訓者：陳怡君（已不在名冊）」
+    static func mentorCardLine(_ m: CompetencyMentor, roster: [UUID: String]) -> String {
+        "帶訓者：" + mentorName(m, roster: roster) + (mentorMissing(m, roster: roster) ? mentorMissingNote : "")
+    }
+
+    /// ↔ rater_choices：〔記帶訓者的評分…〕可以選的帶訓者（同一位帶好幾組合成一個；組只算這位要學的、現在畫得出來的
+    ///（visibleGroups 在職那一支）；順序＝第一次出現的組的順序）
+    static func raterChoices(setup: CompetencySetupBook, subordinateId: UUID, roster: [UUID: String]) -> [CompetencyRaterChoice] {
+        let shown: [CompetencyGroup] = visibleGroups(setup: setup, subordinateId: subordinateId, archivedPerson: false,
+                                                     sessions: [])
+        let list: [CompetencyMentor] = mentors(setup: setup, subordinateId: subordinateId)
+        var order: [String] = []
+        var groups: [String: [UUID]] = [:]
+        var first: [String: CompetencyMentor] = [:]
+        for g in shown {
+            guard let m = list.first(where: { $0.groupId == g.id }) else { continue }
+            let k: String = mentorKey(m)
+            if groups[k] == nil {
+                order.append(k)
+                first[k] = m
+            }
+            groups[k, default: []].append(g.id)
+        }
+        var out: [CompetencyRaterChoice] = []
+        for k in order {
+            guard let m = first[k] else { continue }
+            out.append(CompetencyRaterChoice(id: k, mentorId: m.mentorId, name: mentorName(m, roster: roster),
+                                             groupIds: groups[k] ?? [], missing: mentorMissing(m, roster: roster)))
+        }
+        return out
+    }
+
+    /// ↔ rater_choice_for：評分紀錄〔改分數〕那一張的帶訓者（名字＝那一張存的；組＝這位現在帶的組＋那一張有評的組）
+    static func raterChoice(for s: CompetencySession, setup: CompetencySetupBook, roster: [UUID: String]) -> CompetencyRaterChoice {
+        let k: String = sessionRaterKey(s)
+        let current: CompetencyRaterChoice? = raterChoices(setup: setup, subordinateId: s.subordinateId, roster: roster)
+            .first { $0.id == k }
+        var gids: [UUID] = current?.groupIds ?? []
+        for sc in s.liveScores where !gids.contains(sc.groupId) { gids.append(sc.groupId) }
+        let snap: String = (s.raterName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let name: String = !snap.isEmpty ? snap : (current?.name ?? "帶訓者")
+        let missing: Bool = s.raterId.map { roster[$0] == nil } ?? false
+        return CompetencyRaterChoice(id: k, mentorId: s.raterId, name: name,
+                                     groupIds: orderedGroupIds(gids, setup: setup), missing: missing)
+    }
+
+    /// ↔ mentor_rows：帶訓者頁：這位要學的每一組（人格特質＋要學的系統；照設定順序）一列
+    static func mentorRows(setup: CompetencySetupBook, subordinateId: UUID, roster: [UUID: String],
+                           today: String) -> [CompetencyMentorRow] {
+        let shown: [CompetencyGroup] = visibleGroups(setup: setup, subordinateId: subordinateId, archivedPerson: false,
+                                                     sessions: [])
+        let list: [CompetencyMentor] = mentors(setup: setup, subordinateId: subordinateId)
+        let choices: [CompetencyRaterChoice] = raterChoices(setup: setup, subordinateId: subordinateId, roster: roster)
+        var out: [CompetencyMentorRow] = []
+        for g in shown {
+            let m: CompetencyMentor? = list.first { $0.groupId == g.id }
+            var text: String = "還沒有"
+            var missing: String? = nil
+            var rater: CompetencyRaterChoice? = nil
+            if let mm = m {
+                text = mentorText(mm, roster: roster, today: today)
+                missing = mentorMissing(mm, roster: roster) ? mentorMissingNote : nil
+                let k: String = mentorKey(mm)
+                rater = choices.first { $0.id == k }
+            }
+            out.append(CompetencyMentorRow(id: g.id, title: g.displayName, isTrait: g.isTrait, mentor: m,
+                                           mentorText: text, missingNote: missing, rater: rater))
+        }
+        return out
+    }
+
+    /// ↔ mentor_candidates：設定小表單「從名冊挑」：在職、不是這位自己（照名冊順序）
+    static func mentorCandidates(_ people: [CompetencyTeamPerson], excluding subordinateId: UUID) -> [CompetencyTeamPerson] {
+        people.filter { !$0.archived && $0.id != subordinateId }
+    }
+
+    /// ↔ set_mentor：設（或換）一組的帶訓者。一組一位（換人＝蓋掉；換的是同一位只改開始日時，那一筆的 extra 留著）；
+    /// skippedGroupIds、別組的帶訓者、Assignment 的 extra 原樣留著。mentorId 有＝從名冊挑（name＝現在的名字當快照）；
+    /// nil＝名冊外（name 自己打，cleanMentorName）。名字空、是這位自己、日子壞掉 → 原樣回傳；一模一樣 → 原樣回傳（不寫）。
+    /// Assignment 有墓碑（清理過）：從空的開始（舊的不用學不會跑回來）
+    static func settingMentor(_ book: CompetencySetupBook, subordinateId: UUID, groupId: UUID, mentorId: UUID?,
+                              mentorName: String?, startKey: String, now: Date) -> CompetencySetupBook {
+        guard let name = cleanMentorName(mentorName), parseDay(startKey) != nil else { return book }
+        if let mid = mentorId, mid == subordinateId { return book }
+        var a: CompetencyAssignment = book.allAssignments.first(where: { $0.id == subordinateId })
+            ?? CompetencyAssignment(id: subordinateId)
+        if a.deletedAt != nil {
+            a.skippedGroupIds = nil
+            a.mentors = nil
+            a.deletedAt = nil
+        }
+        var list: [CompetencyMentor] = a.mentors ?? []
+        let newKey: String = raterKey(mentorId: mentorId, name: name)
+        var entry = CompetencyMentor(groupId: groupId, mentorId: mentorId, mentorName: name, startKey: startKey, extra: nil)
+        if let i = list.firstIndex(where: { $0.groupId == groupId }) {
+            let old: CompetencyMentor = list[i]
+            if old.mentorId == mentorId && old.mentorName == name && old.startKey == startKey { return book }
+            if mentorKey(old) == newKey { entry.extra = old.extra }
+            list[i] = entry
+            // 同一組只留一筆（別台寫壞的多筆一起收掉）
+            var j: Int = list.count - 1
+            while j > i {
+                if list[j].groupId == groupId { list.remove(at: j) }
+                j -= 1
+            }
+        } else {
+            list.append(entry)
+        }
+        a.mentors = list
+        a.updatedAt = now
+        var b = book
+        b.upsertAssignment(a)
+        return b
+    }
+
+    /// ↔ clear_mentor：拿掉一組的帶訓者（舊的帶訓者評照留）。沒有這一組 → 原樣回傳；拿完空了 mentors＝nil
+    static func clearingMentor(_ book: CompetencySetupBook, subordinateId: UUID, groupId: UUID, now: Date) -> CompetencySetupBook {
+        guard var a = book.allAssignments.first(where: { $0.id == subordinateId }), a.deletedAt == nil else { return book }
+        let list: [CompetencyMentor] = a.mentors ?? []
+        let kept: [CompetencyMentor] = list.filter { $0.groupId != groupId }
+        guard kept.count != list.count else { return book }
+        a.mentors = kept.isEmpty ? nil : kept
+        a.updatedAt = now
+        var b = book
+        b.upsertAssignment(a)
+        return b
+    }
+
+    // MARK: 帶訓者評（評分那一包）
+
+    /// ↔ mentor_sessions：這位同仁的帶訓者評（沒刪的；照日子、再照最後改的時間）。all＝評分那一包的全部 session
+    static func mentorSessions(_ all: [CompetencySession], subordinateId: UUID) -> [CompetencySession] {
+        let list: [CompetencySession] = all.filter { $0.subordinateId == subordinateId && $0.isLive && isMentorSession($0) }
+        return CompetencyRatingBook.sortedSessions(list)
+    }
+
+    /// ↔ as_mine：只把 raterKind 拿掉的複本（既有規則只看 isByMe；算帶訓者那一份時先換）。**不准存、不准跟我評的混著傳**
+    static func mentorAsMine(_ list: [CompetencySession]) -> [CompetencySession] {
+        list.map { (s: CompetencySession) -> CompetencySession in
+            var x = s
+            x.raterKind = nil
+            return x
+        }
+    }
+
+    /// ↔ rating_sessions：評分畫面帶訓者模式用的那一份＝這位帶訓者記的（已經 mentorAsMine；sessionOn、ratingPlan、
+    /// draft(from:)、footerCounts、buildSession 直接用）
+    static func mentorRatingSessions(_ mentorSessions: [CompetencySession], rater: CompetencyRaterChoice) -> [CompetencySession] {
+        mentorAsMine(mentorSessions.filter { sessionRaterKey($0) == rater.id })
+    }
+
+    /// ↔ mentor_plan：評分畫面帶訓者模式只列這位帶的組（改舊的那一張時，那一張有評的組也留著）
+    static func mentorPlan(_ plan: [CompetencyRatingSection], rater: CompetencyRaterChoice,
+                           editing: CompetencySession?) -> [CompetencyRatingSection] {
+        var keep: Set<UUID> = Set(rater.groupIds)
+        for sc in editing?.liveScores ?? [] { keep.insert(sc.groupId) }
+        return plan.filter { keep.contains($0.id) }
+    }
+
+    /// ↔ stamp_mentor：存檔前蓋回帶訓者：raterKind "mentor"；新的一張 raterId／raterName＝這位帶訓者（現在的名字）；
+    /// 改舊的那一張＝那一張原本的（紀錄上寫當時的名字）
+    static func stampingMentor(_ s: CompetencySession, rater: CompetencyRaterChoice,
+                               existing: CompetencySession?) -> CompetencySession {
+        var x = s
+        x.raterKind = raterMentor
+        if let e = existing {
+            x.raterId = e.raterId
+            x.raterName = e.raterName ?? rater.name
+        } else {
+            x.raterId = rater.mentorId
+            x.raterName = rater.name
+        }
+        return x
+    }
+
+    /// ↔ mentor_rater_line：評分畫面帶訓者模式最上面一行「陳怡君（帶訓者）的評分」
+    static func mentorRaterLine(_ rater: CompetencyRaterChoice) -> String {
+        raterLabel(rater.name) + "的評分"
+    }
+
+    /// ↔ mentor_saved_toast：「已儲存 11/2 陳怡君（帶訓者）的評分（3 格）」
+    static func mentorSavedToast(_ s: CompetencySession, rater: CompetencyRaterChoice) -> String {
+        "已儲存 " + shortDay(s.dayKey) + " " + raterLabel(rater.name) + "的評分（\(s.liveScores.count) 格）"
+    }
+
+    /// ↔ mentor_move_problem：帶訓者記的那一張改日期（「那一天已經有一張」只跟同一位帶訓者的比）
+    static func mentorMoveProblem(_ s: CompetencySession, to day: String, mentorSessions: [CompetencySession],
+                                  today: String) -> String? {
+        let k: String = sessionRaterKey(s)
+        let same: [CompetencySession] = mentorAsMine(mentorSessions.filter { sessionRaterKey($0) == k })
+        var x = s
+        x.raterKind = nil
+        return moveSessionProblem(x, to: day, sessions: same, today: today)
+    }
+
+    // MARK: 疊帶訓者、看法不一樣
+
+    /// ↔ mentor_overlay：那一組現在的帶訓者每一格最新的分數（latestCells 同一套；只留這一組現在的軸）。
+    /// 沒有帶訓者、這位帶訓者沒評過這一組（現在的軸）nil
+    static func mentorOverlay(setup: CompetencySetupBook, subordinateId: UUID, groupId: UUID,
+                              mentorSessions: [CompetencySession], roster: [UUID: String]) -> CompetencyMentorOverlay? {
+        guard let m = mentor(setup: setup, subordinateId: subordinateId, groupId: groupId) else { return nil }
+        let k: String = mentorKey(m)
+        let all: [CompetencyCellKey: CompetencyCellValue] = latestCells(mentorAsMine(mentorSessions.filter {
+            sessionRaterKey($0) == k
+        }))
+        let axisIds: Set<UUID> = Set(setup.axes(for: groupId).map { $0.id })
+        var cells: [CompetencyCellKey: CompetencyCellValue] = [:]
+        for (key, c) in all where key.groupId == groupId && axisIds.contains(key.itemId) { cells[key] = c }
+        guard let day = cells.values.map({ $0.dayKey }).max() else { return nil }
+        let name: String = mentorName(m, roster: roster)
+        let rater = CompetencyRaterChoice(id: k, mentorId: m.mentorId, name: name, groupIds: [groupId],
+                                          missing: mentorMissing(m, roster: roster))
+        let legend: String = name + " " + shortDay(day)
+        return CompetencyMentorOverlay(id: groupId, rater: rater, cells: cells, latestDay: day,
+                                       chipTitle: "帶訓者（" + legend + "）", legend: legend)
+    }
+
+    /// ↔ apply_mentor_overlay：灰色虛線換成帶訓者那一份（取代上一次：previousT／previousText 換成帶訓者的、↑↓ 拿掉、
+    /// 每一軸 mentorText「帶訓者 3」「帶訓者 未評」「帶訓者 不適用」、圖例「┅ 陳怡君 11/2」、標題「Gas System・10/30 比 陳怡君 11/2」）。
+    /// 這次的分數、平均、目標、達標一個都不動
+    static func applyingMentorOverlay(_ card: CompetencyChartModel, _ o: CompetencyMentorOverlay) -> CompetencyChartModel {
+        let r: CompetencyRange = card.range
+        var axes: [CompetencyAxisModel] = []
+        var spoken: [String] = []
+        var mentorCells: [CompetencyCellValue?] = []
+        for ax in card.axes {
+            let c: CompetencyCellValue? = o.cells[CompetencyCellKey(groupId: card.id, itemId: ax.id)]
+            mentorCells.append(c)
+            let pText: String? = c.map { cellText($0, in: r) }
+            var m = CompetencyAxisModel(id: ax.id, name: ax.name, label: ax.label, state: ax.state, t: ax.t,
+                                        valueText: ax.valueText, originalText: ax.originalText, levelText: ax.levelText,
+                                        previousT: c?.ratio, previousText: pText, deltaText: nil,
+                                        carriedFrom: ax.carriedFrom, archived: ax.archived)
+            m.targetT = ax.targetT
+            m.targetValueText = ax.targetValueText
+            m.targetText = ax.targetText
+            m.targetMet = ax.targetMet
+            m.targetGap = ax.targetGap
+            m.mentorText = "帶訓者 " + (pText ?? "未評")
+            axes.append(m)
+            if let p = pText {
+                spoken.append(ax.name + " " + p + (c?.ratio == nil ? "" : " 分"))
+            } else {
+                spoken.append(ax.name + " 未評")
+            }
+        }
+        let dateLine: String = card.latestDay.map { shortDay($0) + " 比 " + o.legend } ?? card.dateLine
+        let a11y: String = card.accessibilityText + "灰色虛線是帶訓者 " + o.legend + "：" + spoken.joined(separator: "；") + "。"
+        var out = CompetencyChartModel(
+            id: card.id, isTrait: card.isTrait, title: card.title, dateLine: dateLine, headline: card.title + "・" + dateLine,
+            averageText: card.averageText, style: card.style, axes: axes, rings: card.rings, range: card.range,
+            ratedCount: card.ratedCount, drawsPolygon: card.drawsPolygon, hasPrevious: true, legendCurrent: card.legendCurrent,
+            legendPrevious: o.legend, note: card.note, carriedNote: card.carriedNote, accessibilityText: a11y,
+            neverRated: card.neverRated, averageRatio: card.averageRatio,
+            previousAverageRatio: averageRatio(mentorCells), filledCount: card.filledCount, axisCount: card.axisCount,
+            latestDay: card.latestDay, previousDayText: "帶訓者 " + o.legend)
+        out.hasTarget = card.hasTarget
+        out.legendTarget = card.legendTarget
+        out.targetTotal = card.targetTotal
+        out.targetAchieved = card.targetAchieved
+        out.targetUnrated = card.targetUnrated
+        out.compareDay = nil
+        return out
+    }
+
+    /// ↔ mentor_diffs：跟帶訓者看法不一樣的格子：同一格你（〔職能〕分頁的卡＝我評的目前分數）和帶訓者都有分數（不適用、沒評不算；
+    /// 已停用的軸不算），換到現在的範圍比：≤ 11 級差 2 級以上、> 11 級比例差 0.25 以上。差得多的在前，一樣照卡片、軸的順序
+    static func mentorDiffs(cards: [CompetencyChartModel], overlays: [UUID: CompetencyMentorOverlay],
+                            setup: CompetencySetupBook) -> [CompetencyMentorDiff] {
+        var found: [(diff: CompetencyMentorDiff, order: Int)] = []
+        var n = 0
+        for card in cards {
+            guard let o = overlays[card.id] else { continue }
+            let r: CompetencyRange = card.range
+            let span: Double = Double(r.high - r.low)
+            guard span > 0 else { continue }
+            let big: Bool = r.levelCount > 11
+            let gName: String = setup.group(card.id).map { recordGroupName($0) } ?? card.title
+            for ax in card.axes where !ax.archived {
+                n += 1
+                guard let tm = ax.t, let c = o.cells[CompetencyCellKey(groupId: card.id, itemId: ax.id)],
+                      let tb = c.ratio else { continue }
+                let d: Double = abs(tm - tb)
+                let hit: Bool = big ? d >= mentorDiffRatio - 1e-9 : d * span >= mentorDiffLevels - 1e-9
+                guard hit else { continue }
+                let mine: String = ax.valueText ?? ""
+                let theirs: String = cellText(c, in: r)
+                let title: String = gName + " " + ax.name
+                let pair: String = "你 " + mine + "、" + o.rater.name + " " + theirs
+                let text: String = title + "（" + pair + "）"
+                let diff = CompetencyMentorDiff(id: card.id.uuidString + "|" + ax.id.uuidString, groupId: card.id,
+                                                itemId: ax.id, title: title, mineText: mine, mentorText: theirs,
+                                                mentorName: o.rater.name, gap: d, bigRange: big, text: text)
+                found.append((diff: diff, order: n))
+            }
+        }
+        let ranked = found.sorted { a, b in
+            if abs(a.diff.gap - b.diff.gap) > 1e-9 { return a.diff.gap > b.diff.gap }
+            return a.order < b.order
+        }
+        return ranked.map { $0.diff }
+    }
+
+    /// ↔ mentor_diff_line：摘要卡一行「跟帶訓者差 2 級以上：Gas 值班技能（你 4、陳怡君 2）」（最多 3 格；多的接「等 5 格」）。
+    /// 有超過 11 級的範圍時開頭改「跟帶訓者看法差很多：」。沒有 nil
+    static func mentorDiffLine(_ diffs: [CompetencyMentorDiff]) -> String? {
+        guard !diffs.isEmpty else { return nil }
+        let head: String = diffs.contains { $0.bigRange } ? "跟帶訓者看法差很多：" : "跟帶訓者差 2 級以上："
+        let shown: [String] = diffs.prefix(mentorDiffMax).map { $0.text }
+        var s: String = head + shown.joined(separator: "、")
+        if diffs.count > mentorDiffMax { s += "等 \(diffs.count) 格" }
+        return s
+    }
+
+    // MARK: 評分紀錄、明細、點一格
+
+    /// ↔ mentor_record_rows：評分紀錄裡帶訓者記的（同一位、同一天合成一列；標「陳怡君（帶訓者）」＝那一天後改的那一張存的名字）
+    static func mentorRecordRows(mentorSessions: [CompetencySession], setup: CompetencySetupBook) -> [CompetencyRecordRow] {
+        var keys: [String] = []
+        var byKey: [String: [CompetencySession]] = [:]
+        for s in mentorSessions where s.isLive && isMentorSession(s) {
+            let k: String = sessionRaterKey(s) + "|" + s.dayKey
+            if byKey[k] == nil { keys.append(k) }
+            byKey[k, default: []].append(s)
+        }
+        var out: [CompetencyRecordRow] = []
+        for k in keys {
+            let list: [CompetencySession] = byKey[k] ?? []
+            guard let base = recordRows(sessions: mentorAsMine(list), setup: setup).first else { continue }
+            let head: CompetencySession? = list.max { a, b in a.stamp < b.stamp }
+            let snap: String = (head?.raterName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let label: String = raterLabel(snap.isEmpty ? "帶訓者" : snap)
+            let rk: String = head.map { sessionRaterKey($0) } ?? ""
+            var row = CompetencyRecordRow(id: "mentor|" + k, dayKey: base.dayKey, dayText: base.dayText,
+                                          countText: base.countText, groupsText: base.groupsText,
+                                          cellCountText: base.cellCountText, sessionIds: base.sessionIds,
+                                          accessibilityText: base.accessibilityText + "，" + label)
+            row.raterKey = rk
+            row.raterText = label
+            out.append(row)
+        }
+        return out
+    }
+
+    /// ↔ merged_records：我的＋帶訓者的（新的日子在前；同一天我的在前、帶訓者照原本的順序）
+    static func mergedRecordRows(mine: [CompetencyRecordRow], mentor: [CompetencyRecordRow]) -> [CompetencyRecordRow] {
+        let all: [CompetencyRecordRow] = mine + mentor
+        let indexed: [(row: CompetencyRecordRow, i: Int)] = all.enumerated().map { (row: $0.element, i: $0.offset) }
+        return indexed.sorted { a, b in
+            if a.row.dayKey != b.row.dayKey { return a.row.dayKey > b.row.dayKey }
+            return a.i < b.i
+        }.map { $0.row }
+    }
+
+    /// ↔ mentor_session_details：帶訓者記的那一天（這一位；後改的在前）。標題「陳怡君（帶訓者）・2026/11/2（一）」、
+    /// 刪除確認「刪掉 11/2 陳怡君（帶訓者）的評分？」；不寫總評
+    static func mentorSessionDetails(dayKey: String, raterKey: String, mentorSessions: [CompetencySession],
+                                     setup: CompetencySetupBook) -> [CompetencySessionDetailModel] {
+        let list: [CompetencySession] = mentorSessions.filter {
+            $0.isLive && isMentorSession($0) && $0.dayKey == dayKey && sessionRaterKey($0) == raterKey
+        }
+        let ordered: [CompetencySession] = list.sorted { a, b in a.stamp > b.stamp }
+        var out: [CompetencySessionDetailModel] = []
+        for s in ordered {
+            var x = s
+            x.raterKind = nil
+            x.note = nil
+            let base: CompetencySessionDetailModel = sessionDetail(x, setup: setup)
+            let snap: String = (s.raterName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            let label: String = raterLabel(snap.isEmpty ? "帶訓者" : snap)
+            out.append(CompetencySessionDetailModel(id: base.id, dayKey: base.dayKey,
+                                                    title: label + "・" + longDayText(s.dayKey),
+                                                    infoLines: base.infoLines, note: nil, cards: base.cards,
+                                                    deleteTitle: "刪掉 " + shortDay(s.dayKey) + " " + label + "的評分？",
+                                                    deleteMessage: base.deleteMessage))
+        }
+        return out
+    }
+
+    /// ↔ mentor_history_rows：點一格的歷史裡帶訓者記的那幾次（換成現在的範圍；raterText＝那一張存的名字；不進小折線）
+    static func mentorHistoryRows(groupId: UUID, itemId: UUID, setup: CompetencySetupBook, subordinateId: UUID,
+                                  mentorSessions: [CompetencySession]) -> [CompetencyHistoryRow] {
+        let list: [CompetencySession] = mentorSessions.filter { $0.isLive && isMentorSession($0) }
+        guard !list.isEmpty else { return [] }
+        var names: [UUID: String] = [:]
+        for s in list {
+            let snap: String = (s.raterName ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+            names[s.id] = snap.isEmpty ? "帶訓者" : snap
+        }
+        let base: CompetencyCellHistoryModel = cellHistory(groupId: groupId, itemId: itemId, setup: setup,
+                                                           subordinateId: subordinateId, sessions: mentorAsMine(list))
+        return base.rows.map { (r: CompetencyHistoryRow) -> CompetencyHistoryRow in
+            var x = CompetencyHistoryRow(id: r.id, dayKey: r.dayKey, dayText: r.dayText, valueText: r.valueText,
+                                         detailText: r.detailText)
+            x.raterText = names[r.id] ?? "帶訓者"
+            return x
+        }
+    }
+
+    /// ↔ merged_history_rows：點一格的歷史：我的＋帶訓者的（新的日子在前；同一天我的在前）
+    static func mergedHistoryRows(mine: [CompetencyHistoryRow], mentor: [CompetencyHistoryRow]) -> [CompetencyHistoryRow] {
+        let all: [CompetencyHistoryRow] = mine + mentor
+        let indexed: [(row: CompetencyHistoryRow, i: Int)] = all.enumerated().map { (row: $0.element, i: $0.offset) }
+        return indexed.sorted { a, b in
+            if a.row.dayKey != b.row.dayKey { return a.row.dayKey > b.row.dayKey }
+            return a.i < b.i
+        }.map { $0.row }
+    }
+
+    // MARK: 〔職能〕分頁一次算好
+
+    /// ↔ tab_mentor：〔職能〕分頁帶訓者那一份。tab＝tabModel（我評的）；mentorSessions＝LifeStore.competencyMentorSessions(of:)；
+    /// roster＝LifeStore.competencyMentorRoster。tab 裡的數字一個都不動（只另外算一份）
+    static func tabMentorModel(tab: CompetencyTabModel, setup: CompetencySetupBook, subordinateId: UUID,
+                               mentorSessions: [CompetencySession], roster: [UUID: String]) -> CompetencyTabMentorModel {
+        let list: [CompetencyMentor] = mentors(setup: setup, subordinateId: subordinateId)
+        var lines: [UUID: String] = [:]
+        var overlays: [UUID: CompetencyMentorOverlay] = [:]
+        for card in tab.cards {
+            guard let m = list.first(where: { $0.groupId == card.id }) else { continue }
+            lines[card.id] = mentorCardLine(m, roster: roster)
+            if let o = mentorOverlay(setup: setup, subordinateId: subordinateId, groupId: card.id,
+                                     mentorSessions: mentorSessions, roster: roster) {
+                overlays[card.id] = o
+            }
+        }
+        let diffs: [CompetencyMentorDiff] = mentorDiffs(cards: tab.cards, overlays: overlays, setup: setup)
+        let mentorRows: [CompetencyRecordRow] = mentorRecordRows(mentorSessions: mentorSessions, setup: setup)
+        return CompetencyTabMentorModel(cardLines: lines, overlays: overlays, diffs: diffs, diffLine: mentorDiffLine(diffs),
+                                        choices: raterChoices(setup: setup, subordinateId: subordinateId, roster: roster),
+                                        records: mergedRecordRows(mine: tab.records, mentor: mentorRows),
+                                        hasMentors: !list.isEmpty)
+    }
+
+    /// ↔ mentor_bar：一張卡標題下那一行＋膠囊（沒有帶訓者 nil）
+    static func mentorBar(for card: CompetencyChartModel, model: CompetencyTabMentorModel,
+                          overlayOn: Set<UUID>) -> CompetencyCardMentorBar? {
+        guard let line = model.cardLines[card.id] else { return nil }
+        let o: CompetencyMentorOverlay? = model.overlays[card.id]
+        return CompetencyCardMentorBar(line: line, chipTitle: o?.chipTitle, isOn: o != nil && overlayOn.contains(card.id))
+    }
+
+    /// ↔ display_card：要畫的那一張（膠囊開著、有帶訓者評＝applyingMentorOverlay；不然原樣）
+    static func displayCard(_ card: CompetencyChartModel, model: CompetencyTabMentorModel,
+                            overlayOn: Set<UUID>) -> CompetencyChartModel {
+        guard overlayOn.contains(card.id), let o = model.overlays[card.id] else { return card }
+        return applyingMentorOverlay(card, o)
+    }
+
+    // MARK: 課的總覽「帶訓中」、系統頁「誰在帶誰」
+
+    /// ↔ mentoring_lines：一位帶訓者一行「陳怡君 → 王小明（Gas、Slurry）、林志豪（Chemical）」。people＝課的總覽的名單
+    ///（已轉出的不列）；帶訓者有部屬 id 但不在名冊（離職、轉出）不列，名冊外的人照列。組只算這位要學的、現在畫得出來的；
+    /// 帶訓者照名單裡第一次出現的順序、學的人照名單順序、組照設定順序
+    static func mentoringLines(setup: CompetencySetupBook, people: [CompetencyTeamPerson],
+                               roster: [UUID: String]) -> [CompetencyMentoringLine] {
+        var order: [String] = []
+        var names: [String: String] = [:]
+        var learners: [String: [CompetencyMentoringLearner]] = [:]
+        for p in people where !p.archived {
+            let list: [CompetencyMentor] = mentors(setup: setup, subordinateId: p.id)
+            guard !list.isEmpty else { continue }
+            let shown: [CompetencyGroup] = visibleGroups(setup: setup, subordinateId: p.id, archivedPerson: false,
+                                                         sessions: [])
+            var perKey: [String: [String]] = [:]
+            var keyOrder: [String] = []
+            for g in shown {
+                guard let m = list.first(where: { $0.groupId == g.id }), !mentorMissing(m, roster: roster) else { continue }
+                let k: String = mentorKey(m)
+                if perKey[k] == nil {
+                    keyOrder.append(k)
+                    if names[k] == nil { names[k] = mentorName(m, roster: roster) }
+                }
+                perKey[k, default: []].append(chipTitle(g))
+            }
+            for k in keyOrder {
+                let gs: String = (perKey[k] ?? []).joined(separator: "、")
+                if learners[k] == nil { order.append(k) }
+                learners[k, default: []].append(CompetencyMentoringLearner(id: p.id, name: p.name, groupsText: gs,
+                                                                           text: p.name + "（" + gs + "）"))
+            }
+        }
+        return order.map { (k: String) -> CompetencyMentoringLine in
+            let n: String = names[k] ?? "帶訓者"
+            let ls: [CompetencyMentoringLearner] = learners[k] ?? []
+            return CompetencyMentoringLine(id: k, mentorName: n, learners: ls,
+                                           text: n + " → " + ls.map { $0.text }.joined(separator: "、"))
+        }
+    }
+
+    /// ↔ system_mentor_rows：系統頁「誰在帶誰」：要學這個系統、有帶訓者的在職同仁（照名單順序）
+    static func systemMentorRows(setup: CompetencySetupBook, groupId: UUID, people: [CompetencyTeamPerson],
+                                 roster: [UUID: String], today: String) -> [CompetencySystemMentorRow] {
+        var out: [CompetencySystemMentorRow] = []
+        for p in people where !p.archived {
+            guard !setup.skippedGroupIds(p.id).contains(groupId),
+                  let m = mentor(setup: setup, subordinateId: p.id, groupId: groupId) else { continue }
+            out.append(CompetencySystemMentorRow(id: p.id, learnerName: p.name,
+                                                 mentorText: "帶訓者：" + mentorText(m, roster: roster, today: today),
+                                                 missingNote: mentorMissing(m, roster: roster) ? mentorMissingNote : nil))
+        }
+        return out
     }
 }

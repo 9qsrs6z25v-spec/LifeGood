@@ -19,6 +19,10 @@ import SwiftUI
 //  「目標 3 ✓」（綠）「目標 3・差 1」「目標 3・未評」（灰）；整列 .combine 念得到。
 // • 不做形變動畫、不用 accessibilityChartDescriptor（目標差已經組進 model.accessibilityText）。
 // 要退回這一件：刪 CompetencyRadarTargetLayer、CompetencyRadarBarTick、layout.target、圖例 target、橫條 targetT／targetText 那幾行。
+// [v25.606 職能雷達 v5a]（radar/build/v5a/brief.md §4 G2 9–12）CompetencyChartCard(mentorBar:onToggleMentor:)：標題下一行
+//「帶訓者：陳怡君」＋膠囊〔帶訓者（陳怡君 11/2）〕（CompetencyRadarMentorBarView；一排放不下換兩行）；橫條每列 axis.mentorText
+//「帶訓者 3」。疊帶訓者的字、線都在 CompetencyMath.displayCard 換好，這裡只照 model 畫；匯出那張卡沒動。
+// 要退回這一件：刪 CompetencyRadarMentorBarView、CompetencyRadarMentorChip、卡片 body 與橫條 mentorText 那幾行。
 
 /// 人格特質紫、系統藍綠（跟執掌 (0.18,0.62,0.60) 分開）
 enum CompetencyPalette {
@@ -38,12 +42,21 @@ struct CompetencyChartCard: View {
     var showPrevious: Bool = true
     /// 點頂點、軸名、橫條那一列（v1a-2 才接 sheet；v1a-1 傳 nil）
     var onTapAxis: ((UUID) -> Void)? = nil
+    /// [v25.606 職能雷達 v5a] 標題下一行「帶訓者：陳怡君」＋〔帶訓者（陳怡君 11/2）〕膠囊（〔職能〕分頁才傳；nil＝跟 v25.605 一模一樣）（主控加的契約）
+    var mentorBar: CompetencyCardMentorBar? = nil
+    /// [v25.606 v5a] 按〔帶訓者（…）〕膠囊（nil＝膠囊不能按）（主控加的契約）
+    var onToggleMentor: (() -> Void)? = nil
 
     private var isRadar: Bool { model.style == .radar || model.style == .radarShort }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             CompetencyRadarCardHeader(model: model)
+            // [v25.606 v5a] 標題下一行「帶訓者：陳怡君」＋〔帶訓者（陳怡君 11/2）〕膠囊（〔職能〕分頁才傳）
+            if let bar = mentorBar {
+                CompetencyRadarMentorBarView(bar: bar, tint: CompetencyPalette.tint(isTrait: model.isTrait),
+                                             onToggle: onToggleMentor)
+            }
             if model.style == .empty {
                 CompetencyRadarEmptyNote()
             } else {
@@ -77,6 +90,87 @@ private struct CompetencyRadarCardHeader: View {
                     .foregroundStyle(tint)
             }
         }
+    }
+}
+
+/// [v25.606 v5a] 標題下一行「帶訓者：陳怡君」＋右邊膠囊〔帶訓者（陳怡君 11/2）〕（一排放不下：膠囊換到下一行）
+private struct CompetencyRadarMentorBarView: View {
+    let bar: CompetencyCardMentorBar
+    let tint: Color
+    let onToggle: (() -> Void)?
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .center, spacing: 6) {
+                lineView
+                Spacer(minLength: 8)
+                chipView
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                lineView
+                chipView
+            }
+        }
+    }
+
+    private var lineView: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 4) {
+            Image(systemName: "person.2")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .accessibilityHidden(true)
+            Text(bar.line)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    private var chipView: some View {
+        if let chip = bar.chipTitle {
+            CompetencyRadarMentorChip(title: chip, isOn: bar.isOn, tint: tint, onToggle: onToggle)
+        }
+    }
+}
+
+/// [v25.606 v5a] 膠囊〔帶訓者（陳怡君 11/2）〕：開著打勾、主題色；關著灰（只是看，不擋訂閱、不記住；開關由分頁管）
+private struct CompetencyRadarMentorChip: View {
+    let title: String
+    let isOn: Bool
+    let tint: Color
+    let onToggle: (() -> Void)?
+
+    private var fg: Color { isOn ? tint : Color.secondary }
+    private var bg: Color { isOn ? tint.opacity(0.12) : Color(.tertiarySystemFill) }
+    private var traits: AccessibilityTraits { isOn ? AccessibilityTraits.isSelected : AccessibilityTraits() }
+
+    var body: some View {
+        Button {
+            onToggle?()
+        } label: {
+            chipLabel
+        }
+        .buttonStyle(.plain)
+        .disabled(onToggle == nil)
+        .accessibilityLabel("疊" + title)
+        .accessibilityAddTraits(traits)
+    }
+
+    private var chipLabel: some View {
+        HStack(spacing: 4) {
+            Image(systemName: isOn ? "checkmark" : "circle")
+                .font(.caption2.weight(.bold))
+            Text(title)
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .foregroundStyle(fg)
+        .background(bg, in: Capsule())
+        .frame(minHeight: 44)
+        .contentShape(Rectangle())
     }
 }
 
@@ -467,6 +561,10 @@ struct CompetencyRadarAxisRow: View {
             if let tx = axis.targetText {
                 Text(tx).font(.caption2).foregroundStyle(targetColor)
                     .accessibilityLabel(targetSpoken)
+            }
+            // [v25.606 v5a] 疊帶訓者時「帶訓者 3」「帶訓者 未評」「帶訓者 不適用」（沒疊 nil）
+            if let mt = axis.mentorText {
+                Text(mt).font(.caption2).foregroundStyle(.secondary)
             }
         }
         .accessibilityElement(children: .combine)

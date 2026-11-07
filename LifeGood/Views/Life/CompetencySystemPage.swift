@@ -16,6 +16,12 @@ import SwiftUI
 // • 「這個系統自己的項目」那一節頂上：兩台各自加的同名項目一行「有兩個 鋼瓶更換〔合併〕」（competencyDuplicates 的 kind "own"、groupId 這個系統）
 //   → 擋訂閱 → 確認框 → 下一個 runloop mergeCompetencyDuplicate（LifeStore 一次 batched）；合併完那一行自己不見。
 // 要退回這一件：刪 detailRequest／pendingMerge／showMergeAlert、ownRow 的往右滑、ownSection 頂上的 ForEach、CompSysDetailRequest／CompSysDupRow、第二個 sheet 與合併的 alert。
+//
+// MARK: [v25.606 職能雷達 v5a]（G3；radar/build/v5a/brief.md §5 G3 12–14）
+// •「這個系統自己的項目」下面多一節「誰在帶誰」（CompetencyMath.systemMentorRows：要學這個系統、有帶訓者的在職同仁，
+//   「王小明　帶訓者：陳怡君・從 5/4」＋灰字「（已不在名冊）」）。只看：點一列 sheet(item:) 開那位的帶訓者頁
+//  （CompetencyMentorView；不擋訂閱，頁裡〔設定〕才擋）。人格特質沒有系統頁（人格的帶訓者在帶訓者頁、〔職能〕分頁、課的總覽看）。
+// 要退回這一件：刪 mentorRequest、第三個 sheet、mentorSection／openMentor、CompSysMentorRow。
 
 struct CompetencySystemPage: View {
     let groupId: UUID
@@ -41,6 +47,8 @@ struct CompetencySystemPage: View {
     /// [v25.601 v1b] 重名〔合併〕先問（存要合併的那一筆）
     @State private var pendingMerge: CompetencyDuplicate?
     @State private var showMergeAlert = false
+    /// [v25.606 v5a]「誰在帶誰」點一列：打開那位的帶訓者頁（sheet(item:)）
+    @State private var mentorRequest: CompetencyMentorRequest?
 
     private var setup: CompetencySetupBook { lifeStore.competencySetup }
     private var readOnly: Bool { lifeStore.competencyReadOnly }
@@ -64,6 +72,9 @@ struct CompetencySystemPage: View {
                     CompetencyItemDetailsView(itemId: r.itemId, showsDoneButton: true)
                 }
                 .appStores()
+            }
+            .sheet(item: $mentorRequest) { r in
+                CompetencyMentorView(subordinateId: r.subordinateId).appStores()
             }
             .alert(archiveTitle, isPresented: $showArchiveAlert) {
                 Button("停用", role: .destructive) { archiveNow() }
@@ -103,6 +114,7 @@ struct CompetencySystemPage: View {
             nameSection(g)
             sharedSection
             ownSection
+            mentorSection
             bottomSection
         }
         .alert(hideTitle, isPresented: $showHideAlert) {
@@ -218,6 +230,39 @@ struct CompetencySystemPage: View {
         } footer: {
             Text(Self.ownFooter)
         }
+    }
+
+    /// [v25.606 v5a]「誰在帶誰」：只看；點一列開那位的帶訓者頁（頁裡〔設定〕才擋訂閱）
+    @ViewBuilder
+    private var mentorSection: some View {
+        let rows: [CompetencySystemMentorRow] = systemMentorRows
+        Section {
+            if rows.isEmpty {
+                Text("還沒有人設帶訓者")
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
+            ForEach(rows) { r in
+                CompSysMentorRow(row: r, onOpen: { openMentor(r.id) })
+            }
+        } header: {
+            Text("誰在帶誰")
+        } footer: {
+            Text("在部屬的〔職能〕分頁「…」〔帶訓者〕設定。")
+        }
+    }
+
+    /// [v25.606 v5a] 要學這個系統、有帶訓者的在職同仁（照名冊順序）
+    private var systemMentorRows: [CompetencySystemMentorRow] {
+        CompetencyMath.systemMentorRows(setup: setup, groupId: groupId,
+                                        people: lifeStore.competencyTeamPeople(lifeStore.activeSubordinates),
+                                        roster: lifeStore.competencyMentorRoster,
+                                        today: CompetencyMath.dayKey(Date()))
+    }
+
+    /// [v25.606 v5a]「誰在帶誰」點一列：打開那位的帶訓者頁（只是看，不擋訂閱）
+    private func openMentor(_ id: UUID) {
+        mentorRequest = CompetencyMentorRequest(subordinateId: id)
     }
 
     private var bottomSection: some View {
@@ -778,6 +823,58 @@ private struct CompSysFormSheet: View {
         case .editItem(let id):
             store.renameCompetencyItem(id, to: n)
             store.setCompetencyItemShortName(id, to: shortOrNil)
+        }
+    }
+}
+
+// MARK: - [v25.606 職能雷達 v5a]「誰在帶誰」一列（只看；點一列開那位的帶訓者頁）
+
+/// 「王小明」＋下一行「帶訓者：陳怡君・從 5/4」（＋灰字「（已不在名冊）」）＋ chevron
+private struct CompSysMentorRow: View {
+    let row: CompetencySystemMentorRow
+    let onOpen: () -> Void
+
+    private var spoken: String {
+        row.learnerName + "，" + row.mentorText + (row.missingNote ?? "")
+    }
+
+    var body: some View {
+        Button(action: onOpen) {
+            HStack(spacing: 8) {
+                CompSysMentorTexts(row: row)
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
+            }
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .foregroundStyle(.primary)
+        .accessibilityLabel(spoken)
+        .accessibilityHint("打開這位同仁的帶訓者")
+    }
+}
+
+/// 名字＋下一行帶訓者（＋「（已不在名冊）」灰字）
+private struct CompSysMentorTexts: View {
+    let row: CompetencySystemMentorRow
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(row.learnerName)
+                .font(.subheadline)
+            HStack(alignment: .firstTextBaseline, spacing: 0) {
+                Text(row.mentorText)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                if let n = row.missingNote {
+                    Text(n)
+                        .font(.caption)
+                        .foregroundStyle(.tertiary)
+                }
+            }
         }
     }
 }

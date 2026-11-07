@@ -17,12 +17,21 @@ import Charts
 // • 點一格改用 v1b 的 cellHistory（多傳這位現在的職等）：每一分多一句說明（項目自己的蓋過通用的）、「E2 目標 3（差 1）」、
 //   評過三次以上一節「走勢」小折線（舊範圍的點換算後空心、目標 RuleMark 點線；只在 App 裡）。§13：照樣沒有評語。
 // • 改日期的 DatePicker 起點改叫 CompetencyMath.noonDate（日子轉換統一一支；台北、洛杉磯 sim 對過）。
+//
+// [v25.606 職能雷達 v5a] 帶訓者評（radar/build/v5a/brief.md §5 G3 1–8）：
+// • 明細多 raterKey（帶訓者那一列）：內容走 CompetencyMath.mentorSessionDetails（標題「陳怡君（帶訓者）・2026/11/2（一）」、
+//   不寫總評）；不出〔那一次｜跟現在比〕（跟現在比是我評的目前分數，混在一起看不懂）。〔改分數〕帶 raterChoice(for:)＝
+//   評分畫面帶訓者模式；〔改日期〕撞期只跟同一位帶訓者比（mentorMoveProblem＋moveCompetencyMentorSession）；〔刪除〕照舊整張墓碑。
+// • 點一格的歷史：歷史列合進帶訓者記的那幾次（mergedHistoryRows，標「・陳怡君」）；小折線（cellTrend）只畫我評的、不動。
+// • raterKey nil（我評的）一行行為都沒變。
 
 /// 打開一天的評分紀錄明細（sheet(item:) 用）
 struct CompetencyRecordRequest: Identifiable {
     let id = UUID()
     let subordinateId: UUID
     let dayKey: String
+    /// [v25.606 職能雷達 v5a] 帶訓者記的那一列（CompetencyRecordRow.raterKey）；nil＝我評的（跟 v25.605 一模一樣）（主控加的契約）
+    var raterKey: String? = nil
 }
 
 /// 打開點一格的歷史（sheet(item:) 用）
@@ -63,8 +72,24 @@ struct CompetencyRecordDetailView: View {
         _day = State(initialValue: dayKey)
     }
 
+    /// [v25.606 職能雷達 v5a] 帶訓者記的那一天（raterKey＝CompetencyMath.sessionRaterKey；nil＝我評的，跟上面那一支一樣）（主控加的契約）
+    var raterKey: String? = nil
+
+    init(subordinateId: UUID, dayKey: String, raterKey: String?) {
+        self.subordinateId = subordinateId
+        self.dayKey = dayKey
+        self.raterKey = raterKey
+        _day = State(initialValue: dayKey)
+    }
+
     private var details: [CompetencySessionDetailModel] {
-        CompetencyMath.sessionDetails(dayKey: day,
+        // [v25.606 v5a] 帶訓者記的那一天：這一位、這一天（不寫總評）
+        if let rk = raterKey {
+            return CompetencyMath.mentorSessionDetails(dayKey: day, raterKey: rk,
+                                                       mentorSessions: lifeStore.competencyMentorSessions(of: subordinateId),
+                                                       setup: lifeStore.competencySetup)
+        }
+        return CompetencyMath.sessionDetails(dayKey: day,
                                       sessions: lifeStore.competencySessions(of: subordinateId),
                                       setup: lifeStore.competencySetup)
     }
@@ -125,11 +150,14 @@ struct CompetencyRecordDetailView: View {
             if let d = current(in: list) {
                 // [v25.601 職能雷達 v1b] 〔那一次｜跟現在比〕；跟現在比時不畫當時的雷達。要退回這一件：換回 92b02fe 那三段
                 // [v1b 審查] 「第幾張」兩種都留著：下面〔改分數〕〔改日期〕〔刪除〕動的是選的那一張，藏起來會不知道刪的是哪張
-                CompHistModeBlock(compareNow: $compareNow)
+                // [v25.606 v5a] 帶訓者記的那一天不出〔那一次｜跟現在比〕
+                if raterKey == nil {
+                    CompHistModeBlock(compareNow: $compareNow)
+                }
                 if list.count > 1 {
                     CompHistPickerBlock(list: list, selected: d.id, onPick: { pickId = $0 })
                 }
-                if compareNow {
+                if compareNow && raterKey == nil {
                     CompHistCompareBlock(dayKey: day, cards: compareModels, regular: horizontalSizeClass == .regular)
                 } else {
                     CompHistDetailBlock(detail: d, regular: horizontalSizeClass == .regular)
@@ -148,13 +176,21 @@ struct CompetencyRecordDetailView: View {
     private func startRate(_ d: CompetencySessionDetailModel) {
         guard subscription.isPremium else { showPremiumAlert = true; return }
         resultLine = nil
+        // [v25.606 v5a] 帶訓者記的那一張：評分畫面帶訓者模式（名字＝那一張存的；組＝這位現在帶的＋那一張有評的）
+        if raterKey != nil {
+            guard let s = lifeStore.competencyRatings.session(d.id) else { return }
+            let c: CompetencyRaterChoice = CompetencyMath.raterChoice(for: s, setup: lifeStore.competencySetup,
+                                                                      roster: lifeStore.competencyMentorRoster)
+            ratingRequest = CompetencyRatingRequest(subordinateId: subordinateId, dayKey: d.dayKey, sessionId: d.id, rater: c)
+            return
+        }
         ratingRequest = CompetencyRatingRequest(subordinateId: subordinateId, dayKey: d.dayKey, sessionId: d.id)
     }
 
     private func startMove(_ d: CompetencySessionDetailModel) {
         guard subscription.isPremium else { showPremiumAlert = true; return }
         resultLine = nil
-        moveRequest = CompHistMoveRequest(sessionId: d.id, dayKey: d.dayKey)
+        moveRequest = CompHistMoveRequest(sessionId: d.id, dayKey: d.dayKey, mentor: raterKey != nil)
     }
 
     private func askDelete(_ d: CompetencySessionDetailModel) {
@@ -215,10 +251,20 @@ struct CompetencyCellHistorySheet: View {
         CompetencyPalette.tint(isTrait: groupId == CompetencySetupBook.traitGroupId)
     }
 
+    /// [v25.606 v5a] 歷史列：我的＋帶訓者記的（新的日子在前；同一天我的在前）。小折線照舊只用 model.trend（我評的）
+    private func historyRows(_ m: CompetencyCellHistoryModel) -> [CompetencyHistoryRow] {
+        let mentor: [CompetencyHistoryRow] = CompetencyMath.mentorHistoryRows(groupId: groupId, itemId: itemId,
+                                                                              setup: lifeStore.competencySetup,
+                                                                              subordinateId: subordinateId,
+                                                                              mentorSessions: lifeStore.competencyMentorSessions(of: subordinateId))
+        return CompetencyMath.mergedHistoryRows(mine: m.rows, mentor: mentor)
+    }
+
     var body: some View {
         let m: CompetencyCellHistoryModel = model
+        let rows: [CompetencyHistoryRow] = historyRows(m)
         return NavigationStack {
-            CompHistCellList(model: m, tint: tint)
+            CompHistCellList(model: m, rows: rows, tint: tint)
                 .navigationTitle(m.title)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -238,6 +284,8 @@ private struct CompHistMoveRequest: Identifiable {
     let id = UUID()
     let sessionId: UUID
     let dayKey: String
+    /// [v25.606 v5a] 帶訓者記的那一張（撞期只跟同一位帶訓者比）
+    var mentor: Bool = false
 }
 
 /// 〔刪除這次評分〕要刪的那一張（確認框的字先存起來）
@@ -495,6 +543,8 @@ private struct CompHistMoveSheet: View {
     /// [v1a-2 裁定] 打開時 DatePicker 停的那一天。那一張的日子在這台晚於今天（別的時區評的）時是今天：
     /// 沒動就按〔完成〕不搬（不然會不小心搬到今天）
     let startKey: String
+    /// [v25.606 v5a] 帶訓者記的那一張（mentorMoveProblem＋moveCompetencyMentorSession）
+    let mentor: Bool
 
     @EnvironmentObject var lifeStore: LifeStore
     @Environment(\.dismiss) private var dismiss
@@ -505,6 +555,7 @@ private struct CompHistMoveSheet: View {
         self.subordinateId = subordinateId
         self.sessionId = request.sessionId
         self.onDone = onDone
+        self.mentor = request.mentor
         // 今天就用現在（中午 12 點在上午會晚於 DatePicker 的上限 ...Date()）；以前的日子用那天中午
         //（那一張的日子在這台時區晚於今天——別的時區評的——也用現在：DatePicker 不能超過 ...Date()；照評分畫面 key < t）
         let today: String = CompetencyMath.dayKey(Date())
@@ -558,8 +609,12 @@ private struct CompHistMoveSheet: View {
             dismiss()
             return
         }
-        let sessions: [CompetencySession] = lifeStore.competencySessions(of: subordinateId)
         let today: String = CompetencyMath.dayKey(Date())
+        if mentor {
+            finishMentor(s, key: key, today: today)
+            return
+        }
+        let sessions: [CompetencySession] = lifeStore.competencySessions(of: subordinateId)
         if let p = CompetencyMath.moveSessionProblem(s, to: key, sessions: sessions, today: today) {
             problem = p
             return
@@ -573,13 +628,38 @@ private struct CompHistMoveSheet: View {
             done(id, key, r)
         }
     }
+
+    /// [v25.606 v5a] 帶訓者記的那一張：「那一天已經有一張」只跟同一位帶訓者比；可以 → dismiss → 下一個 runloop 寫 store
+    private func finishMentor(_ s: CompetencySession, key: String, today: String) {
+        let others: [CompetencySession] = lifeStore.competencyMentorSessions(of: subordinateId)
+        if let p = CompetencyMath.mentorMoveProblem(s, to: key, mentorSessions: others, today: today) {
+            problem = p
+            return
+        }
+        let store: LifeStore = lifeStore
+        let id: UUID = sessionId
+        let done = onDone
+        dismiss()
+        DispatchQueue.main.async {
+            let r: String? = store.moveCompetencyMentorSession(id, toDay: key)
+            done(id, key, r)
+        }
+    }
 }
 
 // MARK: - 點一格的歷史（§13：沒有評語）
 
 private struct CompHistCellList: View {
     let model: CompetencyCellHistoryModel
+    /// [v25.606 v5a] 歷史那一節的列（我的＋帶訓者的；model.rows 只有我的）
+    let rows: [CompetencyHistoryRow]
     let tint: Color
+
+    /// [v25.606 v5a] 有走勢、歷史裡有帶訓者記的：「歷史」節 footer 一行
+    private var mentorFootnote: String? {
+        guard model.trend != nil, rows.contains(where: { $0.raterText != nil }) else { return nil }
+        return "帶訓者記的不畫進走勢。"
+    }
 
     var body: some View {
         List {
@@ -612,8 +692,14 @@ private struct CompHistCellList: View {
                     CompHistTrendBlock(trend: tr, tint: tint)
                 }
             }
-            Section("歷史") {
-                CompHistRows(rows: model.rows)
+            Section {
+                CompHistRows(rows: rows)
+            } header: {
+                Text("歷史")
+            } footer: {
+                if let f = mentorFootnote {
+                    Text(f)
+                }
             }
             if let o = model.otherLine {
                 Section {
@@ -684,7 +770,9 @@ private struct CompHistRowView: View {
     let row: CompetencyHistoryRow
 
     private var spoken: String {
-        var s: String = row.dayText + "，" + row.valueText
+        var s: String = row.dayText
+        if let w = row.raterText { s += "，帶訓者 " + w }
+        s += "，" + row.valueText
         if let d = row.detailText { s += "，" + d }
         return s
     }
@@ -694,6 +782,13 @@ private struct CompHistRowView: View {
             HStack {
                 Text(row.dayText)
                     .font(.subheadline)
+                // [v25.606 v5a] 帶訓者記的那一次「・陳怡君」（那一張存的名字）
+                if let w = row.raterText {
+                    Text("・" + w)
+                        .font(.subheadline)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
                 Spacer(minLength: 8)
                 Text(row.valueText)
                     .font(.subheadline.weight(.semibold))

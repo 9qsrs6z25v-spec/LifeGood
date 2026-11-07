@@ -9997,3 +9997,86 @@ extension LifeStore {
                                          xMid: xMid, potentialMid: potentialMid)
     }
 }
+
+// MARK: - [v25.606 職能雷達 v5a] 帶訓者、帶訓者評（radar/judge_v5a.md §C1、§C2；radar/build/v5a/brief.md §2.3）
+// 跟上面幾段同一套規矩：寫入每支一個 batched（mutateCompetencySetup／mutateCompetencyRatings）、唯讀時不寫、訂閱由畫面擋。
+// 帶訓者寫在 CompetencyAssignment.mentors（v1a 就宣告了）、帶訓者評寫在同一包評分（raterKind "mentor"）：沒有新的同步鍵、
+// Competency.swift 一個欄位都沒加。CompetencyIndex 照舊只收我評的（目前分數、熱力表、人才矩陣、匯出、給對方看都不會碰到帶訓者評）。
+// sim：radar/build/v5a/sim_v5a.py（set_mentor、clear_mentor、save_mentor、move_mentor…）。
+
+extension LifeStore {
+    /// 在職的部屬 id → 名字（帶訓者的名字、「（已不在名冊）」用；名字空白「這位同仁」）
+    var competencyMentorRoster: [UUID: String] {
+        var out: [UUID: String] = [:]
+        for p in competencyTeamPeople(activeSubordinates) where !p.archived {
+            out[p.id] = p.name
+        }
+        return out
+    }
+
+    /// 帶訓者設定小表單「從名冊挑」：在職、不是這位自己（照名冊順序）
+    func competencyMentorCandidates(for subordinateId: UUID) -> [CompetencyTeamPerson] {
+        CompetencyMath.mentorCandidates(competencyTeamPeople(activeSubordinates), excluding: subordinateId)
+    }
+
+    /// 這位同仁的帶訓者評（同一包評分裡 raterKind "mentor" 的；沒刪的、照日子排）。CompetencyIndex 只收我評的，所以這支直接掃
+    func competencyMentorSessions(of subordinateId: UUID) -> [CompetencySession] {
+        CompetencyMath.mentorSessions(competencyRatings.allSessions, subordinateId: subordinateId)
+    }
+
+    /// 設（或換）一組的帶訓者。mentorId 有＝從名冊挑（名字照名冊現在的名字存快照；不在名冊、是自己 → false）；
+    /// nil＝名冊外的人（name 自己打，最多 10 字；空的 → false）。startKey「2026-05-04」。唯讀 → false
+    @discardableResult
+    func setCompetencyMentor(_ subordinateId: UUID, groupId: UUID, mentorId: UUID?, name: String?, startKey: String) -> Bool {
+        guard !competencySetup.isReadOnlyHere, CompetencyMath.parseDay(startKey) != nil else { return false }
+        var snap: String? = CompetencyMath.cleanMentorName(name)
+        if let mid = mentorId {
+            guard mid != subordinateId, let n = competencyMentorRoster[mid] else { return false }
+            snap = CompetencyMath.cleanMentorName(n)
+        }
+        guard let finalName = snap else { return false }
+        mutateCompetencySetup { b, now in
+            b = CompetencyMath.settingMentor(b, subordinateId: subordinateId, groupId: groupId, mentorId: mentorId,
+                                             mentorName: finalName, startKey: startKey, now: now)
+        }
+        return true
+    }
+
+    /// 〔拿掉帶訓者〕（舊的帶訓者評照留）
+    func clearCompetencyMentor(_ subordinateId: UUID, groupId: UUID) {
+        mutateCompetencySetup { b, now in
+            b = CompetencyMath.clearingMentor(b, subordinateId: subordinateId, groupId: groupId, now: now)
+        }
+    }
+
+    /// 存一張帶訓者評：s＝評分畫面帶訓者模式用 CompetencyMath.buildSession 組好的（existing 是 mentorRatingSessions 那一份）；
+    /// 這裡蓋回 raterKind "mentor"、raterId、raterName（CompetencyMath.stampingMentor）再寫。
+    /// 同一個 id 已經有、而且是我評的 → 不寫（不准把我評的那一張蓋成帶訓者評）
+    func saveCompetencyMentorSession(_ s: CompetencySession, rater: CompetencyRaterChoice) {
+        mutateCompetencyRatings { b, _ in
+            let old: CompetencySession? = b.session(s.id)
+            if let o = old, !CompetencyMath.isMentorSession(o) { return }
+            b.upsertSession(CompetencyMath.stampingMentor(s, rater: rater, existing: old))
+        }
+    }
+
+    /// 帶訓者記的那一張改日期（「那一天已經有一張」只跟同一位帶訓者的比）。不行回一句話，可以回 nil
+    @discardableResult
+    func moveCompetencyMentorSession(_ id: UUID, toDay day: String) -> String? {
+        guard !competencyRatings.isReadOnlyHere else { return "這台的 App 比較舊，評分請在已更新的那台做" }
+        guard let s = competencyRatings.session(id), s.isLive, CompetencyMath.isMentorSession(s) else { return "找不到這次評分" }
+        let today: String = CompetencyMath.dayKey(Date())
+        if let problem = CompetencyMath.mentorMoveProblem(s, to: day, mentorSessions: competencyMentorSessions(of: s.subordinateId),
+                                                          today: today) {
+            return problem
+        }
+        guard day != s.dayKey else { return nil }
+        mutateCompetencyRatings { b, now in
+            guard var x = b.session(id), x.isLive else { return }
+            x.dayKey = day
+            x.updatedAt = now
+            b.upsertSession(x)
+        }
+        return nil
+    }
+}

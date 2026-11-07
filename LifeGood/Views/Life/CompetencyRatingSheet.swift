@@ -42,6 +42,16 @@ import SwiftUI
 // • 按〔儲存〕照原本的存檔（先 dismiss、下一個 runloop 寫 store、onSaved），換下一位由 host 決定。
 // 要退回這一件：刪 batchHasNext／nextTapped／goNext／showNextAsk、toolbar 的 if 那一段、content 的 .modifier、
 // openSession 的 batch 那一行、CompRatingBatchHeader、CompRatingNextAsk、compRatingBatchSpoken。
+//
+// [v25.606 職能雷達 v5a] 帶訓者模式（radar/build/v5a/brief.md §1 C2、§4 G2 1–8；judge_v5a §C2、§13）
+// • request.rater == nil：跟 v25.605 一模一樣（新加的都只在 rater 有值時才動）。
+// • sessions 一律走 ratingSessions()：帶訓者模式＝CompetencyMath.mentorRatingSessions(那位帶訓者記的，已經換成我評的樣子)，
+//   sessionOn（同一天同一位＝同一張）、ratingPlan（〔照上次〕＝那位自己的上一次）、draft(from:)、footerCounts、buildSession 照舊叫。
+// • 只列那位帶的組（CompetencyMath.mentorPlan；改舊的那一張時那一張有評的組也留著）；最上面一行「陳怡君（帶訓者）的評分」
+//  （CompRatingMentorHeader）；不出總評欄（§13）；目標那幾行照舊（這位同仁的職等目標）。
+// • 存檔：buildSession 照舊 → 先 dismiss、下一個 runloop store.saveCompetencyMentorSession(s, rater:)（LifeStore 裡蓋回
+//   raterKind "mentor"、raterId、raterName；這裡不碰 raterKind）；小提示 CompetencyMath.mentorSavedToast。
+// 要退回這一件：刪 ratingSessions()、requestedSession／openSession／content／editingLine／save 裡 rater 那幾行、CompRatingMentorHeader。
 
 /// 打開評分畫面的請求（sheet(item:) 用）
 struct CompetencyRatingRequest: Identifiable {
@@ -53,6 +63,9 @@ struct CompetencyRatingRequest: Identifiable {
     var sessionId: UUID? = nil
     /// [v25.602 v2]〔一次評全課〕的這一頁（「2／3　陳怡君」、預設勾的組、後面還有沒有人）；nil＝照舊一位一張（主控加的契約）
     var batch: CompetencyRatingBatch? = nil
+    /// [v25.606 職能雷達 v5a] 帶訓者模式：記這位帶訓者說的分數（存成 raterKind "mentor"；只列這位帶的組、不寫總評）。
+    /// nil＝我評（跟 v25.605 一模一樣）（主控加的契約）
+    var rater: CompetencyRaterChoice? = nil
 }
 
 struct CompetencyRatingSheet: View {
@@ -154,6 +167,10 @@ struct CompetencyRatingSheet: View {
                     if let b = request.batch {
                         CompRatingBatchHeader(text: b.positionText)
                     }
+                    // [v25.606 v5a] 帶訓者模式最上面一行「陳怡君（帶訓者）的評分」
+                    if let r = request.rater {
+                        CompRatingMentorHeader(text: CompetencyMath.mentorRaterLine(r))
+                    }
                     topCard
                     if loaded && sections.isEmpty {
                         CompRatingEmptyNote()
@@ -161,7 +178,10 @@ struct CompetencyRatingSheet: View {
                     ForEach(sections) { sec in
                         sectionBlock(sec)
                     }
-                    noteCard
+                    // [v25.606 v5a] 帶訓者模式不寫總評（§13）
+                    if request.rater == nil {
+                        noteCard
+                    }
                 }
                 .disabled(readOnly)
                 .padding(.horizontal)
@@ -261,6 +281,12 @@ struct CompetencyRatingSheet: View {
 
     private var readOnly: Bool { lifeStore.competencyReadOnly }
 
+    /// [v25.606 v5a] 這張用的評分：我評＝competencySessions(of:)；帶訓者模式＝那位帶訓者記的（已經換成我評的樣子，既有規則直接用）
+    private func ratingSessions() -> [CompetencySession] {
+        guard let r = request.rater else { return lifeStore.competencySessions(of: request.subordinateId) }
+        return CompetencyMath.mentorRatingSessions(lifeStore.competencyMentorSessions(of: request.subordinateId), rater: r)
+    }
+
     private var includedSections: [CompetencyRatingSection] {
         sections.filter { included.contains($0.id) }
     }
@@ -332,8 +358,13 @@ struct CompetencyRatingSheet: View {
     }
 
     /// 「今天已經評過一次，這次會改那一張」「10/30 已經有一張，這次會改那一張」
+    /// [v25.606 v5a] 帶訓者模式「今天已經記過一次陳怡君的評分，這次會改那一張」「11/2 已經有一張陳怡君的評分，這次會改那一張」
     private var editingLine: String? {
         guard editing != nil else { return nil }
+        if let mn = request.rater?.name {
+            if dayKey == today { return "今天已經記過一次" + mn + "的評分，這次會改那一張" }
+            return CompetencyMath.shortDay(dayKey) + " 已經有一張" + mn + "的評分，這次會改那一張"
+        }
         if dayKey == today { return "今天已經評過一次，這次會改那一張" }
         return CompetencyMath.shortDay(dayKey) + " 已經有一張，這次會改那一張"
     }
@@ -464,7 +495,7 @@ struct CompetencyRatingSheet: View {
     private func loadIfNeeded() {
         guard !loaded else { return }
         let t: String = CompetencyMath.dayKey(Date())
-        let sessions: [CompetencySession] = lifeStore.competencySessions(of: request.subordinateId)
+        let sessions: [CompetencySession] = ratingSessions()
         // [v25.600 v1a-2] 評分紀錄〔改分數〕：打開的就是那一張（日子＝那一張的日子），不走 sessionOn。
         // 要退回這一件：target 拿掉（＝v1a-1 照 dayKey 找）
         let target: CompetencySession? = requestedSession()
@@ -485,6 +516,11 @@ struct CompetencyRatingSheet: View {
 
     /// [v25.600 v1a-2] request.sessionId 那一張還在（沒刪、我評的、是這位同仁的、日子認得）才用；不然 nil（照日子找）
     private func requestedSession() -> CompetencySession? {
+        // [v25.606 v5a] 帶訓者模式：在那位帶訓者記的（ratingSessions，已經是這位同仁的）裡找那一張（沒刪、日子認得）
+        if request.rater != nil {
+            guard let rid = request.sessionId else { return nil }
+            return ratingSessions().first { $0.id == rid && $0.isLive && CompetencyMath.parseDay($0.dayKey) != nil }
+        }
         guard let id = request.sessionId, let s = lifeStore.competencyRatings.session(id) else { return nil }
         guard s.isLive, s.isByMe, s.subordinateId == request.subordinateId else { return nil }
         guard CompetencyMath.parseDay(s.dayKey) != nil else { return nil }
@@ -499,16 +535,18 @@ struct CompetencyRatingSheet: View {
         commitAllInput()
         focusedKey = nil
         dayKey = key
-        let sessions: [CompetencySession] = lifeStore.competencySessions(of: request.subordinateId)
+        let sessions: [CompetencySession] = ratingSessions()
         let e: CompetencySession? = CompetencyMath.sessionOn(key, sessions: sessions)
         openSession(e, sessions: sessions, keepDraft: true)
     }
 
     private func openSession(_ e: CompetencySession?, sessions: [CompetencySession], keepDraft: Bool) {
         let oldIds: Set<UUID> = Set(sections.map { $0.id })
-        let plan: [CompetencyRatingSection] = CompetencyMath.ratingPlan(setup: lifeStore.competencySetup,
-                                                                       subordinateId: request.subordinateId,
-                                                                       sessions: sessions, dayKey: dayKey, editing: e)
+        let fullPlan: [CompetencyRatingSection] = CompetencyMath.ratingPlan(setup: lifeStore.competencySetup,
+                                                                           subordinateId: request.subordinateId,
+                                                                           sessions: sessions, dayKey: dayKey, editing: e)
+        // [v25.606 v5a] 帶訓者模式只列那位帶的組（改舊的那一張時那一張有評的組也留著）
+        let plan: [CompetencyRatingSection] = request.rater.map { CompetencyMath.mentorPlan(fullPlan, rater: $0, editing: e) } ?? fullPlan
         let ids: Set<UUID> = Set(plan.map { $0.id })
         let kept: [CompetencyCellKey: CompetencyDraftCell] = keepDraft ? keptDraft(for: plan) : [:]
         editing = e
@@ -786,12 +824,19 @@ struct CompetencyRatingSheet: View {
             traitRange: openedTrait, skillRange: openedSkill, draft: effectiveDraft, sections: sections,
             setup: lifeStore.competencySetup, note: note, gradeTitleId: gradeId, gradeLabel: gradeLabel(gradeId),
             now: Date())
-        let toast: String = CompetencyMath.savedToast(s)
+        // [v25.606 v5a] 帶訓者模式：小提示「已儲存 11/2 陳怡君（帶訓者）的評分（3 格）」、寫 saveCompetencyMentorSession
+        //（raterKind／raterId／raterName 在 LifeStore 裡蓋回）
+        let rater: CompetencyRaterChoice? = request.rater
+        let toast: String = rater.map { CompetencyMath.mentorSavedToast(s, rater: $0) } ?? CompetencyMath.savedToast(s)
         let store: LifeStore = lifeStore
         let callback: ((String) -> Void)? = onSaved
         dismiss()
         DispatchQueue.main.async {
-            store.saveCompetencySession(s)
+            if let r = rater {
+                store.saveCompetencyMentorSession(s, rater: r)
+            } else {
+                store.saveCompetencySession(s)
+            }
             callback?(toast)
         }
     }
@@ -836,6 +881,22 @@ fileprivate func compRatingBatchSpoken(_ text: String) -> String {
     let parts: [String] = head.components(separatedBy: "／")
     guard parts.count == 2 else { return text }
     return "第 " + parts[0] + " 位，共 " + parts[1] + " 位，" + name
+}
+
+// MARK: - [v25.606 v5a] 帶訓者模式最上面一行
+
+/// 「陳怡君（帶訓者）的評分」
+private struct CompRatingMentorHeader: View {
+    let text: String
+
+    var body: some View {
+        Label(text, systemImage: "person.2")
+            .font(.subheadline.weight(.semibold))
+            .foregroundStyle(CompetencyPalette.trait)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .accessibilityAddTraits(.isHeader)
+    }
 }
 
 // MARK: - [v25.602 v2]〔一次評全課〕的小零件

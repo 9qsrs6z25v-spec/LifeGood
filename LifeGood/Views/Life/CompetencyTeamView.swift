@@ -11,6 +11,9 @@ import SwiftUI
 //   [v25.605 v4b] 熱力表右上〔分享…〕（先選〔圖片｜文字〕→ 提醒「圖上有 N 位同仁的名字和職能分數…」→ 分享面板）：使用者自己按的分享，
 //   看不擋訂閱；照畫面上那一份 model（列照 m.rows，不照排序）；部門字讀人才矩陣的 talentMatrixDeptFilter（只讀、不寫）。
 //   規則在 CompetencyMath.heatShare…，提醒／面板在 CompetencyTeamTools（CompetencyHeatShareFlow），圖在 CompetencyTeamShareImage。
+//   [v25.606 v5a] 最下面「帶訓中」（CompetencyTeamTools 的 CompetencyTeamMentoringSection；字照 CompetencyMath.mentoringLines）：
+//   一位帶訓者一行「陳怡君 → 王小明（Gas）」，點學的人開那位的〔職能〕（既有的 CompTeamPersonSheet，看不擋）；
+//   熱力表、四張卡、課平均不加帶訓者評。
 // • 字不用「他／她」：用名字或「這位同仁」。
 // • 熱力表不用 Grid／Table／LazyHGrid：固定的名字欄 VStack＋ScrollView(.horizontal) 裡「一組一個 VStack（組名＋一欄一個 VStack）」，
 //   一欄一個 VStack 紅框橘框才能整欄框住；名字欄與格子用同一組 @ScaledMetric 常數（CompTeamMetrics）才對得齊。
@@ -91,6 +94,14 @@ struct CompetencyTeamView: View {
         CompetencyTeamBatchButton(members: members)
         CompetencyTeamFindCard(model: m)
         CompetencyTeamRadarSection(model: m, members: members)
+        CompetencyTeamMentoringSection(lines: mentoringLines, onOpen: openLearner)
+    }
+
+    /// [v25.606 v5a] 最下面「帶訓中」（名單＝人才矩陣現在的名單；已轉出的不列）
+    private var mentoringLines: [CompetencyMentoringLine] {
+        CompetencyMath.mentoringLines(setup: lifeStore.competencySetup,
+                                      people: lifeStore.competencyTeamPeople(members),
+                                      roster: lifeStore.competencyMentorRoster)
     }
 
     // MARK: 排序（第一下高到低、第二下低到高、第三下回原順序；切了區找不到那一欄就照原順序）
@@ -158,6 +169,11 @@ struct CompetencyTeamView: View {
         let name: String = raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "這位同仁" : raw
         pendingPerson = CompTeamPersonRequest(id: id, name: name)
         riskRequest = nil
+    }
+
+    /// [v25.606 v5a]「帶訓中」點學的人：開那位的〔職能〕（只是看，不擋訂閱）
+    private func openLearner(_ id: UUID, _ name: String) {
+        personRequest = CompTeamPersonRequest(id: id, name: name)
     }
 
     /// 風險 sheet 關好了：有按〔看某某〕才開下一張（下一個 runloop）；往下滑關掉的什麼都不開
