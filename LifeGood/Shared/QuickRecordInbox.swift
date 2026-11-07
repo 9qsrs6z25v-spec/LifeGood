@@ -36,6 +36,13 @@ import Foundation
 // [手錶 v6] v25.578（watch/judge.md §2.14、§4.1；watch/build/v6/brief.md §2）：旅途中記的帳——
 //   • QuickRecordEntry 多 currencyCode、foreignAmount、rateShown、tripPlanId、tripStopId（全部選填；舊檔、小工具寫的都沒有＝台幣、不連旅遊）。
 //     amount 照舊是台幣（手錶上看到的那個，iPhone 入帳不重算）
+// [wallet] v25.608（radar/judge_wallet.md §C；radar/build/wallet/brief.md）：Apple Pay 自動記帳也進這個收件匣——
+//   • source "wallet"（walletSource）：捷徑「交易」自動化 → App 的 WalletRecordIntent（App target）寫的
+//   • QuickRecordEntry 多 walletCard（捷徑給的卡片名稱原字；選填，舊檔、小工具、手錶寫的都沒有）。
+//     amount 照手錶 v6 的規矩是台幣（外幣在寫進來之前就用設定裡的匯率換好）；amountText 是空的（不給任何地方畫）
+//   • pending(includeWatch:) 預設也**不含** wallet 來的：小工具「待入帳 N 筆」「✓ 已記…〔復原〕」只畫自己按的；
+//     includeWatch: true（add 判斷手滑、importOverdue）照舊看全部
+//   • 其他（add、undo、take、take(where:)、watchIds、finish、postChanged）一行沒改
 
 /// 收件匣裡的一筆（使用者按了一顆「7-11 咖啡 NT$65」）
 struct QuickRecordEntry: Codable, Equatable, Identifiable {
@@ -68,9 +75,13 @@ struct QuickRecordEntry: Codable, Equatable, Identifiable {
     /// [手錶 v6] 記到哪一趟、哪一站 → Expense.linkedTripPlanId／linkedTripStopId（入帳時那一趟、那一站還在才連）
     var tripPlanId: UUID? = nil
     var tripStopId: UUID? = nil
+    /// [wallet] Apple Pay 自動記帳：捷徑給的卡片名稱（「國泰世華 CUBE 卡」；沒給＝nil）。只存名稱，不存卡號
+    var walletCard: String? = nil
 
     /// [手錶 v2] 手錶記的
     var isFromWatch: Bool { source == QuickRecordInbox.watchSource }
+    /// [wallet] Apple Pay 自動記帳記的（捷徑「交易」自動化）
+    var isFromWallet: Bool { source == QuickRecordInbox.walletSource }
 
     /// 從範本做一筆（小工具的 QuickRecordIntent 用；它手上是範本的各個欄位，見 init(templateId:…)）
     init(template t: WidgetQuickTemplate, now: Date = Date()) {
@@ -105,6 +116,8 @@ enum QuickRecordInbox {
     static let darwinNotificationName = "com.lifegood.app.quickinbox.changed"
     /// [手錶 v2] QuickRecordEntry.source：手錶記的
     static let watchSource = "watch"
+    /// [wallet] QuickRecordEntry.source：Apple Pay 自動記帳（App 的 WalletRecordIntent）記的
+    static let walletSource = "wallet"
 
     private static let pendingExtension = "json"
     private static let takenExtension = "taken"
@@ -160,10 +173,11 @@ enum QuickRecordInbox {
     /// 還沒被 App 收走的，依按下的時間由舊到新（小工具畫「待入帳 N 筆」「✓ 已記…」用）。
     /// [手錶 v2] includeWatch 預設 false：手錶來的不算（小工具不畫、不能〔復原〕）；要全部的（add 判斷手滑、
     /// QuickRecordImporter.importOverdue）傳 true
+    /// [wallet] 預設也不含 Apple Pay 自動記的（小工具不畫、不能〔復原〕）；傳 true 照舊是全部
     static func pending(includeWatch: Bool = false) -> [QuickRecordEntry] {
         guard let folder = folderURL(create: false) else { return [] }
         let entries = files(withExtension: pendingExtension, in: folder).compactMap { decode($0.url) }
-        let kept = includeWatch ? entries : entries.filter { !$0.isFromWatch }
+        let kept = includeWatch ? entries : entries.filter { !$0.isFromWatch && !$0.isFromWallet }
         return kept.sorted { $0.createdAt < $1.createdAt }
     }
 

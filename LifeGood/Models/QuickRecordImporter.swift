@@ -33,6 +33,12 @@ import UIKit
 //   • start 多收 life（預設 nil，舊的呼叫照樣編得過；LifeGoodApp 傳 lifeStore）：入帳時確認那一趟、那一站還在才連
 //   • makeExpense：金額一律用收件匣那一筆的台幣（手錶上看到的那個，不用今天的匯率重算）；currencyCode＝那一筆的幣別
 //     （沒有＝"NT$"）；連旅遊照 AddExpenseView 存檔那一段：只有變動支出、那一趟還在才連，站要還在那一趟裡（不在＝算整趟）
+//
+// [wallet] v25.608（radar/judge_wallet.md §C2；radar/build/wallet/brief.md）：Apple Pay 自動記帳（source "wallet"）也走這裡——
+//   • importFromWallet()：只收 wallet 來的（WalletIntake 在 App 行程裡、isReady 時叫；小工具剛按的不動，同主控定案 13）
+//   • importEntries 迴圈：wallet 那筆改走 WalletImport.makeExpense（分類照同商家上一次、連卡片），不走 makeExpense；
+//     nil／"watch" 那幾筆一行都沒改（makeExpense、連車、旅遊、watch_imported_ids 照舊）
+//   • 存好之後：連到銀行帳戶（金融卡）的照 AIExpenseCommitter 寫扣款紀錄（WalletImport.syncBankWithdrawals；刷信用卡的不寫）
 
 @MainActor
 final class QuickRecordImporter {
@@ -87,6 +93,13 @@ final class QuickRecordImporter {
         return importEntries(QuickRecordInbox.take(where: { $0.isFromWatch }))
     }
 
+    /// [wallet] 只收 Apple Pay 自動記的（WalletIntake 寫完收件匣、App 活著時叫）。小工具那幾筆照舊等 App 回前景（主控定案 13）
+    @discardableResult
+    func importFromWallet() -> Int {
+        guard isReady else { return 0 }
+        return importEntries(QuickRecordInbox.take(where: { $0.isFromWallet }))
+    }
+
     /// 交出來的那幾筆 → 帳本，回傳新增幾筆（importPending、importFromWatch 共用）
     private func importEntries(_ entries: [QuickRecordEntry]) -> Int {
         guard let expense = expenseStore, let finance = financeStore else { return 0 }
@@ -102,6 +115,15 @@ final class QuickRecordImporter {
 
         for entry in entries {
             guard !known.contains(entry.id) else { continue }
+            // [wallet] Apple Pay 自動記的走自己那一支（不連車、不連旅遊）；ledger 用這一批之前的帳本
+            if entry.isFromWallet {
+                if let walletBuilt = WalletImport.makeExpense(from: entry, ledger: expense.expenses, life: lifeStore,
+                                                              expense: expense, finance: finance) {
+                    known.insert(entry.id)
+                    newExpenses.append(walletBuilt)
+                }
+                continue
+            }
             guard let built = Self.makeExpense(from: entry, vehicles: vehicles, plans: plans) else { continue }
             known.insert(entry.id)
             newExpenses.append(built)
@@ -115,6 +137,11 @@ final class QuickRecordImporter {
         expense.addExpenses(newExpenses)
         if vehiclesChanged {
             finance.vehicles = vehicles
+        }
+        // [wallet] Apple Pay 自動記的、連到銀行帳戶（金融卡）的：照 AIExpenseCommitter 寫銀行扣款紀錄（刷信用卡的不寫）
+        let walletIds = Set(entries.filter { $0.isFromWallet }.map(\.id))
+        if !walletIds.isEmpty, let life = lifeStore {
+            WalletImport.syncBankWithdrawals(newExpenses.filter { walletIds.contains($0.id) }, expense: expense, life: life)
         }
 
         // 交出來的每一筆（含跳過、壞掉的）都要 finish，不然每次都卡在收件匣

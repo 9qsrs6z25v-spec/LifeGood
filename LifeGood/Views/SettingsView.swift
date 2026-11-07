@@ -718,6 +718,8 @@ struct SettingsView: View {
                     }
                 }
             }
+            // [wallet] v25.608 Apple Pay 自動記帳（捷徑「交易」自動化 → 記一筆支出；卡片對應、最近自動記的）
+            NavigationLink(destination: WalletAutoRecordView().appStores()) { WalletAutoRecordSettingsRow() }
         } header: {
             Text("電子發票")
         } footer: {
