@@ -33,7 +33,8 @@ import AppIntents
 
 struct WalletRecordIntent: AppIntent {
     static var title: LocalizedStringResource = "記一筆支出"
-    static var description = IntentDescription("用 Apple Pay 付款時，把金額、商家、卡片記成 LifeGood 的一筆變動支出（在背景記，不打開 App）")
+    // [v25.609] App Intent 的說明不能有「Apple」這個字（App Store Connect ITMS-90626 退件），改成「感應付款」
+    static var description = IntentDescription("感應付款時，把金額、商家、卡片記成 LifeGood 的一筆變動支出（在背景記，不打開 App）")
     /// 不開 App：在背景寫進待入帳就結束（App 開著就當場收進帳本）
     static var openAppWhenRun: Bool = false
 
