@@ -7086,6 +7086,7 @@ struct PromotionSheet: View {
             note: note.trimmingCharacters(in: .whitespacesAndNewlines)
         )
         lifeStore.promoteSubordinate(subordinateId, to: sel, record: record)
+        lifeStore.saveCompetencyPromotionMilestone(subordinateId, record: record)   // [v25.607 職能雷達 v5b] 升職前的職能分數留一份（生效日之前有評分才存）。要退回這一件：刪這一行
         dismiss()
     }
 }

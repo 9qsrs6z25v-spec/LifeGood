@@ -9681,6 +9681,8 @@ extension LifeStore {
                     s.updatedAt = now
                     b.upsertSession(s)
                 }
+                // [v25.607 職能雷達 v5b] 升職快照一起清（找不到人的那幾份蓋墓碑；CompetencyMath.purgingMilestones）。要退回這一件：刪這兩行
+                b.milestones = CompetencyMath.purgingMilestones(b.milestones, knownIds: Set(subordinates.map { $0.id }), now: now)
             }
             mutateCompetencySetup { b, now in
                 for aid in assignmentIds {
@@ -10078,5 +10080,104 @@ extension LifeStore {
             b.upsertSession(x)
         }
         return nil
+    }
+}
+
+// MARK: - [v25.607 職能雷達 v5b] 升職快照、一對一議程、互評參考（radar/judge_v5b.md §C；radar/build/v5b/brief.md §2.2）
+// 升職快照寫在 CompetencyRatingBook.milestones（v1a 就宣告了；一個 batched：mutateCompetencyRatings）；議程走
+// mutateSubordinateMeetingFields（MeetingQuickAddItemSheet.save 同一個寫法）。promoteSubordinate、mutateSubordinateMeetingFields
+// 本身一行都沒改。唯讀時升職快照不寫；訂閱由畫面擋。沒有新的同步鍵、Competency.swift／LifeModels 一個欄位都沒加。
+// 互評參考只是讀（latestCells＋matrixRatio），不寫票。sim：radar/build/v5b/sim_v5b.py（store_save_milestone、store_add_agenda…）。
+
+extension LifeStore {
+    /// 升職當下留一份：PromotionSheet.applyPromotion 在 promoteSubordinate 之後叫（使用者自己按〔確認升職〕，不是開 App 自動寫）；
+    /// 〔留一份〕也走這支。生效日之前沒有任何我評的分數、唯讀、同一筆升職已經有一份 → 不寫、回 false
+    @discardableResult
+    func saveCompetencyPromotionMilestone(_ subordinateId: UUID, record: PromotionRecord) -> Bool {
+        guard !competencyRatings.isReadOnlyHere else { return false }
+        let day: String = CompetencyMath.dayKey(record.date)
+        guard let m = CompetencyMath.promotionMilestone(subordinateId: subordinateId, recordId: record.id, dayKey: day,
+                                                        fromTitle: record.fromTitle,
+                                                        sessions: competencySessions(of: subordinateId),
+                                                        setup: competencySetup, now: Date()),
+              CompetencyMath.savingMilestone(competencyRatings, m) != nil else { return false }
+        mutateCompetencyRatings { b, _ in
+            if let nb = CompetencyMath.savingMilestone(b, m) { b = nb }
+        }
+        return true
+    }
+
+    /// 〔留一份〕：以前的升職（〔職能〕分頁現算的那一份）存起來。找不到這筆升職紀錄 → false
+    @discardableResult
+    func keepCompetencyPromotionMilestone(_ subordinateId: UUID, promotionId: UUID) -> Bool {
+        guard let sub = subordinates.first(where: { $0.id == subordinateId }),
+              let r = sub.promotions.first(where: { $0.id == promotionId }) else { return false }
+        return saveCompetencyPromotionMilestone(subordinateId, record: r)
+    }
+
+    /// 〔職能〕分頁「升職」一段（新的在前；留了的照留的、沒留的現算）。沒有升職紀錄＝空
+    func competencyPromotionRows(of subordinateId: UUID) -> [CompetencyPromotionRow] {
+        guard let sub = subordinates.first(where: { $0.id == subordinateId }), !sub.promotions.isEmpty else { return [] }
+        let now = Date()
+        return CompetencyMath.promotionRows(promotions: sub.promotions, ratings: competencyRatings,
+                                            subordinateId: subordinateId,
+                                            sessions: competencySessions(of: subordinateId),
+                                            setup: competencySetup, grades: competencyGradeRefs,
+                                            today: CompetencyMath.dayKey(now), now: now)
+    }
+
+    /// 升職快照明細（CompetencyMilestoneView 用；這筆升職不在了、生效日之前沒評過 nil）
+    func competencyMilestoneDetail(of subordinateId: UUID, promotionId: UUID) -> CompetencyMilestoneDetailModel? {
+        guard let sub = subordinates.first(where: { $0.id == subordinateId }),
+              let r = sub.promotions.first(where: { $0.id == promotionId }),
+              let row = competencyPromotionRows(of: subordinateId).first(where: { $0.id == promotionId }) else { return nil }
+        return CompetencyMath.milestoneDetail(row, toTitle: r.toTitle, toGradeId: r.toGradeTitleId,
+                                              setup: competencySetup, subordinateId: subordinateId,
+                                              archivedPerson: OrgMoveIndex.isArchived(subordinateId),
+                                              sessions: competencySessions(of: subordinateId),
+                                              grades: competencyGradeRefs,
+                                              today: CompetencyMath.dayKey(Date()))
+    }
+
+    /// 這位的一對一會議（會議名稱照 SubExportComposer.isOneOnOneName）
+    func competencyOneOnOneMeetings(of subordinateId: UUID) -> [SubordinateMeeting] {
+        guard let sub = subordinates.first(where: { $0.id == subordinateId }) else { return [] }
+        return sub.meetings.filter { SubExportComposer.isOneOnOneName($0.topic) }
+    }
+
+    /// 〔加到一對一議程…〕要不要出現（有一對一會議）
+    func competencyHasOneOnOne(_ subordinateId: UUID) -> Bool {
+        !competencyOneOnOneMeetings(of: subordinateId).isEmpty
+    }
+
+    /// 〔加到一對一議程…〕上面「哪一場」（第一個＝預設；CompetencyMath.oneOnOneChoices）
+    func competencyOneOnOneChoices(of subordinateId: UUID) -> [CompetencyOneOnOneChoice] {
+        CompetencyMath.oneOnOneChoices(competencyOneOnOneMeetings(of: subordinateId), now: Date())
+    }
+
+    /// 〔加入議程〕：勾的那幾行加進那一場（CompetencyMath.addingAgenda；一次存檔）。回傳加了幾個（一模一樣的已經有就不加；0＝沒寫）
+    @discardableResult
+    func addCompetencyAgendaItems(subordinateId: UUID, meetingId: UUID, scheduledDate: Date?, contents: [String]) -> Int {
+        guard let sub = subordinates.first(where: { $0.id == subordinateId }),
+              let m = sub.meetings.first(where: { $0.id == meetingId }),
+              CompetencyMath.addingAgenda(m, scheduledDate: scheduledDate, contents: contents).added > 0 else { return 0 }
+        var added = 0
+        mutateSubordinateMeetingFields(subordinateId: subordinateId, meetingId: meetingId) { mt in
+            let r = CompetencyMath.addingAgenda(mt, scheduledDate: scheduledDate, contents: contents)
+            mt = r.meeting
+            added = r.added
+        }
+        return added
+    }
+
+    /// 互評〔顯示職能參考〕這台能不能開（設過職能項目、有項目）
+    var competencyBallotReferenceAvailable: Bool {
+        !CompetencyMath.matrixAxisOptions(setup: competencySetup).isEmpty
+    }
+
+    /// 互評〔顯示職能參考〕每位那一行「職能：本職學能 58.3・人格 70」（只是看，不寫票；全都沒評 nil）
+    func competencyBallotReference(for personId: UUID) -> String? {
+        CompetencyMath.ballotReferenceLine(setup: competencySetup, personId: personId,
+                                           cells: CompetencyMath.latestCells(competencySessions(of: personId)))
     }
 }

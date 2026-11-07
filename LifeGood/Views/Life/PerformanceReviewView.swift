@@ -34,8 +34,19 @@ struct PerformanceBallotView: View {
     /// （要退回這一件：刪掉這個旗子與用到它的 5 處——占比欄 onChange、備註 Binding（noteBinding）、reload、flushDraft、move——
     ///  占比欄 onChange 與 reload 改回原本的寫法，shareDisplayText 可以留著不用。）
     @State private var editedSinceLoad = false
+    // [v25.607 職能雷達 v5b] 互評〔顯示職能參考〕（我自己評時才有；這台記住、出廠關；只是看，不進票）。要退回這一件：刪這一行與 showsCompetencyRefToggle、competencyRefText、ballotList／entryRow 各一行、CompRef… 兩個型別
+    @AppStorage("competency.ballotReference") private var showCompetencyRef = false
 
     private var isSelf: Bool { raterId == PerformanceBallot.selfRaterId }
+
+    /// [v25.607 v5b] 我自己評、設過職能項目才有〔顯示職能參考〕（替部屬記票沒有）
+    private var showsCompetencyRefToggle: Bool { isSelf && lifeStore.competencyBallotReferenceAvailable }
+
+    /// [v25.607 v5b] 每一位那一行「職能：本職學能 55.6・人格 66.7」（開關關著、沒評 nil）
+    private func competencyRefText(_ personId: UUID) -> String? {
+        guard showsCompetencyRefToggle && showCompetencyRef else { return nil }
+        return lifeStore.competencyBallotReference(for: personId)
+    }
 
     private var raterGradeId: UUID? {
         if isSelf { return UUID(uuidString: selfGradeIdRaw) }
@@ -98,6 +109,7 @@ struct PerformanceBallotView: View {
     private func ballotList(_ b: PerformanceBallot) -> some View {
         List {
             headerSection(b)
+            if showsCompetencyRefToggle { CompRefToggleSection(isOn: $showCompetencyRef) }   // [v25.607 v5b]
             ForEach(Array(b.groups.enumerated()), id: \.element.id) { gi, group in
                 Section {
                     ForEach(Array(group.entries.enumerated()), id: \.element.id) { idx, entry in
@@ -274,6 +286,7 @@ struct PerformanceBallotView: View {
                 }
                 Text("基礎 \(base) 分 × 權重 = \(pointsText(points)) 分")
                     .font(.caption2).foregroundStyle(.secondary)
+                if let ref = competencyRefText(entry.id) { CompRefLine(text: ref) }   // [v25.607 v5b] 只是看，不進票
             }
             Spacer()
             Text(pointsText(points))
@@ -415,6 +428,32 @@ struct PerformanceBallotView: View {
         lifeStore.upsertPerformanceBallot(b)
         ballot = b
         dismiss()
+    }
+
+    /// [v25.607 v5b]〔顯示職能參考〕一節（只是看；不進票）
+    private struct CompRefToggleSection: View {
+        @Binding var isOn: Bool
+        var body: some View {
+            Section {
+                Toggle(isOn: $isOn) {
+                    Label("顯示職能參考", systemImage: "graduationcap")
+                }
+            } footer: {
+                Text(CompetencyMath.ballotReferenceNote + "。每位下面多一行職能分數（0–100，跟人才矩陣縱軸同一個數）；這台記住。")
+            }
+        }
+    }
+
+    /// [v25.607 v5b] 每一位那一行灰小字「職能：本職學能 55.6・人格 66.7」
+    private struct CompRefLine: View {
+        let text: String
+        var body: some View {
+            Text(text)
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
     }
 }
 

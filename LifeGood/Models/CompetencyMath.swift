@@ -5544,3 +5544,615 @@ extension CompetencyMath {
         return out
     }
 }
+
+// MARK: - [v25.607 職能雷達 v5b] 升職快照、一對一議程、互評參考（純函式；主控寫好，各組只呼叫、不准改）
+//（radar/judge_v5b.md §C；radar/build/v5b/brief.md §2；sim_v5b.py 一個函式一個函式對照，↔ 後面是 sim 的名字）
+// • 升職快照＝CompetencyRatingBook.milestones（v1a 就宣告了）：kind "promotion"、**id＝升職紀錄的 id**（同一筆升職兩台各存一份，
+//   合併照 id 只剩一份；顯示時再照 promotionRecordId 去重）、dayKey＝生效日（存的那台的時區）、gradeLabel＝升職前的職稱字
+//  （「E2 工程師」）、frozen＝生效日（含）之前我評的每一格最新那一筆（latestCells(through:)；不放評語）。
+// • 範圍：一區（人格／本職）的格子都是同一個範圍＝存那個範圍、原始分數一個字都不動；混了不同範圍＝存那一區現在的範圍、
+//   範圍不一樣的格子照比例換成整數（四捨五入）、那一分的名字拿掉。
+// • 以前的升職不自動補寫（不在開 App 時寫）：〔職能〕分頁用同一支 promotionMilestone 現算（不寫 store）、標「（現算）」；
+//   〔留一份〕才寫。刪掉的升職紀錄：快照留著、不顯示。
+// • 一對一：候選議程三種（目標差距、跟帶訓者看法不一樣、超過 6 個月沒評的組）；只用分數與項目名，不寫評語（§13）。
+//   議程字裡的「@」換成全形「＠」：不會變成標註，被標註加分（主動性）一分都不會動；加的議程沒有負責人、沒有到期日、沒完成。
+// • 互評參考：只是給你看的一行字（v3 人才矩陣縱軸那個 0–100），不進票、不進排名、加總、匯出、分享。
+// • 潛力、主動性、綜合分數、ScoreWeights、互評的計算一行都不碰；沒有新的同步鍵、沒有新的模型欄位。
+// • 通知、小工具、手錶、鎖定畫面、靈動島一個字都不加。字不用「他／她」。
+
+/// 〔職能〕分頁「升職」一段一列（一筆升職紀錄）
+struct CompetencyPromotionRow: Equatable, Identifiable {
+    /// ＝升職紀錄 id（PromotionRecord.id）
+    let id: UUID
+    /// 生效日「2026-07-01」（留了的照留的那一天；現算的照這台的時區）
+    let dayKey: String
+    /// 「7/1 升 E3 資深工程師（那時 E2）」（跟今天不同年「2025/7/1 …」）
+    let title: String
+    /// 現算的（還沒留一份）「（現算）」；留了 nil
+    let computedNote: String?
+    /// 「12 格」
+    let cellCountText: String
+    /// 留了的那一份，或現算的那一份（現算的沒有寫進 store）
+    let milestone: CompetencyMilestone
+    /// VoiceOver 一句
+    let accessibilityText: String
+
+    var computed: Bool { computedNote != nil }
+}
+
+/// 升職快照明細（CompetencyMilestoneView 只照這個畫）
+struct CompetencyMilestoneDetailModel: Equatable, Identifiable {
+    /// ＝升職紀錄 id
+    let id: UUID
+    /// 「升 E3 前的樣子・7/1」
+    let title: String
+    /// 「2026/7/1 升 E3 資深工程師」「那時：E2 工程師」「評了 12 格」「人格特質 1–5・本職學能 1–5」
+    let infoLines: [String]
+    /// 現算的（還沒留一份）
+    let computed: Bool
+    /// 現算的一句（留了 nil）
+    let computedLine: String?
+    /// 那時的雷達（唯讀；評分紀錄明細同一種畫法、不疊上一次；目標照那時的職等）
+    let cards: [CompetencyChartModel]
+    /// 〔跟現在比〕：現在的卡片（實線）、灰虛線＝升職前那一份（不疊目標）
+    let compareCards: [CompetencyChartModel]
+    /// 「實線是現在，灰色虛線是升職前 7/1」
+    let compareExplain: String
+    /// 那時的職稱對不到職等表（而且有訂目標）：「那時的職等「E2 工程師」對不到職等表，不疊目標」；其他 nil
+    let gradeNote: String?
+}
+
+/// 〔加到一對一議程…〕候選議程一列
+struct CompetencyAgendaCandidate: Equatable, Identifiable {
+    /// 「gap|組|項目」「mentor|組|項目」「stale|組」
+    let id: String
+    /// "gap"／"mentor"／"stale"
+    let kind: String
+    /// 議程內容（＝MeetingItem.content；「Chemical System 緊急應變：目前 2，目標 3」）
+    let text: String
+}
+
+/// 〔加到一對一議程…〕上面「哪一場」一個選項
+struct CompetencyOneOnOneChoice: Equatable, Identifiable {
+    /// 「會議 id|那一場原定時間的秒數」；不重複的會議「會議 id|-」
+    let id: String
+    let meetingId: UUID
+    /// 有週期＝那一場的原定時間（對 MeetingOccurrence.scheduledDate 用）；不重複 nil（議程放 meeting.items）
+    let scheduledDate: Date?
+    /// 那一場實際開會那一天「2026-11-14」
+    let dayKey: String
+    /// 「1on1（隔週）・11/14」「一對一面談・11/20」
+    let title: String
+    /// 小提示用的會議名「1on1」（空白「一對一」）
+    let topic: String
+    /// 那一場已經有的議程內容（去頭尾空白；比「已經在議程裡」用）
+    let existing: [String]
+    /// 今天（含）以後的場次；不重複的會議日子過了 false
+    let upcoming: Bool
+}
+
+/// 〔加到一對一議程…〕下面一列（候選＋這一場是不是已經有）
+struct CompetencyAgendaRow: Equatable, Identifiable {
+    let id: String
+    let kind: String
+    let text: String
+    /// 這一場已經有一模一樣的內容：灰字「已經在議程裡」、不能勾
+    let already: Bool
+}
+
+extension CompetencyMath {
+
+    // MARK: 常數
+
+    /// CompetencyMilestone.kind
+    static let milestoneKindPromotion: String = "promotion"
+    static let milestoneComputedNote: String = "（現算）"
+    static let milestoneComputedLine: String = "現算：生效日當時每一格最新的分數，還沒留一份。按〔留一份〕存下來，之後改舊的評分也不會跟著變。"
+    /// 一對一候選議程預設勾幾個
+    static let agendaDefaultPicks: Int = 3
+    static let agendaAlreadyText: String = "已經在議程裡"
+    /// 互評〔顯示職能參考〕旁邊那一句
+    static let ballotReferenceNote: String = "只是參考，不會算進互評分數"
+
+    // MARK: 日子、職稱字
+
+    /// ↔ year_day：「7/1」；跟今天不同年「2025/7/1」
+    static func yearAwareDay(_ key: String, today: String) -> String {
+        guard let p = parseDay(key) else { return key }
+        if let t = parseDay(today), t.y == p.y { return "\(p.m)/\(p.d)" }
+        return "\(p.y)/\(p.m)/\(p.d)"
+    }
+
+    /// ↔ promo_label：升職紀錄的職稱快照「E2 — 工程師」→「E2 工程師」（— 換空白、多個空白併成一個、去頭尾；空的 nil）
+    static func promotionLabel(_ s: String) -> String? {
+        let swapped: String = s.replacingOccurrences(of: "—", with: " ")
+        let words: [String] = swapped.split(separator: " ").map { String($0) }
+        let t: String = words.joined(separator: " ").trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? nil : t
+    }
+
+    /// ↔ promo_grade：那時的職等（職稱字跟職等表的「E2 工程師」一樣才算；normalizedGrade 比；對不到 nil）
+    static func promotionGrade(_ label: String?, grades: [CompetencyGradeRef]) -> CompetencyGradeRef? {
+        guard let l = label else { return nil }
+        let k: String = normalizedGrade(l)
+        return grades.first { normalizedGrade($0.label) == k }
+    }
+
+    // MARK: 升職快照
+
+    /// ↔ frozen：生效日（含）之前我評的每一格最新那一筆 → 存進快照的格子＋兩區的範圍（照組、項目代號排，兩台算的一樣）
+    static func frozenScores(_ sessions: [CompetencySession], through day: String,
+                             setup: CompetencySetupBook) -> (scores: [CompetencyScore], trait: CompetencyRange, skill: CompetencyRange) {
+        let cells: [CompetencyCellKey: CompetencyCellValue] = latestCells(sessions, through: day)
+        let keys: [CompetencyCellKey] = cells.keys.sorted { a, b in
+            if a.groupId != b.groupId { return a.groupId.uuidString < b.groupId.uuidString }
+            return a.itemId.uuidString < b.itemId.uuidString
+        }
+        var traitRanges: Set<CompetencyRange> = []
+        var skillRanges: Set<CompetencyRange> = []
+        for k in keys {
+            guard let c = cells[k] else { continue }
+            if k.groupId == CompetencySetupBook.traitGroupId {
+                traitRanges.insert(c.range)
+            } else {
+                skillRanges.insert(c.range)
+            }
+        }
+        let tr: CompetencyRange = traitRanges.count == 1 ? (traitRanges.first ?? setup.traitRange) : setup.traitRange
+        let sr: CompetencyRange = skillRanges.count == 1 ? (skillRanges.first ?? setup.skillRange) : setup.skillRange
+        var byId: [UUID: CompetencySession] = [:]
+        for s in sessions { byId[s.id] = s }
+        var out: [CompetencyScore] = []
+        for k in keys {
+            guard let c = cells[k] else { continue }
+            let isTrait: Bool = k.groupId == CompetencySetupBook.traitGroupId
+            let target: CompetencyRange = isTrait ? tr : sr
+            var v: Int? = c.na ? nil : c.value
+            var lName: String? = c.na ? nil : c.levelName
+            if let raw = v, c.range != target {
+                v = target.clamp(roundHalfUp(convert(raw, from: c.range, to: target)))
+                lName = nil
+            }
+            let src: CompetencyScore? = byId[c.sessionId]?.score(k)
+            let gName: String? = setup.group(k.groupId)?.displayName ?? src?.groupName
+            let iName: String? = setup.item(k.itemId)?.displayName ?? src?.itemName
+            out.append(CompetencyScore(groupId: k.groupId, itemId: k.itemId, value: v, na: c.na ? true : nil,
+                                       comment: nil, groupName: gName, itemName: iName, levelName: lName,
+                                       updatedAt: c.stamp))
+        }
+        return (out, tr, sr)
+    }
+
+    /// ↔ promo_milestone：一筆升職的快照（升職當下自動留、〔留一份〕、現算都是這一支）。生效日之前一格都沒評 → nil（不存、不顯示）
+    static func promotionMilestone(subordinateId: UUID, recordId: UUID, dayKey: String, fromTitle: String,
+                                   sessions: [CompetencySession], setup: CompetencySetupBook,
+                                   now: Date) -> CompetencyMilestone? {
+        guard parseDay(dayKey) != nil else { return nil }
+        let f = frozenScores(sessions, through: dayKey, setup: setup)
+        guard !f.scores.isEmpty else { return nil }
+        return CompetencyMilestone(id: recordId, subordinateId: subordinateId, kind: milestoneKindPromotion, dayKey: dayKey,
+                                   promotionRecordId: recordId, gradeLabel: promotionLabel(fromTitle), frozen: f.scores,
+                                   traitLow: f.trait.low, traitHigh: f.trait.high,
+                                   skillLow: f.skill.low, skillHigh: f.skill.high,
+                                   createdAt: now, updatedAt: now)
+    }
+
+    /// ↔ live_milestones：這位留了的升職快照（沒刪、kind promotion）：升職紀錄 id → 那一份。
+    /// 同一筆升職兩份（別台、舊資料）留後改的、一樣新照 id 大的
+    static func promotionMilestones(_ book: CompetencyRatingBook, subordinateId: UUID) -> [UUID: CompetencyMilestone] {
+        var out: [UUID: CompetencyMilestone] = [:]
+        for m in book.allMilestones where m.deletedAt == nil && m.kind == milestoneKindPromotion {
+            guard m.subordinateId == subordinateId, let rid = m.promotionRecordId else { continue }
+            if let old = out[rid] {
+                if old.stamp > m.stamp { continue }
+                if old.stamp == m.stamp && old.id.uuidString > m.id.uuidString { continue }
+            }
+            out[rid] = m
+        }
+        return out
+    }
+
+    /// ↔ save_milestone：存一份。同一個 id 已經有（含清理蓋了墓碑的）、或同一筆升職已經有一份 → nil（不寫）
+    static func savingMilestone(_ book: CompetencyRatingBook, _ m: CompetencyMilestone) -> CompetencyRatingBook? {
+        let list: [CompetencyMilestone] = book.allMilestones
+        if list.contains(where: { $0.id == m.id }) { return nil }
+        if let rid = m.promotionRecordId,
+           list.contains(where: { $0.deletedAt == nil && $0.promotionRecordId == rid }) { return nil }
+        var b = book
+        b.milestones = list + [m]
+        return b
+    }
+
+    /// ↔ purge_milestones：〔清理已刪除同仁的評分〕一起清：找不到人的升職快照蓋墓碑（knownIds 空＝不清；沒有 milestones 照舊 nil）
+    static func purgingMilestones(_ list: [CompetencyMilestone]?, knownIds: Set<UUID>, now: Date) -> [CompetencyMilestone]? {
+        guard var out = list, !knownIds.isEmpty else { return list }
+        for i in out.indices where out[i].deletedAt == nil {
+            guard let sid = out[i].subordinateId, !knownIds.contains(sid) else { continue }
+            out[i].deletedAt = now
+            out[i].updatedAt = now
+        }
+        return out
+    }
+
+    /// ↔ milestone_session：快照當成一張評分（畫圖、比較用；只在記憶體，不存）
+    static func milestoneSession(_ m: CompetencyMilestone) -> CompetencySession {
+        CompetencySession(id: m.id, subordinateId: m.subordinateId ?? m.id, dayKey: m.dayKey ?? "",
+                          raterKind: CompetencySession.raterMe, gradeLabel: m.gradeLabel,
+                          traitLow: m.traitLow, traitHigh: m.traitHigh, skillLow: m.skillLow, skillHigh: m.skillHigh,
+                          scores: m.frozen ?? [], createdAt: m.createdAt, updatedAt: m.updatedAt)
+    }
+
+    /// ↔ promo_title：「7/1 升 E3 資深工程師（那時 E2）」（那時的職稱對到職等表寫職等字，對不到寫整個職稱；沒有職稱不寫括號）
+    static func promotionTitle(dayKey: String, toTitle: String, fromLabel: String?, grades: [CompetencyGradeRef],
+                               today: String) -> String {
+        var s: String = yearAwareDay(dayKey, today: today)
+        if let to = promotionLabel(toTitle) {
+            s += " 升 " + to
+        } else {
+            s += " 升職"
+        }
+        if let f = fromLabel {
+            let short: String = promotionGrade(f, grades: grades)?.short ?? f
+            s += "（那時 " + short + "）"
+        }
+        return s
+    }
+
+    /// ↔ promo_rows：〔職能〕分頁「升職」一段（生效日新的在前）：留了的照留的；沒留的現算（不寫 store）；
+    /// 生效日之前一格都沒評的不列。刪掉的升職紀錄（快照還在）不列
+    static func promotionRows(promotions: [PromotionRecord], ratings: CompetencyRatingBook, subordinateId: UUID,
+                              sessions: [CompetencySession], setup: CompetencySetupBook, grades: [CompetencyGradeRef],
+                              today: String, calendar: Calendar = .current, now: Date) -> [CompetencyPromotionRow] {
+        let saved: [UUID: CompetencyMilestone] = promotionMilestones(ratings, subordinateId: subordinateId)
+        let ordered: [PromotionRecord] = promotions.sorted { a, b in
+            if a.date != b.date { return a.date > b.date }
+            return a.id.uuidString > b.id.uuidString
+        }
+        var out: [CompetencyPromotionRow] = []
+        for r in ordered {
+            let day: String = dayKey(r.date, calendar: calendar)
+            var pick: CompetencyMilestone? = saved[r.id]
+            let computed: Bool = pick == nil
+            if computed {
+                pick = promotionMilestone(subordinateId: subordinateId, recordId: r.id, dayKey: day, fromTitle: r.fromTitle,
+                                          sessions: sessions, setup: setup, now: now)
+            }
+            guard let m = pick else { continue }
+            let mDay: String = m.dayKey ?? day
+            let title: String = promotionTitle(dayKey: mDay, toTitle: r.toTitle, fromLabel: m.gradeLabel, grades: grades,
+                                               today: today)
+            let n: Int = (m.frozen ?? []).filter { $0.isLive }.count
+            let count: String = "\(n) 格"
+            let a11y: String = title + (computed ? "，現算" : "") + "，" + count
+            out.append(CompetencyPromotionRow(id: r.id, dayKey: mDay, title: title,
+                                              computedNote: computed ? milestoneComputedNote : nil,
+                                              cellCountText: count, milestone: m, accessibilityText: a11y))
+        }
+        return out
+    }
+
+    /// ↔ milestone_cards：那時的雷達（sessionCards 同一種畫法：有評的組、有評的格子、名字照快照、範圍照快照、不疊上一次）；
+    /// grade 有、這個職等有訂目標 → 疊目標（那時的職等＝升職前）
+    static func milestoneCards(_ m: CompetencyMilestone, setup: CompetencySetupBook,
+                               grade: CompetencyGradeRef?) -> [CompetencyChartModel] {
+        let s: CompetencySession = milestoneSession(m)
+        let table: [CompetencyTargetKey: CompetencyTarget] = targetTable(setup)
+        var targets: CompetencyChartTargets? = nil
+        if let g = grade, table.keys.contains(where: { $0.gradeId == g.id }) {
+            targets = CompetencyChartTargets(grade: g, table: table)
+        }
+        let cells: [CompetencyScore] = s.liveScores
+        let gids: [UUID] = orderedGroupIds(cells.map { $0.groupId }, setup: setup)
+        var out: [CompetencyChartModel] = []
+        for gid in gids {
+            let mine: [CompetencyScore] = cells.filter { $0.groupId == gid }
+            let ratedIds: [UUID] = mine.map { $0.itemId }
+            let ratedSet: Set<UUID> = Set(ratedIds)
+            let current: [CompetencyItem] = setup.axes(for: gid).filter { ratedSet.contains($0.id) }
+            let currentIds: Set<UUID> = Set(current.map { $0.id })
+            let others: [CompetencyItem] = CompetencySetupBook.sortedItems(setup.allItems.filter {
+                $0.isLive && ratedSet.contains($0.id) && !currentIds.contains($0.id)
+            })
+            let knownIds: Set<UUID> = currentIds.union(others.map { $0.id })
+            var unknown: [CompetencyItem] = []
+            for id in ratedIds where !knownIds.contains(id) {
+                let raw: String = (mine.first(where: { $0.itemId == id })?.itemName ?? "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
+                unknown.append(CompetencyItem(id: id, groupId: gid, name: raw.isEmpty ? "已刪除的項目" : raw))
+            }
+            let axes: [CompetencyItem] = current + others + unknown
+            let archivedIds: Set<UUID> = Set(others.map { $0.id }).union(unknown.map { $0.id })
+            var g: CompetencyGroup
+            if let found = setup.group(gid), found.isLive {
+                g = found
+                if !found.isTrait && !found.isActive { g.name = found.displayName + "（已停用）" }
+            } else {
+                let isTrait: Bool = gid == CompetencySetupBook.traitGroupId
+                g = CompetencyGroup(id: gid, kind: isTrait ? CompetencyGroup.kindTrait : CompetencyGroup.kindSystem,
+                                    name: groupTitle(gid, setup: setup, sessions: [s], short: false))
+            }
+            out.append(chartModel(group: g, axes: axes, archivedIds: archivedIds, sessions: [s],
+                                  range: s.range(forGroup: gid), scale: nil, snapshotDay: s.dayKey, targets: targets))
+        }
+        return out
+    }
+
+    /// ↔ apply_milestone：〔跟現在比〕灰虛線換成升職前那一份（previousT／previousText＝那時；↑↓＝現在比那時；
+    /// 圖例「┅ 升職前 7/1」、標題「Gas System・10/30 比 升職前 7/1」）。現在的分數、平均一個都不動；那時沒評這一組＝沒有灰線
+    static func applyingMilestone(_ card: CompetencyChartModel, then: [CompetencyCellKey: CompetencyCellValue],
+                                  now: [CompetencyCellKey: CompetencyCellValue], legend: String) -> CompetencyChartModel {
+        let r: CompetencyRange = card.range
+        var axes: [CompetencyAxisModel] = []
+        var thenCells: [CompetencyCellValue?] = []
+        for ax in card.axes {
+            let key = CompetencyCellKey(groupId: card.id, itemId: ax.id)
+            let c: CompetencyCellValue? = then[key]
+            thenCells.append(c)
+            let pText: String? = c.map { cellText($0, in: r) }
+            var m = CompetencyAxisModel(id: ax.id, name: ax.name, label: ax.label, state: ax.state, t: ax.t,
+                                        valueText: ax.valueText, originalText: ax.originalText, levelText: ax.levelText,
+                                        previousT: c?.ratio, previousText: pText,
+                                        deltaText: deltaText(current: now[key], previous: c),
+                                        carriedFrom: ax.carriedFrom, archived: ax.archived)
+            m.targetT = ax.targetT
+            m.targetValueText = ax.targetValueText
+            m.targetText = ax.targetText
+            m.targetMet = ax.targetMet
+            m.targetGap = ax.targetGap
+            axes.append(m)
+        }
+        let hasThen: Bool = thenCells.contains { $0 != nil }
+        let dateLine: String
+        if let d = card.latestDay {
+            dateLine = hasThen ? shortDay(d) + " 比 " + legend : shortDay(d)
+        } else {
+            dateLine = "還沒評過"
+        }
+        let a11y: String = card.accessibilityText + (hasThen ? "灰色虛線是" + legend + "。" : "")
+        var out = CompetencyChartModel(
+            id: card.id, isTrait: card.isTrait, title: card.title, dateLine: dateLine, headline: card.title + "・" + dateLine,
+            averageText: card.averageText, style: card.style, axes: axes, rings: card.rings, range: card.range,
+            ratedCount: card.ratedCount, drawsPolygon: card.drawsPolygon, hasPrevious: hasThen,
+            legendCurrent: card.legendCurrent, legendPrevious: hasThen ? legend : nil, note: card.note,
+            carriedNote: card.carriedNote, accessibilityText: a11y, neverRated: card.neverRated,
+            averageRatio: card.averageRatio, previousAverageRatio: averageRatio(thenCells),
+            filledCount: card.filledCount, axisCount: card.axisCount, latestDay: card.latestDay,
+            previousDayText: hasThen ? legend : nil)
+        out.hasTarget = card.hasTarget
+        out.legendTarget = card.legendTarget
+        out.targetTotal = card.targetTotal
+        out.targetAchieved = card.targetAchieved
+        out.targetUnrated = card.targetUnrated
+        out.compareDay = nil
+        return out
+    }
+
+    /// ↔ milestone_compare：〔跟現在比〕現在的卡片（visibleGroups、cardAxes、現在的範圍；不疊目標）、灰虛線＝升職前那一份
+    static func milestoneCompareCards(_ m: CompetencyMilestone, setup: CompetencySetupBook, subordinateId: UUID,
+                                      archivedPerson: Bool, sessions: [CompetencySession]) -> [CompetencyChartModel] {
+        let then: [CompetencyCellKey: CompetencyCellValue] = latestCells([milestoneSession(m)])
+        let now: [CompetencyCellKey: CompetencyCellValue] = latestCells(sessions)
+        let legend: String = "升職前 " + shortDay(m.dayKey ?? "")
+        let groups: [CompetencyGroup] = visibleGroups(setup: setup, subordinateId: subordinateId,
+                                                      archivedPerson: archivedPerson, sessions: sessions)
+        var out: [CompetencyChartModel] = []
+        for g in groups {
+            let ax = cardAxes(group: g, setup: setup, archivedPerson: archivedPerson, sessions: sessions)
+            let card: CompetencyChartModel = chartModel(group: g, axes: ax.axes, archivedIds: ax.archived,
+                                                        sessions: sessions, range: setup.range(forGroup: g.id),
+                                                        scale: setup.scaleFor(group: g.id))
+            out.append(applyingMilestone(card, then: then, now: now, legend: legend))
+        }
+        return out
+    }
+
+    /// ↔ milestone_detail：升職快照明細。toTitle／toGradeId＝那筆升職紀錄的 toTitle、toGradeTitleId
+    static func milestoneDetail(_ row: CompetencyPromotionRow, toTitle: String, toGradeId: UUID?, setup: CompetencySetupBook,
+                                subordinateId: UUID, archivedPerson: Bool, sessions: [CompetencySession],
+                                grades: [CompetencyGradeRef], today: String) -> CompetencyMilestoneDetailModel {
+        let m: CompetencyMilestone = row.milestone
+        let day: String = m.dayKey ?? row.dayKey
+        let toLabel: String? = promotionLabel(toTitle)
+        let toShort: String? = grades.first(where: { $0.id == toGradeId })?.short ?? toLabel
+        let when: String = yearAwareDay(day, today: today)
+        let title: String = toShort.map { "升 " + $0 + " 前的樣子・" + when } ?? "升職前的樣子・" + when
+        var info: [String] = []
+        if let p = parseDay(day) {
+            info.append("\(p.y)/\(p.m)/\(p.d) " + (toLabel.map { "升 " + $0 } ?? "升職"))
+        }
+        if let gl = m.gradeLabel { info.append("那時：" + gl) }
+        let s: CompetencySession = milestoneSession(m)
+        let live: [CompetencyScore] = s.liveScores
+        info.append("評了 \(live.count) 格")
+        var ranges: [String] = []
+        if live.contains(where: { $0.groupId == CompetencySetupBook.traitGroupId }) {
+            ranges.append("人格特質 " + s.traitRange.text)
+        }
+        if live.contains(where: { $0.groupId != CompetencySetupBook.traitGroupId }) {
+            ranges.append("本職學能 " + s.skillRange.text)
+        }
+        if !ranges.isEmpty { info.append(ranges.joined(separator: "・")) }
+        let grade: CompetencyGradeRef? = promotionGrade(m.gradeLabel, grades: grades)
+        var note: String? = nil
+        if let gl = m.gradeLabel, grade == nil, !targetTable(setup).isEmpty {
+            note = "那時的職等「" + gl + "」對不到職等表，不疊目標"
+        }
+        return CompetencyMilestoneDetailModel(
+            id: row.id, title: title, infoLines: info, computed: row.computed,
+            computedLine: row.computed ? milestoneComputedLine : nil,
+            cards: milestoneCards(m, setup: setup, grade: grade),
+            compareCards: milestoneCompareCards(m, setup: setup, subordinateId: subordinateId,
+                                                archivedPerson: archivedPerson, sessions: sessions),
+            compareExplain: "實線是現在，灰色虛線是升職前 " + shortDay(day),
+            gradeNote: note)
+    }
+
+    /// ↔ keep_toast：「已留一份 7/1 升職前的職能分數」
+    static func milestoneKeptToast(_ row: CompetencyPromotionRow, today: String) -> String {
+        "已留一份 " + yearAwareDay(row.dayKey, today: today) + " 升職前的職能分數"
+    }
+
+    // MARK: 一對一議程
+
+    /// ↔ agenda_safe：議程字裡的「@」換成全形「＠」（不會變成標註）、換行換空白、去頭尾空白
+    static func agendaSafe(_ s: String) -> String {
+        s.replacingOccurrences(of: "@", with: "＠")
+            .replacingOccurrences(of: "\r", with: " ")
+            .replacingOccurrences(of: "\n", with: " ")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// ↔ agenda_candidates：候選議程，照這個順序：目標差距（大到小）→ 跟帶訓者看法不一樣（差多的在前）→ 超過 6 個月沒評的組（卡片順序）。
+    /// tab＝〔職能〕分頁的 tabModel（〔目標 E2 ▾〕不疊時，呼叫端改傳疊目前職等的那一份）；mentorDiffs＝tabMentorModel 的 diffs。
+    /// 一模一樣的字只列一次
+    static func agendaCandidates(tab: CompetencyTabModel, mentorDiffs: [CompetencyMentorDiff],
+                                 today: String) -> [CompetencyAgendaCandidate] {
+        var out: [CompetencyAgendaCandidate] = []
+        var seen: Set<String> = []
+        for row in tab.targets?.gapRows ?? [] {
+            guard let card = tab.cards.first(where: { $0.id == row.groupId }),
+                  let ax = card.axes.first(where: { $0.id == row.itemId }),
+                  let nowText = ax.valueText, let goal = ax.targetValueText else { continue }
+            let text: String = agendaSafe("\(card.title) \(ax.name)：目前 \(nowText)，目標 \(goal)")
+            guard !text.isEmpty, !seen.contains(text) else { continue }
+            seen.insert(text)
+            out.append(CompetencyAgendaCandidate(id: "gap|" + row.id, kind: "gap", text: text))
+        }
+        for d in mentorDiffs {
+            let text: String = agendaSafe("\(d.title)：你 \(d.mineText)、\(d.mentorName) \(d.mentorText)，聊一下")
+            guard !text.isEmpty, !seen.contains(text) else { continue }
+            seen.insert(text)
+            out.append(CompetencyAgendaCandidate(id: "mentor|" + d.id, kind: "mentor", text: text))
+        }
+        for card in tab.cards {
+            guard let last = card.latestDay, isStale(lastDay: last, today: today) else { continue }
+            let lastText: String = yearAwareDay(last, today: today)
+            let text: String = agendaSafe("\(card.title)：上次評是 \(lastText)，該再評一次")
+            guard !text.isEmpty, !seen.contains(text) else { continue }
+            seen.insert(text)
+            out.append(CompetencyAgendaCandidate(id: "stale|" + card.id.uuidString, kind: "stale", text: text))
+        }
+        return out
+    }
+
+    /// ↔ one_on_one_choices：這位的一對一（呼叫端先照 SubExportComposer.isOneOnOneName 篩好）。
+    /// 有週期＝今天（含）以後最近一場（取消的跳過、改期的照改過的日子；三個月內都沒有＝不列）；不重複＝那一場（日子過了也列）。
+    /// 今天以後的照日子在前；過了的接在後面（新的在前）。第一個＝預設
+    static func oneOnOneChoices(_ meetings: [SubordinateMeeting], now: Date,
+                                calendar: Calendar = .current) -> [CompetencyOneOnOneChoice] {
+        let start: Date = calendar.startOfDay(for: now)
+        let horizon: Date = calendar.date(byAdding: .month, value: 3, to: now) ?? now
+        let today: String = dayKey(now, calendar: calendar)
+        var out: [CompetencyOneOnOneChoice] = []
+        for m in meetings {
+            let raw: String = m.topic.trimmingCharacters(in: .whitespacesAndNewlines)
+            let name: String = raw.isEmpty ? "一對一" : raw
+            if let rule = m.rule {
+                let list: [ResolvedMeetingOccurrence] = m.expandedOccurrences(from: start, horizon: horizon)
+                guard let next = list.first(where: { !$0.isCancelled && $0.date >= start }) else { continue }
+                let day: String = dayKey(next.date, calendar: calendar)
+                let key: String = String(Int(next.scheduledDate.timeIntervalSinceReferenceDate))
+                let have: [String] = next.items.map { $0.content.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+                let when: String = yearAwareDay(day, today: today)
+                let title: String = "\(name)（\(rule.frequency.rawValue)）・\(when)"
+                out.append(CompetencyOneOnOneChoice(id: m.id.uuidString + "|" + key, meetingId: m.id,
+                                                    scheduledDate: next.scheduledDate, dayKey: day, title: title,
+                                                    topic: name, existing: have, upcoming: true))
+            } else {
+                let day: String = dayKey(m.date, calendar: calendar)
+                let have: [String] = m.items.map { $0.content.trimmingCharacters(in: .whitespacesAndNewlines) }
+                    .filter { !$0.isEmpty }
+                let title: String = name + "・" + yearAwareDay(day, today: today)
+                out.append(CompetencyOneOnOneChoice(id: m.id.uuidString + "|-", meetingId: m.id, scheduledDate: nil,
+                                                    dayKey: day, title: title, topic: name, existing: have,
+                                                    upcoming: m.date >= start))
+            }
+        }
+        let up: [CompetencyOneOnOneChoice] = out.filter { $0.upcoming }.sorted { a, b in
+            if a.dayKey != b.dayKey { return a.dayKey < b.dayKey }
+            return a.id < b.id
+        }
+        let past: [CompetencyOneOnOneChoice] = out.filter { !$0.upcoming }.sorted { a, b in
+            if a.dayKey != b.dayKey { return a.dayKey > b.dayKey }
+            return a.id < b.id
+        }
+        return up + past
+    }
+
+    /// ↔ agenda_rows：候選議程＋這一場是不是已經有一模一樣的內容
+    static func agendaRows(_ candidates: [CompetencyAgendaCandidate],
+                           choice: CompetencyOneOnOneChoice?) -> [CompetencyAgendaRow] {
+        let have: Set<String> = Set(choice?.existing ?? [])
+        return candidates.map { c in
+            CompetencyAgendaRow(id: c.id, kind: c.kind, text: c.text, already: have.contains(c.text))
+        }
+    }
+
+    /// ↔ agenda_default：預設勾前 3 個（已經在議程裡的跳過）
+    static func defaultAgendaPicks(_ rows: [CompetencyAgendaRow]) -> Set<String> {
+        let ids: [String] = rows.filter { !$0.already }.prefix(agendaDefaultPicks).map { $0.id }
+        return Set(ids)
+    }
+
+    /// ↔ add_agenda：把勾的那幾行加進那一場（MeetingQuickAddItemSheet.save 同一個寫法：不重複的放 meeting.items；有週期的放那一場的
+    /// occurrence，還沒落地就建一筆）。同一場已經有一模一樣的內容不再加；每一個＝MeetingItem（沒有負責人、沒有到期日、備註空、沒完成）
+    static func addingAgenda(_ m: SubordinateMeeting, scheduledDate: Date?,
+                             contents: [String]) -> (meeting: SubordinateMeeting, added: Int) {
+        var out: SubordinateMeeting = m
+        var have: Set<String> = []
+        if let sd = scheduledDate {
+            if let o = out.occurrences.first(where: { $0.scheduledDate == sd }) {
+                for it in o.items { have.insert(it.content.trimmingCharacters(in: .whitespacesAndNewlines)) }
+            }
+        } else {
+            for it in out.items { have.insert(it.content.trimmingCharacters(in: .whitespacesAndNewlines)) }
+        }
+        var items: [MeetingItem] = []
+        for raw in contents {
+            let c: String = agendaSafe(raw)
+            guard !c.isEmpty, !have.contains(c) else { continue }
+            have.insert(c)
+            items.append(MeetingItem(content: c))
+        }
+        guard !items.isEmpty else { return (out, 0) }
+        if let sd = scheduledDate {
+            if let idx = out.occurrences.firstIndex(where: { $0.scheduledDate == sd }) {
+                out.occurrences[idx].items.append(contentsOf: items)
+            } else {
+                out.occurrences.append(MeetingOccurrence(scheduledDate: sd, items: items))
+            }
+        } else {
+            out.items.append(contentsOf: items)
+        }
+        return (out, items.count)
+    }
+
+    /// ↔ agenda_toast：「已加 3 個議程到 11/14 的 1on1」
+    static func agendaAddedToast(_ n: Int, choice: CompetencyOneOnOneChoice, today: String) -> String {
+        let day: String = yearAwareDay(choice.dayKey, today: today)
+        return "已加 \(n) 個議程到 \(day) 的 \(choice.topic)"
+    }
+
+    // MARK: 互評參考
+
+    /// ↔ ballot_ref：互評〔顯示職能參考〕每位那一行「職能：本職學能 58.3・人格 70」（v3 人才矩陣縱軸那個數：matrixRatio×100、
+    /// 四捨五入到一位）。區照 matrixAxisOptions（沒設職能項目＝空）；沒評的區「—」；全都沒評 nil（不寫這一行）
+    static func ballotReferenceLine(setup: CompetencySetupBook, personId: UUID,
+                                    cells: [CompetencyCellKey: CompetencyCellValue]) -> String? {
+        let areas: [CompetencyTeamArea] = matrixAxisOptions(setup: setup)
+        var parts: [String] = []
+        var any = false
+        for a in areas {
+            let label: String = a == .trait ? "人格" : "本職學能"
+            if let r = matrixRatio(setup: setup, personId: personId, cells: cells, area: a) {
+                parts.append(label + " " + matrixNumberText(matrixValue(r.t)))
+                any = true
+            } else {
+                parts.append(label + " —")
+            }
+        }
+        guard any else { return nil }
+        return "職能：" + parts.joined(separator: "・")
+    }
+}

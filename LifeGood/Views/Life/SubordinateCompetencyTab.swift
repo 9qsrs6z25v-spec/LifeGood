@@ -40,6 +40,14 @@ import SwiftUI
 // • 評分紀錄多帶訓者記的那幾列（「・陳怡君（帶訓者）」）；點進去帶 raterKey 開那一張的明細。
 // • 目前分數、上一次、達標、熱力表、匯出不碰帶訓者評：tabModel 照舊只傳 competencySessions(of:)；帶訓者那一份另外算
 //  （CompetencyMath.tabMentorModel）。§13 評語照舊不顯示。
+//
+// [v25.607 職能雷達 v5b] 這一版加的（radar/build/v5b/brief.md §3 G1；要退回這一件：照 7a6507c 的這個檔）：
+// • 評分紀錄上面多「升職」一段（CompTabPromotionCard；lifeStore.competencyPromotionRows）：一筆升職一列「7/1 升 E3 資深工程師
+//  （那時 E2）」，點了打開升職快照明細（CompetencyMilestoneView；只是看，不擋訂閱）。以前的升職標「（現算）」、旁邊〔留一份〕
+//  （擋訂閱；唯讀、已轉出不出現；寫入只走 keepCompetencyPromotionMilestone）。
+// • 摘要卡「…」多〔加到一對一議程…〕（擋訂閱；唯讀、已轉出、沒有一對一會議不出現）：候選議程在按下去那一刻算好
+//  （CompetencyMath.agendaCandidates；〔目標 E2 ▾〕不疊時用目前職等），放進 request 打開 CompetencyOneOnOneSheet。
+// • tabModel、目前分數、上一次、達標、帶訓者那一份、匯出一個都不碰；§13 評語照舊不顯示。
 
 struct SubordinateCompetencyTab: View {
     let subordinateId: UUID
@@ -70,6 +78,9 @@ struct SubordinateCompetencyTab: View {
     // [v25.606 職能雷達 v5a]〔帶訓者〕（sheet(item:)）；疊帶訓者開著的組（只是看，不記住）。要退回這一件：刪這兩行
     @State private var mentorRequest: CompetencyMentorRequest?
     @State private var mentorOverlayOn: Set<UUID> = []
+    // [v25.607 職能雷達 v5b] 升職快照明細、〔加到一對一議程…〕（sheet(item:)）。要退回這一件：刪這兩行
+    @State private var milestoneRequest: CompetencyMilestoneRequest?
+    @State private var oneOnOneRequest: CompetencyOneOnOneRequest?
 
     private var isArchived: Bool { OrgMoveIndex.isArchived(subordinateId) }
 
@@ -125,6 +136,8 @@ struct SubordinateCompetencyTab: View {
         .modifier(CompTabShowShareSheets(showRequest: $showRequest, shareRequest: $shareRequest))
         // [v25.606 職能雷達 v5a]〔帶訓者〕頁（帶訓者評的評分畫面用上面既有的 ratingRequest）。要退回這一件：刪這一行
         .modifier(CompTabMentorSheets(request: $mentorRequest))
+        // [v25.607 職能雷達 v5b] 升職快照明細、〔加到一對一議程…〕兩個 sheet 包在一個 modifier 裡。要退回這一件：刪這一行
+        .modifier(CompTabV5bSheets(milestoneRequest: $milestoneRequest, oneOnOneRequest: $oneOnOneRequest, onAdded: { text in showToast(text) }))
         .premiumLockAlert(isPresented: $showPremiumAlert)
         .onDisappear { toastTask?.cancel() }
     }
@@ -158,7 +171,9 @@ struct SubordinateCompetencyTab: View {
                            showsMentorItem: canRate,
                            mentorChoices: canRate ? mm.choices : [],
                            onMentors: openMentors,
-                           onRateMentor: rateMentor)
+                           onRateMentor: rateMentor,
+                           showsOneOnOneItem: canRate && lifeStore.competencyHasOneOnOne(subordinateId),
+                           onOneOnOne: openOneOnOne)
         // [v25.601 職能雷達 v1b] 離目標的差距（由大到小；沒評的不列）。要退回這一件：刪這個 if
         if let t = m.targets, !t.gapRows.isEmpty {
             CompTabGapCard(title: CompTabGapCard.headerTitle(for: t), rows: t.gapRows, onOpen: openHistory)
@@ -168,6 +183,11 @@ struct SubordinateCompetencyTab: View {
             CompTabSkippedLine(text: m.skippedLineText,
                                canEdit: canRate,
                                onEdit: openSkipSheet)
+        }
+        // [v25.607 職能雷達 v5b] 評分紀錄上面「升職」一段（有升職紀錄、生效日之前有評分才有；看不擋）。要退回這一件：刪這三行與 if
+        let promos: [CompetencyPromotionRow] = lifeStore.competencyPromotionRows(of: subordinateId)
+        if !promos.isEmpty {
+            CompTabPromotionCard(rows: promos, canKeep: canRate, onOpen: openMilestone, onKeep: keepMilestone)
         }
         // [v25.600 職能雷達 v1a-2] 評分紀錄（judge §4.3④；§13 不顯示評語）。要退回這一件：刪這個 if
         if !mm.records.isEmpty {
@@ -277,6 +297,43 @@ struct SubordinateCompetencyTab: View {
         } else {
             mentorOverlayOn.insert(groupId)
         }
+    }
+
+    /// [v25.607 v5b]「升職」一列 → 升職快照明細（只是看，不擋訂閱）
+    private func openMilestone(_ row: CompetencyPromotionRow) {
+        milestoneRequest = CompetencyMilestoneRequest(subordinateId: subordinateId, promotionId: row.id)
+    }
+
+    /// [v25.607 v5b]〔留一份〕（擋訂閱；唯讀、已轉出不出現）：現算的那一份存起來
+    private func keepMilestone(_ row: CompetencyPromotionRow) {
+        guard subscription.isPremium else { showPremiumAlert = true; return }
+        let today: String = CompetencyMath.dayKey(Date())
+        if lifeStore.keepCompetencyPromotionMilestone(subordinateId, promotionId: row.id) {
+            showToast(CompetencyMath.milestoneKeptToast(row, today: today))
+        }
+    }
+
+    /// [v25.607 v5b]〔加到一對一議程…〕（擋訂閱）：候選議程在這一刻算好放進 request
+    private func openOneOnOne() {
+        guard subscription.isPremium else { showPremiumAlert = true; return }
+        let m: CompetencyTabModel = agendaModel()
+        let mm: CompetencyTabMentorModel = mentorModel(m)
+        let list: [CompetencyAgendaCandidate] = CompetencyMath.agendaCandidates(tab: m, mentorDiffs: mm.diffs,
+                                                                               today: CompetencyMath.dayKey(Date()))
+        oneOnOneRequest = CompetencyOneOnOneRequest(subordinateId: subordinateId, candidates: list)
+    }
+
+    /// [v25.607 v5b] 候選議程用的 tabModel：〔目標 E2 ▾〕不疊時改用目前職等（差距那一種才有）；其他跟 model 一樣
+    private func agendaModel() -> CompetencyTabModel {
+        let mode: CompetencyTargetMode = targetMode == .off ? .current : targetMode
+        return CompetencyMath.tabModel(setup: lifeStore.competencySetup,
+                                       ratings: lifeStore.competencyRatings,
+                                       subordinateId: subordinateId,
+                                       archivedPerson: isArchived,
+                                       sessions: lifeStore.competencySessions(of: subordinateId),
+                                       today: CompetencyMath.dayKey(Date()),
+                                       grades: lifeStore.competencyGradeContext(for: subordinateId),
+                                       mode: mode)
     }
 
     /// [v25.600 職能雷達 v1a-2] 點一格的歷史（看不擋；唯讀、已轉出也能看）
@@ -543,6 +600,9 @@ private struct CompTabSummaryCard: View {
     let mentorChoices: [CompetencyRaterChoice]
     let onMentors: () -> Void
     let onRateMentor: (CompetencyRaterChoice) -> Void
+    // [v25.607 職能雷達 v5b]〔加到一對一議程…〕。要退回這一件：刪這兩行與 menu 裡那一段
+    let showsOneOnOneItem: Bool
+    let onOneOnOne: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -588,6 +648,12 @@ private struct CompTabSummaryCard: View {
                     }
                 } label: {
                     Label("記帶訓者的評分…", systemImage: "square.and.pencil")
+                }
+            }
+            // [v25.607 v5b]〔加到一對一議程…〕（擋訂閱；唯讀、已轉出、沒有一對一會議不出現）
+            if showsOneOnOneItem {
+                Button(action: onOneOnOne) {
+                    Label("加到一對一議程…", systemImage: "text.badge.plus")
                 }
             }
             if showsSkipItem {
@@ -905,6 +971,153 @@ private struct CompTabMentorSheets: ViewModifier {
                 CompetencyMentorView(subordinateId: r.subordinateId)
                     .appStores()
             }
+    }
+}
+
+/// [v25.607 職能雷達 v5b] 升職快照明細、〔加到一對一議程…〕（sheet(item:)＋.appStores()）
+private struct CompTabV5bSheets: ViewModifier {
+    @Binding var milestoneRequest: CompetencyMilestoneRequest?
+    @Binding var oneOnOneRequest: CompetencyOneOnOneRequest?
+    let onAdded: (String) -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .sheet(item: $milestoneRequest) { r in
+                CompetencyMilestoneView(subordinateId: r.subordinateId, promotionId: r.promotionId)
+                    .appStores()
+            }
+            .sheet(item: $oneOnOneRequest) { r in
+                CompetencyOneOnOneSheet(request: r, onAdded: onAdded)
+                    .appStores()
+            }
+    }
+}
+
+/// [v25.607 職能雷達 v5b] 評分紀錄上面「升職」白卡：一筆升職一列（新的在前），點了開升職快照明細；現算的旁邊〔留一份〕
+private struct CompTabPromotionCard: View {
+    let rows: [CompetencyPromotionRow]
+    /// 〔留一份〕（唯讀、已轉出 false：照樣列、只是看）
+    let canKeep: Bool
+    let onOpen: (CompetencyPromotionRow) -> Void
+    let onKeep: (CompetencyPromotionRow) -> Void
+
+    private static let baseNote: String = "升職那一天每一格最新的分數。"
+    private static let computedNote: String = "以前的升職標「（現算）」，按〔留一份〕存下來。"
+
+    /// 任何一列現算才寫後半句（唯讀、已轉出沒有〔留一份〕：不寫「按〔留一份〕」）
+    private var footText: String {
+        let anyComputed: Bool = rows.contains { $0.computed }
+        return anyComputed && canKeep ? Self.baseNote + Self.computedNote : Self.baseNote
+    }
+
+    var body: some View {
+        let lastId: UUID? = rows.last?.id
+        return VStack(alignment: .leading, spacing: 6) {
+            CompTabHeader(title: "升職", icon: "arrow.up.circle.fill", color: CompetencyPalette.trait) {
+                EmptyView()
+            }
+            .padding(.bottom, 4)
+            ForEach(rows) { row in
+                CompTabPromotionRowView(row: row, canKeep: canKeep, onOpen: onOpen, onKeep: onKeep)
+                if row.id != lastId {
+                    Divider()
+                }
+            }
+            Text(footText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.top, 4)
+        }
+        .padding(.horizontal, 16)
+        .padding(.vertical, 14)
+        .modifier(CompTabCardStyle())
+    }
+}
+
+/// 「升職」一列：左邊「7/1 升 E3 資深工程師（那時 E2）（現算）」＋「12 格」›（點了開明細）；現算的右邊〔留一份〕。
+/// 一排放不下（字最大）時〔留一份〕換到下一行
+private struct CompTabPromotionRowView: View {
+    let row: CompetencyPromotionRow
+    let canKeep: Bool
+    let onOpen: (CompetencyPromotionRow) -> Void
+    let onKeep: (CompetencyPromotionRow) -> Void
+
+    private var showsKeep: Bool { canKeep && row.computed }
+
+    var body: some View {
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .center, spacing: 8) {
+                openButton
+                keepButton
+            }
+            VStack(alignment: .leading, spacing: 4) {
+                openButton
+                keepButton
+            }
+        }
+    }
+
+    private var openButton: some View {
+        Button {
+            onOpen(row)
+        } label: {
+            HStack(alignment: .center, spacing: 8) {
+                CompTabPromotionTexts(row: row)
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.right")
+                    .font(.caption)
+                    .foregroundStyle(.tertiary)
+            }
+            .frame(minHeight: 44)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(row.accessibilityText)
+        .accessibilityHint("看升職前的雷達")
+    }
+
+    @ViewBuilder
+    private var keepButton: some View {
+        if showsKeep {
+            Button("留一份") { onKeep(row) }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .frame(minHeight: 44)
+        }
+    }
+}
+
+/// 「升職」一列的字：第一行標題（＋灰字「（現算）」），第二行「12 格」
+private struct CompTabPromotionTexts: View {
+    let row: CompetencyPromotionRow
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            CompTabPromotionTitleLine(title: row.title, note: row.computedNote)
+            Text(row.cellCountText)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// 標題＋灰字「（現算）」（字大時標題自己換行）
+private struct CompTabPromotionTitleLine: View {
+    let title: String
+    let note: String?
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 0) {
+            Text(title)
+                .font(.subheadline)
+                .fixedSize(horizontal: false, vertical: true)
+            if let n = note {
+                Text(n)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
     }
 }
 
