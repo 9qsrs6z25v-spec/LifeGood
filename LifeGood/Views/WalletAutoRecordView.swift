@@ -32,6 +32,8 @@ struct WalletAutoRecordView: View {
     @State private var editing: Expense?
     /// 左滑〔刪除〕先問一次
     @State private var deleting: Expense?
+    /// [learn] v25.611 C2：「同行人員照上一次」（這台的開關 WalletPrefs；reload() 讀）
+    @State private var memberFromLast = true
 
     var body: some View {
         pageWithSheets
@@ -69,18 +71,22 @@ struct WalletAutoRecordView: View {
             .sheet(item: $pickingCard, onDismiss: { applyPendingPick() }) { link in
                 pickSheet(for: link).appStores()
             }
-            .sheet(item: $editing) { e in
+            // [learn] 編輯存檔時學到的卡在 AddExpenseView 的下一個 runloop 才寫進對應表 → 關掉後再放一輪才重讀
+            .sheet(item: $editing, onDismiss: { DispatchQueue.main.async { reload() } }) { e in
                 AddExpenseView(expenseType: e.expenseType, editingExpense: e).appStores()
             }
     }
 
     private var listContent: some View {
         let rows = liveRecentRows()
+        // [learn] 每張卡以前還沒連的筆數（一次算全部的卡，不要每列算）
+        let past = WalletAutoRecord.unlinkedCounts(recent: recent, ledger: store.expenses)
         return List {
             introSection(rows: rows)
             WalletSetupStepsSection()
+            memorySection
             unresolvedSection
-            decidedSection
+            decidedSection(past: past)
             recentSection(rows: rows)
             missedSection
             WalletLimitsSection()
@@ -94,7 +100,7 @@ struct WalletAutoRecordView: View {
             VStack(alignment: .leading, spacing: 8) {
                 Label("用 Apple Pay 付款就記一筆", systemImage: "creditcard.fill")
                     .font(.headline)
-                Text("用 Apple Pay 付款那一刻，捷徑會自動把這筆記成變動支出：商家當名稱、分類照同一家店上一次、連到你選的信用卡。")
+                Text("用 Apple Pay 付款那一刻，捷徑會自動把這筆記成變動支出：商家當名稱、分類和同行人員照同一家店上一次、連到你選的信用卡。你在記帳改過的卡片、分類，下一次會照改過的。")
                     .font(.subheadline)
                 Text(introStatus(rows: rows))
                     .font(.footnote)
@@ -110,6 +116,25 @@ struct WalletAutoRecordView: View {
         }
         let day = WalletAutoRecord.shortDate(latest.expense.date, calendar: .current)
         return "這支 iPhone 已經自動記了 \(rows.count) 筆・最近 \(day)"
+    }
+
+    // MARK: 段 2b 自動帶入（[learn] v25.611 C2、C3）
+
+    private var memorySection: some View {
+        Section {
+            Toggle("同行人員照上一次", isOn: memberBinding)
+        } header: {
+            Text("自動帶入")
+        } footer: {
+            Text("自動記的那一筆，分類和同行人員照同一家店上一次記的帶入，你再自己改；就算把店名改了（例：7-ELEVEN 改成小七），下一次在同一家店付款還是對得到。同行人員只帶進飲食、娛樂、購物、日用品這類有同行人員欄位的分類。開關只記在這支 iPhone。")
+        }
+    }
+
+    private var memberBinding: Binding<Bool> {
+        Binding(get: { memberFromLast }, set: { v in
+            memberFromLast = v
+            WalletPrefs.setMemberFromLast(v)
+        })
     }
 
     // MARK: 段 3 還沒對應的卡
@@ -154,12 +179,12 @@ struct WalletAutoRecordView: View {
     }
 
     @ViewBuilder
-    private var decidedSection: some View {
+    private func decidedSection(past: [String: Int]) -> some View {
         let list = decidedLinks
         if !list.isEmpty {
             Section {
                 ForEach(list) { link in
-                    decidedRow(link)
+                    decidedRow(link, pending: pendingPast(link, past: past))
                 }
             } header: {
                 Text("卡片")
@@ -169,14 +194,16 @@ struct WalletAutoRecordView: View {
         }
     }
 
-    private func decidedRow(_ link: WalletCardLink) -> some View {
+    private func decidedRow(_ link: WalletCardLink, pending: Int) -> some View {
         WalletLinkedCardRow(
             link: link,
             status: linkStatus(link),
             dollarOptions: dollarOptions,
             dollarMissingRate: dollarMissingRate(link),
+            pendingPast: pending,
             onChange: { pickingCard = link },
-            onSetDollar: { code in setDollar(link, code: code) }
+            onSetDollar: { code in setDollar(link, code: code) },
+            onLinkPast: { linkPastNow(link) }
         )
         .swipeActions(edge: .trailing, allowsFullSwipe: false) {
             Button(role: .destructive) {
@@ -207,6 +234,21 @@ struct WalletAutoRecordView: View {
     private func dollarMissingRate(_ link: WalletCardLink) -> Bool {
         guard let code = link.dollarCode else { return false }
         return !store.currencyRates.contains { $0.code == code && $0.rate > 0 }
+    }
+
+    /// [learn] 「還有 N 筆沒連」：連到信用卡／銀行帳戶、帳戶還在的卡才寫（〔不連帳戶〕、帳戶不見了＝0）
+    private func pendingPast(_ link: WalletCardLink, past: [String: Int]) -> Int {
+        guard link.linkTarget == .card || link.linkTarget == .bank else { return 0 }
+        guard WalletImport.accountDisplay(for: link, life: lifeStore) != nil else { return 0 }
+        return past[link.key] ?? 0
+    }
+
+    /// [learn] 卡片那一列的〔一起連〕：使用者自己按才連（按鈕本身就是〔一起連〕，不另外問）。寫 store 放下一個 runloop
+    private func linkPastNow(_ link: WalletCardLink) {
+        DispatchQueue.main.async {
+            WalletImport.linkPast(key: link.key, expense: store, life: lifeStore, finance: financeStore)
+            reload()
+        }
     }
 
     private func setDollar(_ link: WalletCardLink, code: String?) {
@@ -394,6 +436,7 @@ struct WalletAutoRecordView: View {
         links = WalletCardBook.all()
         recent = WalletRecentLog.all()
         missed = WalletMissedLog.all()
+        memberFromLast = WalletPrefs.memberFromLast
     }
 }
 
@@ -485,6 +528,8 @@ private struct WalletLimitsSection: View {
         "系統偶爾不會觸發捷徑；同一筆觸發兩次的話，90 秒內的第二次不會再記。",
         "金額只寫「$」時當作台幣；美金卡可以在上面的「卡片」改成美金（照設定裡的匯率換）。",
         "有綁手機條碼的話，同一筆的電子發票會併進這一筆。",
+        "在記帳幫自動記的那筆改了卡片或帳戶，以後同一張卡就自動連到改的那個；以前還沒連的那幾筆，到上面「卡片」按「一起連」。",
+        "改成不連帳戶不會學；只改這一筆。",
         "卡片對應和這份清單只存在這支 iPhone，不跟 iCloud、不進備份。",
         "小工具、通知、鎖定畫面不會出現金額、商家、卡名；捷徑只會回「已記一筆」。"
     ]
@@ -541,8 +586,12 @@ private struct WalletLinkedCardRow: View {
     let status: WalletLinkStatus
     let dollarOptions: [String]
     let dollarMissingRate: Bool
+    /// [learn] 以前用這張卡自動記、還沒連的筆數（0＝不寫那一行）
+    let pendingPast: Int
     let onChange: () -> Void
     let onSetDollar: (String?) -> Void
+    /// [learn] 〔一起連〕
+    let onLinkPast: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
@@ -553,6 +602,7 @@ private struct WalletLinkedCardRow: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
             }
+            pastBlock
             dollarMenu
             if dollarMissingRate {
                 Text("設定裡沒有「\(link.dollarCode ?? "")」的匯率，只寫 $ 的金額會記不到。")
@@ -569,6 +619,22 @@ private struct WalletLinkedCardRow: View {
             Text(status.text)
                 .font(.caption)
                 .foregroundStyle(status.warning ? Color.orange : Color.secondary)
+        }
+    }
+
+    /// [learn] 「還有 2 筆沒連〔一起連〕」
+    @ViewBuilder
+    private var pastBlock: some View {
+        if pendingPast > 0 {
+            HStack(spacing: 12) {
+                Text("還有 \(pendingPast) 筆沒連")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                Spacer(minLength: 8)
+                Button("一起連", action: onLinkPast)
+                    .buttonStyle(.bordered)
+                    .controlSize(.small)
+            }
         }
     }
 

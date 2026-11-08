@@ -17,6 +17,15 @@ import Foundation
 //   wallet_card_links（捷徑給的卡片名稱 → 信用卡／銀行帳戶）、wallet_recent_ids（最近自動記的）、wallet_missed（沒記到的）
 // 隱私：不存卡號（捷徑本來就不給，只有卡片名稱）；不發通知；捷徑回覆只有「已記一筆」／「沒有記到，打開 LifeGood 看看」。
 // 不連網：解析、對應全部在本機。
+//
+// [learn] v25.611（radar/judge_learn.md §C1～C3；radar/build/learn/brief.md）：從你的修改學——
+//   • C3 分類：先找「同一個錢包原始店名」的自動記帳（WalletRecentItem.merchant；舊的從防重指紋拆）那一筆**現在的**分類，
+//     找不到才退回 25.608 的 lastCategory（名稱一樣的最新一筆）。改了店名（7-ELEVEN → 小七）也對得到
+//   • C2 同行人員：同一家店最近一筆有同行人員的那一筆的 diningMember；只帶進有同行人員欄位的分類
+//     （memberCategories＝AddExpenseView.memberCategories），設定頁開關「同行人員照上一次」（WalletPrefs，出廠開）
+//   • C1 卡片：在支出編輯頁（AddExpenseView 編輯存檔，掛鉤點）把自動記的那一筆改連別的卡／帳戶 → WalletLearn 把那張卡的對應
+//     設成新帳戶；改成不連不學。以前沒連的不自動改，設定頁那張卡寫「還有 N 筆沒連〔一起連〕」（unlinkedCounts）
+//   新存的只有 App Group 一個鍵 wallet_member_from_last（這台的開關，不是同步鍵）；Expense 不加欄位
 
 // MARK: - 純資料
 
@@ -95,6 +104,14 @@ struct WalletRecentItem: Codable, Equatable, Identifiable {
     var cardName: String
     /// 防重用（WalletAutoRecord.fingerprint）
     var fingerprint: String
+    /// [learn] 捷徑給的原始商家（cleanMerchant 之後）。v25.611 起才存；舊的沒有＝nil（解得開：Optional 照 decodeIfPresent）
+    var merchant: String? = nil
+
+    /// [learn] 比對同一家店用：有存原始商家用它（titleKey），舊的從防重指紋拆（WalletAutoRecord.merchantKey(fromFingerprint:)）
+    var merchantKey: String {
+        if let m = merchant { return WalletAutoRecord.titleKey(m) }
+        return WalletAutoRecord.merchantKey(fromFingerprint: fingerprint)
+    }
 }
 
 /// 沒記到的一筆（設定頁「沒記到的」）
@@ -112,6 +129,21 @@ struct WalletAccountLink: Equatable {
     var cardId: UUID?
     var bankId: UUID?
     var bankCurrency: String?
+}
+
+/// [learn] 同一家店上一次的分類與同行人員（WalletAutoRecord.shopMemory）
+struct WalletShopMemory: Equatable {
+    var category: VariableCategory
+    /// 同一家店最近一筆**有同行人員**的那一筆的同行人員（去頭尾空白）；沒有＝nil。要不要帶進去看 carriedMember
+    var member: String?
+    /// 分類是從「同一個錢包原始店名的自動記帳」找到的（false＝照名稱一樣的 25.608 規則，或找不到＝其他）
+    var fromWallet: Bool
+}
+
+/// [learn] 一筆支出連的帳戶（WalletLearn.account(of:)）
+struct WalletLearnedLink: Equatable {
+    var target: WalletLinkTarget
+    var milestoneId: UUID
 }
 
 // MARK: - 純函式（sim_wallet.py 一支一支對照）
@@ -388,6 +420,109 @@ enum WalletAutoRecord {
         recent.contains { $0.fingerprint == fingerprint && abs(now.timeIntervalSince($0.at)) < dedupeWindow }
     }
 
+    // MARK: [learn] 同一家店上一次（C2、C3）
+
+    /// 有「同行人員」欄位的分類（照 AddExpenseView.memberCategories——那邊是 private，抄一份；keycheck_learn 對照兩邊一樣）
+    static let memberCategories: Set<VariableCategory> = [
+        .food, .entertainment, .shopping, .dailyNecessities,
+        .medical, .education, .social, .other
+    ]
+
+    /// 防重指紋（titleKey｜分｜cardKey）拆回商家那一段。cardKey 不會有「|」（cardTokens 拿它當分隔），
+    /// 分是整數，所以拿掉最後兩段就是商家（商家自己有「|」也對）。拆不開＝""
+    static func merchantKey(fromFingerprint fp: String) -> String {
+        let parts = fp.components(separatedBy: "|")
+        guard parts.count >= 3 else { return "" }
+        return parts.dropLast(2).joined(separator: "|")
+    }
+
+    /// 同行人員去頭尾空白；空的＝nil
+    static func cleanMember(_ raw: String?) -> String? {
+        let t = (raw ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? nil : t
+    }
+
+    /// 最近清單裡同一個原始店名（merchantKey）的自動記帳、還在帳本、是變動支出的那幾筆（照 recent 的順序：
+    /// 傳 WalletRecentLog.all() 就是新到舊）。excluding＝正在入帳的這一筆
+    static func walletMatches(merchant: String, excluding: UUID?, recent: [WalletRecentItem],
+                              ledger: [Expense]) -> [Expense] {
+        let key = titleKey(merchant)
+        guard !key.isEmpty, !recent.isEmpty else { return [] }
+        var byId: [UUID: Expense] = [:]
+        for e in ledger where byId[e.id] == nil {
+            byId[e.id] = e
+        }
+        var seen = Set<UUID>()
+        var out: [Expense] = []
+        for item in recent where item.id != excluding && !seen.contains(item.id) && item.merchantKey == key {
+            seen.insert(item.id)
+            if let e = byId[item.id], e.expenseType == .variable {
+                out.append(e)
+            }
+        }
+        return out
+    }
+
+    /// 名稱一樣的變動支出裡、有同行人員的最新一筆的同行人員（同 lastCategory 的挑法：日期最新、同時間取排前面的）
+    static func lastMember(for merchant: String, in ledger: [Expense]) -> String? {
+        let key = titleKey(merchant)
+        guard !key.isEmpty else { return nil }
+        var best: Expense? = nil
+        for e in ledger where e.expenseType == .variable && cleanMember(e.diningMember) != nil && titleKey(e.title) == key {
+            if let b = best, e.date <= b.date { continue }
+            best = e
+        }
+        return cleanMember(best?.diningMember)
+    }
+
+    /// 同一家店上一次（C3）：分類＝同一個錢包原始店名、最新那一筆自動記帳**現在的**分類（有分類的；股票、房地產當其他）；
+    /// 找不到退回 lastCategory（25.608）。同行人員（C2）＝那幾筆裡最新一筆有同行人員的；都沒有再退回名稱一樣的 lastMember
+    static func shopMemory(merchant: String, excluding: UUID?, recent: [WalletRecentItem],
+                           ledger: [Expense]) -> WalletShopMemory {
+        let matches = walletMatches(merchant: merchant, excluding: excluding, recent: recent, ledger: ledger)
+        var category: VariableCategory = .other
+        var fromWallet = false
+        if let c = matches.first(where: { $0.variableCategory != nil })?.variableCategory {
+            category = (c == .stock || c == .realEstate) ? .other : c
+            fromWallet = true
+        } else {
+            category = lastCategory(for: merchant, in: ledger)
+        }
+        var member: String? = nil
+        for e in matches {
+            if let m = cleanMember(e.diningMember) {
+                member = m
+                break
+            }
+        }
+        if member == nil {
+            member = lastMember(for: merchant, in: ledger)
+        }
+        return WalletShopMemory(category: category, member: member, fromWallet: fromWallet)
+    }
+
+    /// 這一筆要帶的同行人員：開關開著、分類有同行人員欄位（memberCategories）才帶
+    static func carriedMember(_ memory: WalletShopMemory, enabled: Bool) -> String? {
+        guard enabled, memberCategories.contains(memory.category) else { return nil }
+        return memory.member
+    }
+
+    /// [learn] 每張卡（cardKey）以前自動記、還在帳本、沒連任何卡或帳戶的筆數（設定頁「還有 N 筆沒連」；
+    /// 條件同 WalletImport.unlinkedPast，一次算全部的卡）
+    static func unlinkedCounts(recent: [WalletRecentItem], ledger: [Expense]) -> [String: Int] {
+        var unlinked = Set<UUID>()
+        for e in ledger where e.linkedCreditCardMilestoneId == nil && e.linkedBankMilestoneId == nil {
+            unlinked.insert(e.id)
+        }
+        var seen = Set<UUID>()
+        var out: [String: Int] = [:]
+        for item in recent where !item.cardKey.isEmpty && !seen.contains(item.id) && unlinked.contains(item.id) {
+            seen.insert(item.id)
+            out[item.cardKey, default: 0] += 1
+        }
+        return out
+    }
+
     // MARK: 設定頁的字
 
     /// 「最近自動記的」一列：「11/7 7-ELEVEN NT$65・國泰 CUBE」（account 是 nil 就不寫「・…」）
@@ -554,6 +689,58 @@ enum WalletMissedLog {
     }
 }
 
+/// [learn] 這台的開關（App Group；不跟 iCloud、不進備份、不是同步鍵）
+enum WalletPrefs {
+    static let memberFromLastKey = "wallet_member_from_last"
+
+    /// 「同行人員照上一次」：出廠開（沒存過＝開）
+    static var memberFromLast: Bool {
+        (WidgetShared.defaults?.object(forKey: memberFromLastKey) as? Bool) ?? true
+    }
+
+    static func setMemberFromLast(_ on: Bool) {
+        WidgetShared.defaults?.set(on, forKey: memberFromLastKey)
+    }
+}
+
+// MARK: - [learn] 從你的修改學卡片（C1；掛鉤點：AddExpenseView 編輯存檔）
+
+enum WalletLearn {
+    /// 一筆支出連的帳戶：信用卡優先（刷卡那筆可能也帶著扣款銀行），再來直接扣的銀行帳戶；都沒連＝nil
+    static func account(of e: Expense) -> WalletLearnedLink? {
+        if let c = e.linkedCreditCardMilestoneId { return WalletLearnedLink(target: .card, milestoneId: c) }
+        if let b = e.linkedBankMilestoneId { return WalletLearnedLink(target: .bank, milestoneId: b) }
+        return nil
+    }
+
+    /// 純判斷：自動記的那一筆（item：最近清單裡同 id 的那一項）手動改了連的帳戶 → 要學成什麼；不用學＝nil。
+    /// 沒給卡名的不學；改成「不連」不學；跟改之前一樣不學；對應表已經是這個帳戶不學（免得把「自動對到」洗成你選的）
+    static func learned(before: Expense, after: Expense, item: WalletRecentItem?,
+                        current: WalletCardLink?) -> WalletLearnedLink? {
+        guard before.id == after.id, let item, item.id == after.id, !item.cardKey.isEmpty else { return nil }
+        guard let changed = account(of: after) else { return nil }
+        guard changed != account(of: before) else { return nil }
+        if let c = current, c.linkTarget == changed.target, c.milestoneId == changed.milestoneId { return nil }
+        return changed
+    }
+
+    /// 掛鉤點叫（AddExpenseView 編輯存檔、dismiss 之後的下一個 runloop）：學到就寫這台的對應表（WalletCardBook.setTarget），
+    /// 回傳有沒有學。不是自動記的（最近清單沒有這個 id）什麼都不做。對應表沒有這張卡（〔忘記這張卡〕過）就照最近清單的卡名補一張
+    @discardableResult
+    static func noteManualEdit(before: Expense, after: Expense) -> Bool {
+        guard let item = WalletRecentLog.all().first(where: { $0.id == after.id }) else { return false }
+        let current = WalletCardBook.find(item.cardKey)
+        guard let changed = learned(before: before, after: after, item: item, current: current) else { return false }
+        if current == nil {
+            let name = item.cardName.isEmpty ? item.cardKey : item.cardName
+            WalletCardBook.save(WalletCardLink(key: item.cardKey, name: name, target: nil, milestoneId: nil,
+                                               auto: false, dollarCode: nil, lastSeen: item.at))
+        }
+        WalletCardBook.setTarget(item.cardKey, target: changed.target, milestoneId: changed.milestoneId)
+        return true
+    }
+}
+
 // MARK: - 捷徑動作進來（WalletRecordIntent.perform 叫）
 
 struct WalletIntakeResult: Equatable {
@@ -619,7 +806,7 @@ enum WalletIntake {
             return WalletIntakeResult(recorded: false)
         }
         WalletRecentLog.note(WalletRecentItem(id: entry.id, at: now, cardKey: cardKey, cardName: cardName,
-                                              fingerprint: fp))
+                                              fingerprint: fp, merchant: title))
         if !cardKey.isEmpty {
             WalletCardBook.noteSeen(name: cardName, at: now)
         }
@@ -637,13 +824,17 @@ enum WalletIntake {
 @MainActor
 enum WalletImport {
     /// 收件匣 wallet 那一筆 → Expense（還沒存）：變動支出、title＝商家、台幣金額、date＝付款那一刻、
-    /// 分類照同商家上一次、連卡片（對應表；第一次看到先自動對）、fromQuickRecord＝true（電子發票防重複會併）。
+    /// 分類照同商家上一次（[learn] 先比錢包原始店名）、同行人員照上一次（[learn]）、連卡片（對應表；第一次看到先自動對）、
+    /// fromQuickRecord＝true（電子發票防重複會併）。
     /// 不連車、不連旅遊、不連房地產
     static func makeExpense(from entry: QuickRecordEntry, ledger: [Expense], life: LifeStore?,
                             expense: ExpenseStore, finance: FinanceStore, now: Date = Date()) -> Expense? {
         guard entry.amount.isFinite, entry.amount > 0 else { return nil }
         let title = WalletAutoRecord.cleanMerchant(entry.title)
-        let category = WalletAutoRecord.lastCategory(for: title, in: ledger)
+        // [learn] v25.611 C2／C3：分類、同行人員照同一家店上一次（先比錢包原始店名的自動記帳，再退回名稱一樣的）
+        let memory = WalletAutoRecord.shopMemory(merchant: title, excluding: entry.id, recent: WalletRecentLog.all(),
+                                                 ledger: ledger)
+        let category = memory.category
         let link = resolveLink(cardName: entry.walletCard ?? "", life: life, expense: expense,
                                finance: finance, now: now)
         let code = (entry.currencyCode ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
@@ -661,6 +852,8 @@ enum WalletImport {
             linkedCreditCardMilestoneId: link?.cardId
         )
         e.fromQuickRecord = true
+        // [learn] 同行人員照上一次（設定頁開關；只帶進有同行人員欄位的分類）。不在 memberwise init 的順序裡找位置，存檔前指派
+        e.diningMember = WalletAutoRecord.carriedMember(memory, enabled: WalletPrefs.memberFromLast)
         return e
     }
 

@@ -3951,6 +3951,12 @@ struct AddExpenseView: View {
             let saved = expense
             DispatchQueue.main.async { life.policyExpenseChanged(saved) }
         }
+        // [learn] v25.611（radar/judge_learn.md §C1）：Apple Pay 自動記的那一筆在這裡改了連的卡／帳戶 → 這台的卡片對應照新帳戶
+        //（以後同一張卡自動連）。同上面那段：先 dismiss，下一個 runloop 才寫；不是自動記的、帳戶沒改、改成不連的什麼都不做
+        if isEditing, let before = editingExpense {
+            let after = expense
+            DispatchQueue.main.async { _ = WalletLearn.noteManualEdit(before: before, after: after) }
+        }
         dismiss()
     }
 

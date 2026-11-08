@@ -536,14 +536,13 @@ struct FixedExpenseCard: View {
                     .appStores()
             }
             .alert("更新金額", isPresented: $showAmountUpdate) {
-                TextField("新一期金額（目前 \(Self.decimalFmt.string(from: NSNumber(value: current.amount)) ?? "")）",
-                          text: $newAmountText)
+                TextField(amountUpdatePlaceholder, text: $newAmountText)
                     .keyboardType(.decimalPad)
                 Button("更新") { applyAmountUpdate() }
-                    .disabled((Double(newAmountText.replacingOccurrences(of: ",", with: "")) ?? 0) <= 0)
+                    .disabled(FixedAmountUpdate.parseTyped(newAmountText) == nil)
                 Button("取消", role: .cancel) {}
             } message: {
-                Text("記錄新一期的金額（例：今年續保的乙式險保費）。舊金額會保留成走勢曲線的歷史點。")
+                Text(amountUpdateMessage)
             }
         }
     }
@@ -640,7 +639,7 @@ struct FixedExpenseCard: View {
         if history.count >= 2 {
             lines.append(""); lines.append("📈 金額走勢")
             for p in history {
-                lines.append("• \(Self.dateFmt.string(from: p.date))：NT$\(Self.decimalFmt.string(from: NSNumber(value: p.amount)) ?? "")")
+                lines.append("• \(Self.dateFmt.string(from: p.date))：\(FixedAmountUpdate.historyAmountText(p.amount, label: historyLabel))")
             }
         }
         if !current.note.isEmpty { lines.append(""); lines.append("💬 備註"); lines.append(current.note) }
@@ -881,7 +880,7 @@ struct FixedExpenseCard: View {
                                         .clipShape(Capsule())
                                 }
                             }
-                            Text("NT$\(Self.decimalFmt.string(from: NSNumber(value: sel.amount)) ?? "")")
+                            Text(FixedAmountUpdate.historyAmountText(sel.amount, label: historyLabel))
                                 .font(.system(size: 13, weight: .bold, design: .rounded))
                                 .foregroundStyle(sel.isForecast ? accent.opacity(0.8) : accent)
                             if let prev = sel.prev, prev > 0 {
@@ -921,10 +920,18 @@ struct FixedExpenseCard: View {
         }
     }
 
+    // [learn] v25.611 C4：〔更新金額〕照框上寫的幣別打（外幣有匯率＝打原幣、換成台幣存）。規則全在 FixedAmountUpdate
+    private var amountUpdateUnit: FixedAmountInputUnit { FixedAmountUpdate.unit(for: current, rates: store.currencyRates) }
+    private var amountUpdatePlaceholder: String { FixedAmountUpdate.placeholder(current, unit: amountUpdateUnit) }
+    private var amountUpdateMessage: String { FixedAmountUpdate.message(amountUpdateUnit) }
+    /// 走勢圖、分享文字的歷史點幣別（外幣儲蓄險標原幣，其他 NT$；存法不改）
+    private var historyLabel: String { FixedAmountUpdate.historyLabel(current) }
+
     /// 更新金額：追加歷史快照並改寫目前金額。首次更新先把原金額（起始日期）補為起點。
     private func applyAmountUpdate() {
-        guard let value = Double(newAmountText.replacingOccurrences(of: ",", with: "")),
-              value > 0 else { return }
+        guard let typed = FixedAmountUpdate.parseTyped(newAmountText) else { return }
+        let value = FixedAmountUpdate.storedAmount(typed: typed, unit: amountUpdateUnit)
+        guard value.isFinite, value > 0 else { return }
         var updated = current
         if updated.amountHistory.isEmpty {
             updated.amountHistory.append(AmountSnapshot(date: updated.date, amount: updated.amount))
@@ -1231,6 +1238,9 @@ private struct AmountHistoryEditor: View {
         let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0; return f
     }()
 
+    /// [learn] v25.611 C4：金額紀錄的幣別（外幣儲蓄險＝原幣，其他 NT$；存法不改）
+    private var unitLabel: String { FixedAmountUpdate.historyLabel(expense) }
+
     /// 依日期排好的結果（存檔與「目前金額」都看這個）
     private var sortedRows: [AmountSnapshot] {
         rows.filter { $0.amount > 0 }.sorted { $0.date < $1.date }
@@ -1292,7 +1302,7 @@ private struct AmountHistoryEditor: View {
     private func rowEditor(_ row: Binding<AmountSnapshot>) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("金額").font(.caption).foregroundStyle(.secondary)
+                Text("金額（\(unitLabel)）").font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 TextField("金額", value: row.amount, format: .number)
                     .keyboardType(.decimalPad)
@@ -1324,14 +1334,16 @@ private struct AmountHistoryEditor: View {
             + "改了它，上面的金額會跟著變。"
         if let last = sortedRows.last,
            abs(last.amount - expense.amount) > 0.5 {
-            t += "\n\n儲存後目前金額會從 NT$"
-                + (Self.decimalFmt.string(from: NSNumber(value: expense.amount)) ?? "")
-                + " 變成 NT$"
-                + (Self.decimalFmt.string(from: NSNumber(value: last.amount)) ?? "")
-                + "。"
+            let from = FixedAmountUpdate.historyAmountText(expense.amount, label: unitLabel)
+            let to = FixedAmountUpdate.historyAmountText(last.amount, label: unitLabel)
+            t += "\n\n儲存後目前金額會從 \(from) 變成 \(to)。"
         }
         if rows.contains(where: { $0.amount <= 0 }) {
             t += "\n\n金額填 0 或空白的那幾筆不會被存下來。"
+        }
+        // [learn] v25.611 C4：外幣（不是儲蓄險）說清楚這裡存的是台幣
+        if let n = FixedAmountUpdate.historyNote(expense) {
+            t += "\n\n" + n
         }
         return t
     }

@@ -266,6 +266,7 @@
 		A01B000001001652 /* WalletAutoRecord.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001652 /* WalletAutoRecord.swift */; };
 		A01B000001001653 /* WalletRecordIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001653 /* WalletRecordIntent.swift */; };
 		A01B000001001654 /* WalletAutoRecordView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001654 /* WalletAutoRecordView.swift */; };
+		A01B000001001655 /* FixedAmountUpdate.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001655 /* FixedAmountUpdate.swift */; };
 		A01B000001001619 /* OrgMoveCardParts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001619 /* OrgMoveCardParts.swift */; };
 		A01B000001001621 /* OrgMoveWizardRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001621 /* OrgMoveWizardRows.swift */; };
 		A01B000001001623 /* OrgMoveDueViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001623 /* OrgMoveDueViews.swift */; };
@@ -664,6 +665,7 @@
 		A01A000001001652 /* WalletAutoRecord.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WalletAutoRecord.swift; sourceTree = "<group>"; };
 		A01A000001001653 /* WalletRecordIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WalletRecordIntent.swift; sourceTree = "<group>"; };
 		A01A000001001654 /* WalletAutoRecordView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WalletAutoRecordView.swift; sourceTree = "<group>"; };
+		A01A000001001655 /* FixedAmountUpdate.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FixedAmountUpdate.swift; sourceTree = "<group>"; };
 		A01A000001001619 /* OrgMoveCardParts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveCardParts.swift; sourceTree = "<group>"; };
 		A01A000001001621 /* OrgMoveWizardRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveWizardRows.swift; sourceTree = "<group>"; };
 		A01A000001001623 /* OrgMoveDueViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveDueViews.swift; sourceTree = "<group>"; };
@@ -1062,6 +1064,7 @@
 				A01A000001001545 /* AIExpenseCommitter.swift */,
 				A01A000001001652 /* WalletAutoRecord.swift */,
 				A01A000001001653 /* WalletRecordIntent.swift */,
+				A01A000001001655 /* FixedAmountUpdate.swift */,
 				A01A000001001547 /* WidgetFinanceBuilder.swift */,
 				A01A000001001548 /* TeamDay.swift */,
 				A01A000001001549 /* WidgetLifeExtras.swift */,
@@ -1711,6 +1714,7 @@
 				A01B000001001652 /* WalletAutoRecord.swift in Sources */,
 				A01B000001001653 /* WalletRecordIntent.swift in Sources */,
 				A01B000001001654 /* WalletAutoRecordView.swift in Sources */,
+				A01B000001001655 /* FixedAmountUpdate.swift in Sources */,
 				A01B000001001619 /* OrgMoveCardParts.swift in Sources */,
 				A01B000001001621 /* OrgMoveWizardRows.swift in Sources */,
 				A01B000001001623 /* OrgMoveDueViews.swift in Sources */,
@@ -2113,7 +2117,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 1363;
+				CURRENT_PROJECT_VERSION = 1364;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -2134,7 +2138,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MARKETING_VERSION = 25.610;
+				MARKETING_VERSION = 25.611;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -2178,7 +2182,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 1363;
+				CURRENT_PROJECT_VERSION = 1364;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -2193,7 +2197,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MARKETING_VERSION = 25.610;
+				MARKETING_VERSION = 25.611;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;
