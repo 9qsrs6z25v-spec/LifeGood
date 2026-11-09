@@ -1442,10 +1442,10 @@ struct StockLedgerCard: View {
                     .font(.subheadline.weight(.bold))
                 Spacer(minLength: 8)
                 Menu {
-                    Button { onAdd(.buy) } label: { Label("買進", systemImage: "arrow.down.circle") }
-                    Button { onAdd(.sell) } label: { Label("賣出", systemImage: "arrow.up.circle") }
-                    Button { onAdd(.cash) } label: { Label("配息", systemImage: "dollarsign.circle") }
-                    Button { onAdd(.stock) } label: { Label("配股", systemImage: "leaf") }
+                    Button { addLater(.buy) } label: { Label("買進", systemImage: "arrow.down.circle") }
+                    Button { addLater(.sell) } label: { Label("賣出", systemImage: "arrow.up.circle") }
+                    Button { addLater(.cash) } label: { Label("配息", systemImage: "dollarsign.circle") }
+                    Button { addLater(.stock) } label: { Label("配股", systemImage: "leaf") }
                 } label: {
                     Label("買進／賣出／股利", systemImage: "plus")
                         .font(.caption.weight(.heavy))
@@ -1488,6 +1488,13 @@ struct StockLedgerCard: View {
             }
         }
         .modifier(StockCardChrome())
+    }
+
+    /// [v25.612] 選單收起來那一輪先過，下一輪才叫 onAdd 打開表單（不跟收選單搶同一輪）。
+    /// 以前同一輪就開表單：開出來會卡一下，〔張數〕有時點了打不了字，切到別的 App 再回來才可以
+    private func addLater(_ kind: StockLedgerAdd) {
+        let add = onAdd
+        DispatchQueue.main.async { add(kind) }
     }
 
     /// 帳本的一列。[v25.543] 有文件照片的股利：列和照片膠囊是並排的兩顆按鈕（照載具帳本的收據膠囊，

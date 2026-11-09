@@ -91,6 +91,7 @@ import Charts
 //   兩個編輯 sheet（StockTransactionEditor／StockDividendEditor）照舊，只多了「一開始選哪一種」。
 // [v25.567] 財富 v6：加交易、刪交易寫交割紀錄改叫 LifeStore.rewriteStockSettlements（三處同一支；以前只清目標帳戶，
 //   換過交割帳戶會留重複）。股利入帳那幾支不動。
+// [v25.612] 兩個編輯 sheet 初值改在 init 給（StockEditorSeed）、不再 @EnvironmentObject 觀察三份大資料、畫面讀打開那一刻的快照（shown）；存檔、同步照舊。
 
 struct StockDetailView: View {
     @EnvironmentObject var store: FinanceStore
@@ -590,20 +591,23 @@ fileprivate func stockEditorSectionHeader(_ title: String, icon: String, color: 
 }
 
 struct StockTransactionEditor: View {
-    @EnvironmentObject var store: FinanceStore
-    @EnvironmentObject var lifeStore: LifeStore
-    @EnvironmentObject var expenseStore: ExpenseStore
+    // [v25.612] 不再用 @EnvironmentObject 觀察三份大資料（任何一份一變，整張表單就重算一次：報價、iCloud、
+    // 收件匣、電子發票回來都會）。只有存檔、刪除才用，讀 App 唯一的那一份（.appStores() 注入的也是同一份）
+    private var store: FinanceStore { AppStores.finance }
+    private var lifeStore: LifeStore { AppStores.life }
+    private var expenseStore: ExpenseStore { AppStores.expense }
     @Environment(\.dismiss) private var dismiss
 
     let stockId: UUID
     let editing: StockTransaction?
     /// [v25.528] 新增時一開始選哪一種（帳本的「＋」選單：買進／賣出）
-    var initialKind: StockTransactionKind = .buy
+    let initialKind: StockTransactionKind
 
-    @State private var date: Date = Date()
-    @State private var kind: StockTransactionKind = .buy
-    @State private var lotsText: String = ""
-    @State private var priceText: String = ""
+    // [v25.612] 這幾格的初值在 init 給（StockEditorSeed.transaction），不靠 onAppear 改
+    @State private var date: Date
+    @State private var kind: StockTransactionKind
+    @State private var lotsText: String
+    @State private var priceText: String
     private enum MoneyField: Hashable { case quantity, price, amount, ntd, rate, cumShares }
     @FocusState private var focusedField: MoneyField?
 
@@ -611,7 +615,7 @@ struct StockTransactionEditor: View {
     ///
     /// 實務上兩種下單方式都有：「我要買 2 張」與「我要投 10 萬」。
     /// 以前只能填數量，想用金額下單的人得自己拿計算機除一次再回來填。
-    @State private var totalText: String = ""
+    @State private var totalText: String
 
     // [v25.511] 台幣扣款（定期定額）
     //
@@ -626,15 +630,34 @@ struct StockTransactionEditor: View {
     @State private var showDeleteConfirm = false
     /// 存檔中鎖住儲存按鈕，避免 sheet 收合動畫播完前快速連點建立兩筆重複交易紀錄
     @State private var isSaving = false
+    /// [v25.612] 打開那一刻的這一檔（單位、幣別、美股才有的台幣扣款段）：表單開著時不跟著 store 重算。存檔照舊讀最新的
+    @State private var shown: Stock?
+    /// [v25.612] 這一筆之前的庫存股數（打開時算一次；以前每重畫一次就掃一次全部交易）
+    @State private var sharesBefore: Double
+
+    init(stockId: UUID, editing: StockTransaction?, initialKind: StockTransactionKind = .buy) {
+        self.stockId = stockId
+        self.editing = editing
+        self.initialKind = initialKind
+        let shown = AppStores.finance.stocks.first { $0.id == stockId }
+        let seed = StockEditorSeed.transaction(editing: editing, initialKind: initialKind,
+                                               sharesPerUnit: shown?.sharesPerUnit ?? 1000, now: Date())
+        _shown = State(initialValue: shown)
+        _sharesBefore = State(initialValue: StockEditorSeed.sharesBefore(shown, excludingTransaction: editing?.id))
+        _date = State(initialValue: seed.date)
+        _kind = State(initialValue: seed.kind)
+        _lotsText = State(initialValue: seed.lotsText)
+        _priceText = State(initialValue: seed.priceText)
+        _totalText = State(initialValue: seed.totalText)
+    }
 
     private var isEditing: Bool { editing != nil }
 
     /// [v25.445] 美股論「股」不論「張」，報價也是美元。
     /// 查不到股票時退回台股規格——那只會發生在資料被同時刪掉的瞬間。
-    private var stock: Stock? { store.stocks.first { $0.id == stockId } }
-    private var unit: String { stock?.quantityUnit ?? "張" }
-    private var sharesPerUnit: Double { stock?.sharesPerUnit ?? 1000 }
-    private var currencySymbol: String { stock?.priceCurrencySymbol ?? "NT$" }
+    private var unit: String { shown?.quantityUnit ?? "張" }
+    private var sharesPerUnit: Double { shown?.sharesPerUnit ?? 1000 }
+    private var currencySymbol: String { shown?.priceCurrencySymbol ?? "NT$" }
 
     /// 畫面上輸入的數量（美股＝股數，台股＝張數）
     private var quantityInput: Double { Double(lotsText) ?? 0 }
@@ -645,10 +668,8 @@ struct StockTransactionEditor: View {
 
     /// 美股金額不講「萬」——那是中文的量級單位，US$1.2 萬只會讓人愣住
     private var amountSummary: String {
-        guard stock?.isUSStock == true else { return amountPreview.ntdWanString }
-        let f = NumberFormatter()
-        f.numberStyle = .decimal; f.maximumFractionDigits = 2
-        return "US$" + (f.string(from: NSNumber(value: amountPreview)) ?? "0")
+        guard shown?.isUSStock == true else { return amountPreview.ntdWanString }
+        return StockEditorText.usd(amountPreview)
     }
 
     /// 由金額反推出來的股數（給「約合 N 股」用）。
@@ -669,16 +690,7 @@ struct StockTransactionEditor: View {
     ///
     /// 對帳單上的「庫存股數」是累計的，所以這一次買到幾股＝累計 − 之前。
     /// 編輯既有交易時要把它自己扣掉，不然會拿自己減自己。
-    private var sharesBeforeThisTx: Double {
-        guard let s = stock else { return 0 }
-        var total = s.dividends
-            .filter { $0.kind == .stock }
-            .reduce(0.0) { $0 + $1.sharesEarned }
-        for tx in s.transactions where tx.id != editing?.id {
-            total += tx.kind == .buy ? tx.shares : -tx.shares
-        }
-        return total
-    }
+    private var sharesBeforeThisTx: Double { sharesBefore }
 
     /// 由「對帳單累計股數」回推出來的本次股數與每股價。
     /// 兩者都算不出來就回 nil（欄位沒填齊、或累計數比現有庫存還少）。
@@ -689,13 +701,7 @@ struct StockTransactionEditor: View {
         return (shares, usdFromNtd / shares)
     }
 
-    private static func decimalText(_ v: Double, max digits: Int) -> String {
-        let f = NumberFormatter()
-        f.numberStyle = .decimal
-        f.usesGroupingSeparator = false
-        f.maximumFractionDigits = digits
-        return f.string(from: NSNumber(value: v)) ?? "0"
-    }
+    private static func decimalText(_ v: Double, max digits: Int) -> String { StockEditorText.decimal(v, max: digits) }
 
     /// 把換算結果填進上面三個欄位。
     ///
@@ -779,7 +785,7 @@ struct StockTransactionEditor: View {
                 }
 
                 // [v25.511] 定期定額：直接照著對帳單填
-                if stock?.isUSStock == true, kind == .buy {
+                if shown?.isUSStock == true, kind == .buy {
                     Section {
                         HStack {
                             Text("NT$").foregroundStyle(.secondary)
@@ -871,7 +877,6 @@ struct StockTransactionEditor: View {
                 Button("刪除", role: .destructive) { performDelete() }
                 Button("取消", role: .cancel) {}
             }
-            .onAppear { loadInitial() }
             // [v25.452] 數量 ⇄ 總金額雙向換算。
             //
             // ⚠️ 不用「兩欄互相回寫、靠收斂自己停下來」那套（配息編輯器原本的做法，
@@ -933,38 +938,16 @@ struct StockTransactionEditor: View {
     }
 
     /// 金額：最多兩位小數，不帶千分位（這是輸入欄，逗號會讓人以為要自己打）
-    private static func moneyText(_ v: Double) -> String {
-        let r = (v * 100).rounded() / 100
-        return r == r.rounded() ? String(format: "%.0f", r) : String(format: "%g", r)
-    }
+    private static func moneyText(_ v: Double) -> String { StockEditorText.money(v) }
 
     /// 數量：台股的張數可能到小數第 4 位（0.0001 張 = 0.1 股），美股本來就可能有零股
-    private static func quantityText(_ v: Double) -> String {
-        let r = (v * 10000).rounded() / 10000
-        return r == r.rounded() ? String(format: "%.0f", r) : String(format: "%g", r)
-    }
+    private static func quantityText(_ v: Double) -> String { StockEditorText.quantity(v) }
 
     /// 股數顯示：整數就不帶小數點
-    private static func sharesText(_ v: Double) -> String {
-        let r = (v * 100).rounded() / 100
-        return r == r.rounded() ? String(format: "%.0f", r) : String(format: "%g", r)
-    }
+    private static func sharesText(_ v: Double) -> String { StockEditorText.shares(v) }
 
     private var canSave: Bool {
         (Double(lotsText) ?? 0) > 0 && (Double(priceText) ?? 0) > 0
-    }
-
-    private func loadInitial() {
-        if let e = editing {
-            date = e.date
-            kind = e.kind
-            // 存檔的 lots 永遠是「股數 ÷ 1000」，畫面上要換成這支股票的單位
-            lotsText = formatLots(e.lots * 1000 / sharesPerUnit)
-            priceText = String(format: "%.2f", e.price)
-            totalText = Self.moneyText(e.shares * e.price)
-        } else {
-            kind = initialKind
-        }
     }
 
     private func save() {
@@ -1020,11 +1003,6 @@ struct StockTransactionEditor: View {
 
     // MARK: - Helpers
 
-    private func formatLots(_ v: Double) -> String {
-        if v == v.rounded() { return String(format: "%.0f", v) }
-        return String(format: "%g", v)
-    }
-
     private static let _tradeDateFmt: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "yyyy/MM/dd"; return f
     }()
@@ -1036,52 +1014,74 @@ struct StockTransactionEditor: View {
 // MARK: - 股利編輯器
 
 struct StockDividendEditor: View {
-    @EnvironmentObject var store: FinanceStore
-    @EnvironmentObject var expenseStore: ExpenseStore
-    @EnvironmentObject var lifeStore: LifeStore
+    // [v25.612] 不再用 @EnvironmentObject 觀察三份大資料（任何一份一變，整張表單就重算一次：報價、iCloud、
+    // 收件匣、電子發票回來都會）。只有存檔、刪除才用，讀 App 唯一的那一份（.appStores() 注入的也是同一份）
+    private var store: FinanceStore { AppStores.finance }
+    private var lifeStore: LifeStore { AppStores.life }
+    private var expenseStore: ExpenseStore { AppStores.expense }
     @Environment(\.dismiss) private var dismiss
 
     let stockId: UUID
     let editing: StockDividend?
     /// [v25.528] 新增時一開始選哪一種（帳本的「＋」選單：配息／配股）
-    var initialKind: StockDividendKind = .cash
+    let initialKind: StockDividendKind
 
-    @State private var date: Date = Date()
-    @State private var kind: StockDividendKind = .cash
-    @State private var lotsText: String = ""
-    @State private var perShareText: String = ""
-    @State private var sharesAtEventText: String = ""
+    // [v25.612] 這幾格（含備註、文件照片）的初值在 init 給（StockEditorSeed.dividend），不靠 onAppear 改
+    @State private var date: Date
+    @State private var kind: StockDividendKind
+    @State private var lotsText: String
+    @State private var perShareText: String
+    @State private var sharesAtEventText: String
     /// 總配息輸入欄：與每股配息雙向換算（輸入任一方，依基準股數自動算出另一方）
-    @State private var totalText: String = ""
+    @State private var totalText: String
     private enum DividendField: Hashable { case shares, perShare, total }
     @FocusState private var focusedField: DividendField?
-    @State private var note: String = ""
+    @State private var note: String
     @State private var showDeleteConfirm = false
     /// 存檔中鎖住儲存按鈕，避免 sheet 收合動畫播完前快速連點建立兩筆重複股利／收入／存款紀錄
     @State private var isSaving = false
     /// [v25.543] 股利文件（發放通知書、扣繳憑單）的照片／PDF 檔名。拍下、選好的當下就寫檔了，
     /// 按儲存才記進這筆股利
-    @State private var photoFileNames: [String] = []
+    @State private var photoFileNames: [String]
     /// [v25.543] 新增時先定好這筆股利的 id：照片檔名用它開頭，存檔時也用同一個，
     /// 檔名才對得上是哪一筆（@State 才不會每次重畫換一個）
     @State private var draftId = UUID()
-    /// [v25.543] loadInitial 只跑一次：拍照、掃描文件是全螢幕畫面，關掉時會再觸發這頁的 onAppear，
-    /// 再跑一次會把剛拍的照片和打到一半的欄位蓋回進來時的樣子（載具照片 v25.538 踩過）
-    @State private var didLoadInitial = false
+    /// [v25.612] 打開那一刻的這一檔（單位、幣別、帶入的持股、入帳銀行那一行）：表單開著時不跟著 store 重算。
+    /// 存檔照舊讀最新的（下面的 stock）
+    @State private var shown: Stock?
+
+    /// [v25.612] 以前 loadInitial 在 onAppear 才填（有 didLoadInitial 只跑一次：拍照、掃描文件的全螢幕關掉會再觸發 onAppear，
+    /// 載具照片 v25.538 踩過）。現在 init 就給好，onAppear 再來幾次都不會把打好的字、剛拍的照片蓋回去
+    init(stockId: UUID, editing: StockDividend?, initialKind: StockDividendKind = .cash) {
+        self.stockId = stockId
+        self.editing = editing
+        self.initialKind = initialKind
+        let shown = AppStores.finance.stocks.first(where: { $0.id == stockId })
+        let seed = StockEditorSeed.dividend(editing: editing, initialKind: initialKind, stock: shown, now: Date())
+        _shown = State(initialValue: shown)
+        _date = State(initialValue: seed.date)
+        _kind = State(initialValue: seed.kind)
+        _lotsText = State(initialValue: seed.lotsText)
+        _perShareText = State(initialValue: seed.perShareText)
+        _sharesAtEventText = State(initialValue: seed.sharesAtEventText)
+        _totalText = State(initialValue: seed.totalText)
+        _note = State(initialValue: seed.note)
+        _photoFileNames = State(initialValue: seed.photoFileNames)
+    }
 
     private var isEditing: Bool { editing != nil }
     private var dividendId: UUID { editing?.id ?? draftId }
     /// [v25.543] 照片有沒有還沒存的變動（新加的檔、或刪掉了原本的檔）。
     /// 往下滑關掉不會經過「取消」收拾，會留下沒人認領的檔、或指向已刪檔案的紀錄，所以這時擋住下滑
     private var hasUnsavedPhotoChanges: Bool {
-        guard didLoadInitial else { return false }
-        return photoFileNames != (editing?.photoFileNames ?? [])
+        photoFileNames != (editing?.photoFileNames ?? [])
     }
+    /// 最新的這一檔（存檔時 syncCashDividendIncome 讀它的銀行、幣別；不在畫面上用）
     private var stock: Stock? { store.stocks.first(where: { $0.id == stockId }) }
     /// [v25.445] 美股論「股」不論「張」，配息也是美元
-    private var unit: String { stock?.quantityUnit ?? "張" }
-    private var sharesPerUnit: Double { stock?.sharesPerUnit ?? 1000 }
-    private var currencySymbol: String { stock?.priceCurrencySymbol ?? "NT$" }
+    private var unit: String { shown?.quantityUnit ?? "張" }
+    private var sharesPerUnit: Double { shown?.sharesPerUnit ?? 1000 }
+    private var currencySymbol: String { shown?.priceCurrencySymbol ?? "NT$" }
 
     private var canSave: Bool {
         switch kind {
@@ -1208,7 +1208,6 @@ struct StockDividendEditor: View {
                 Button("刪除", role: .destructive) { performDelete() }
                 Button("取消", role: .cancel) {}
             }
-            .onAppear { loadInitial() }
             .onChange(of: kind) { _, newKind in
                 // 切到配息時若還沒填基準股數，自動帶入該日期之持股
                 if newKind == .cash && (Double(sharesAtEventText) ?? 0) == 0 {
@@ -1311,13 +1310,7 @@ struct StockDividendEditor: View {
 
     /// 每股配息顯示用：最多 6 位小數、去掉尾隨的 0，絕不吐科學記號。
     /// 不能用 "%g"——0.000008 會變成 "8e-06" 出現在輸入欄裡。
-    private static func perShareDisplay(_ v: Double) -> String {
-        if v == v.rounded() { return String(format: "%.0f", v) }
-        var s = String(format: "%.6f", v)
-        while s.hasSuffix("0") { s.removeLast() }
-        if s.hasSuffix(".") { s.removeLast() }
-        return s
-    }
+    private static func perShareDisplay(_ v: Double) -> String { StockEditorText.perShare(v) }
 
     private var kindFooterText: String {
         switch kind {
@@ -1327,7 +1320,7 @@ struct StockDividendEditor: View {
     }
 
     private var bankInfoText: String? {
-        guard let stock else { return nil }
+        guard let stock = shown else { return nil }
         let id = stock.linkedBankMilestoneId ?? stock.linkedSecuritiesMilestoneId
         guard let id, let ms = lifeStore.milestones.first(where: { $0.id == id }) else { return nil }
         let name = ms.bankName ?? ms.title
@@ -1335,45 +1328,9 @@ struct StockDividendEditor: View {
         return currency == "NT$" ? name : "\(name) · \(currency)"
     }
 
-    /// 當前股票在 date 當下的持股股數估算（用 transactions 累積）
+    /// 當前股票在 date 當下的持股股數估算（用 transactions 累積）。[v25.612] 讀打開那一刻的 shown（StockEditorSeed.heldShares，寫法照搬）
     private var currentHeldShares: Double {
-        guard let stock else { return 0 }
-        if stock.transactions.isEmpty {
-            return stock.shares
-        }
-        var s: Double = 0
-        for tx in stock.transactions where tx.date <= date {
-            s += tx.kind == .buy ? tx.shares : -tx.shares
-        }
-        // 加上 date 之前已發放的配股
-        for div in stock.dividends where div.kind == .stock && div.date <= date && div.id != editing?.id {
-            s += div.sharesEarned
-        }
-        return max(0, s)
-    }
-
-    private func loadInitial() {
-        guard !didLoadInitial else { return }
-        didLoadInitial = true
-        if let e = editing {
-            date = e.date
-            kind = e.kind
-            // 存檔的 lots 永遠是「股數 ÷ 1000」，畫面上要換成這支股票的單位
-            lotsText = e.lots > 0 ? String(format: "%g", e.lots * 1000 / sharesPerUnit) : ""
-            perShareText = e.perShare > 0 ? Self.perShareDisplay(e.perShare) : ""
-            sharesAtEventText = e.sharesAtEvent > 0 ? "\(Int(e.sharesAtEvent))" : ""
-            if e.perShare > 0, e.sharesAtEvent > 0 {
-                totalText = String(format: "%g", (e.perShare * e.sharesAtEvent).rounded())
-            }
-            note = e.note
-            photoFileNames = e.photoFileNames
-        } else {
-            kind = initialKind
-            // 新增時，配息預設帶入當下持股股數
-            if kind == .cash {
-                sharesAtEventText = "\(Int(currentHeldShares))"
-            }
-        }
+        StockEditorSeed.heldShares(shown, on: date, excludingDividend: editing?.id)
     }
 
     // MARK: - Save / Delete
