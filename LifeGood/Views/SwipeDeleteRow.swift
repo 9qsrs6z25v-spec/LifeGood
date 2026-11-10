@@ -52,8 +52,10 @@ struct SwipeDeleteRow<Content: View>: View {
             }
 
             content()
-                .offset(x: offsetX)
                 // 開啟狀態：點內容先收合（不觸發內容自身的 onTapGesture 開卡）
+                // [v25.613] 掛在 .offset 前面：overlay 跟著卡片一起往左移。以前掛在 .offset 後面，
+                // overlay 留在卡片原本的位置（offset 只移畫面、不移版面），開著時剛好蓋住右邊的〔刪除〕鈕，
+                // 按〔刪除〕只會收合。
                 .overlay {
                     if isOpen {
                         Color.clear
@@ -61,6 +63,7 @@ struct SwipeDeleteRow<Content: View>: View {
                             .onTapGesture { close() }
                     }
                 }
+                .offset(x: offsetX)
                 // [v25.613] UIKit 的 pan：偏垂直的不開始（交給捲動），明顯偏水平才接（規則見 SwipeDeleteRule）
                 .gesture(swipePan)
         }
