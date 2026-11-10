@@ -76,6 +76,8 @@ struct ExpenseKindIndex {
 
     /// 每筆支出的原始 tag（含墓碑；同一個 id 有兩筆時留 updatedAt 新的）
     private let tags: [UUID: ExpenseKindTag]
+    /// [v25.616] 〔不是〕過的「id|細項」（推的規則、一鍵整理候選都看這個；只增不刪）
+    private let dismissedKeys: Set<String>
 
     init(book: ExpenseKindBook) {
         var map: [UUID: ExpenseKindTag] = [:]
@@ -84,6 +86,7 @@ struct ExpenseKindIndex {
             map[t.id] = t
         }
         tags = map
+        dismissedKeys = Set((book.dismissed ?? []).map { d in ExpenseKindIndex.dismissKey(d.id, d.kind) })
     }
 
     /// 主分類簽名（H1，只准這一支）。一律 `?.rawValue ?? ""`，不准用字串插值 Optional／enum。順序寫死：
@@ -117,6 +120,8 @@ struct ExpenseKindIndex {
 
     /// 這筆的細項（C5）。對不上 → nil（以那筆為準、不算、tag 留著）
     func kind(of e: Expense) -> ExpenseKindHit? {
+        // [v25.616] 連墓碑都沒有的那筆：照「推的」規則（只顯示、不寫；inferredHit 在檔尾 v2 那段）
+        if tags[e.id] == nil { return inferredHit(e) }
         guard let t = tags[e.id], let raw = t.kind, !raw.isEmpty else { return nil }
         let sig = Self.signature(e)
         guard let base = t.base, base == sig else { return nil }
@@ -706,5 +711,383 @@ enum ExpenseKindSync {
               let cb = try? dec.decode(ExpenseKindBook.self, from: c) else { return nil }
         let merged: ExpenseKindBook = localWins ? lb.merged(with: cb) : cb.merged(with: lb)
         return try? JSONEncoder().encode(merged)
+    }
+}
+
+// MARK: - [v25.616] 政府稅費 v2：車子「稅費」「罰款」、推的牌照稅／燃料費、一鍵整理（radar/judge_govfee.md §C9；
+//   build/govfee2/brief.md；sim_govfee2.py 一個函式一個函式對照）
+//
+// • 上面 v25.615 的東西一行都沒改，只加：ExpenseKindIndex 多記 dismissed、kind(of:) 開頭多一行「沒 tag → 推的」。
+// • 推的（只顯示、不寫，UX 2.6）：連墓碑都沒有的固定「其他」＋每年＋連車（沒連房子）、不是記成其他的車險，
+//   名稱有「牌照」→ 牌照稅、有「燃料」→ 燃料費。〔不是〕過（dismissed）就不推。不推房子的、不推罰款、不看備註。
+// • 寫只在使用者按的時候：AddExpenseView 存檔（recordFormSave，取代 recordSave 那一行）、一鍵整理〔改成…〕
+//  （recordRetag）／〔不是〕（recordDismiss）、變動支出頁〔複製〕（recordCopy）。開 App、背景、同步一律不寫。
+// • categories(for:) 不改（小工具「記到…」才不會多出「稅費」「罰款」）：虛擬項另外排（VehicleKindPick.all）。
+// • 隱私：這裡的字只在 App 內頁；通知、小工具、手錶、鎖定畫面、靈動島一個字都沒加。
+
+extension ExpenseKindIndex {
+    /// dismissed 的比對字（id|細項字）
+    static func dismissKey(_ id: UUID, _ kind: String) -> String {
+        id.uuidString + "|" + kind
+    }
+
+    /// 〔不是〕過這筆的這個細項
+    func isDismissed(_ id: UUID, _ k: ExpenseKind) -> Bool {
+        dismissedKeys.contains(Self.dismissKey(id, k.raw))
+    }
+
+    /// 推的規則（C5）：只看那筆本身（不看 tag、不看 dismissed：那兩個在 inferredHit 看）
+    static func inferredKind(_ e: Expense) -> ExpenseKind? {
+        guard e.expenseType == .fixed, e.fixedCategory == .other, e.recurrence == .yearly,
+              e.linkedVehicleId != nil, e.linkedRealEstateId == nil,
+              !VehicleFixes.isInsuranceAsOther(e) else { return nil }
+        if e.title.contains("牌照") { return .licenseTax }
+        if e.title.contains("燃料") { return .fuelFee }
+        return nil
+    }
+
+    /// 沒有 tag 的那筆推得出來、而且沒〔不是〕過 → inferred＝true（kind(of:) 開頭叫）
+    fileprivate func inferredHit(_ e: Expense) -> ExpenseKindHit? {
+        guard let k = Self.inferredKind(e), !isDismissed(e.id, k) else { return nil }
+        return ExpenseKindHit(kind: k, inferred: true)
+    }
+}
+
+extension ExpenseKindForm {
+    /// v2 表單管得到的簽名：多了車子變動「其他」（v2 的「車子・罰款／稅費」在新版打開、改成別的存檔要寫墓碑）
+    static let handledBasesV2: Set<String> = handledBases.union(["vehicle." + VehicleVariableCategory.other.rawValue])
+}
+
+/// 一鍵整理的一筆：哪一筆記帳、建議改成哪個細項
+struct ExpenseKindPick {
+    let expense: Expense
+    let kind: ExpenseKind
+}
+
+extension ExpenseKindBook {
+    /// v2 AddExpenseView 存檔（e＝這次存的那筆）。回 nil＝不用寫。
+    /// ① 有選細項 → 同 savingTag（寫 tag、一律蓋掉）
+    /// ② 沒選、原始 tag 有 kind、base 是 v2 管得到的簽名（固定其他、車子其他）→ 墓碑
+    /// ③ 沒選、連墓碑都沒有、但這筆推得出來（推的那筆打開改選別的、仍是其他）→ 記〔不是〕，之後不再推
+    /// ④ 其他 → 不寫
+    func formSavingTag(for e: Expense, kind: ExpenseKind?, now: Date) -> ExpenseKindBook? {
+        if let k = kind { return savingTag(for: e, kind: k, now: now) }
+        if let r = rawTag(e.id) {
+            guard r.kind != nil, ExpenseKindForm.handledBasesV2.contains(r.base ?? "") else { return nil }
+            var out = self
+            out.upsert(Self.tombstone(of: r, now: now))
+            return out
+        }
+        guard let hit = ExpenseKindIndex(book: self).kind(of: e), hit.inferred else { return nil }
+        return dismissing([ExpenseKindDismissal(id: e.id, kind: hit.kind.raw, at: now)])
+    }
+
+    /// 〔不是〕：只加不刪，(id, 細項) 已經有的不重複加。沒有新的回 nil
+    func dismissing(_ list: [ExpenseKindDismissal]) -> ExpenseKindBook? {
+        var all: [ExpenseKindDismissal] = dismissed ?? []
+        var keys: Set<String> = Set(all.map { d in ExpenseKindIndex.dismissKey(d.id, d.kind) })
+        var changed = false
+        for d in list {
+            let key = ExpenseKindIndex.dismissKey(d.id, d.kind)
+            guard !keys.contains(key) else { continue }
+            keys.insert(key)
+            all.append(d)
+            changed = true
+        }
+        guard changed else { return nil }
+        var out = self
+        out.dismissed = all
+        return out
+    }
+
+    /// 一鍵整理〔改成罰款〕〔全部改〕：只寫 tag（base＝那筆現在的簽名）。現在的分類不能掛這個細項的跳過。沒有要寫的回 nil
+    func retagging(_ picks: [ExpenseKindPick], now: Date) -> ExpenseKindBook? {
+        var out = self
+        var changed = false
+        for p in picks where ExpenseKindIndex.allowed(ExpenseKindIndex.signature(p.expense)).contains(p.kind) {
+            if let next = out.savingTag(for: p.expense, kind: p.kind, now: now) {
+                out = next
+                changed = true
+            }
+        }
+        return changed ? out : nil
+    }
+
+    /// 變動支出頁〔複製〕（M2）：原本那筆有細項（不是推的）→ 新的那筆也寫一筆（同細項、base 照新的那筆重算）
+    func copying(from src: Expense, to copy: Expense, now: Date) -> ExpenseKindBook? {
+        guard let hit = ExpenseKindIndex(book: self).kind(of: src), !hit.inferred else { return nil }
+        return savingTag(for: copy, kind: hit.kind, now: now)
+    }
+}
+
+extension ExpenseKindStore {
+    /// [v25.616] AddExpenseView 存檔（取代 v25.615 的 recordSave 那一行；dismiss 之後、下一個 runloop 叫）
+    func recordFormSave(_ e: Expense, kind: ExpenseKind?, now: Date = Date()) {
+        guard let next = book.formSavingTag(for: e, kind: kind, now: now) else { return }
+        commit(next, now: now)
+    }
+
+    /// 一鍵整理〔改成…〕〔全部改〕：只寫細項那個鍵，記帳那筆一個欄位都不動。找不到那筆的跳過
+    func recordRetag(_ candidates: [ExpenseKindCandidate], expenses: [Expense], now: Date = Date()) {
+        let byId: [UUID: Expense] = Dictionary(expenses.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        let picks: [ExpenseKindPick] = candidates.compactMap { c in
+            byId[c.expenseId].map { e in ExpenseKindPick(expense: e, kind: c.kind) }
+        }
+        guard let next = book.retagging(picks, now: now) else { return }
+        commit(next, now: now)
+    }
+
+    /// 一鍵整理〔不是〕：只加 dismissed（從合併後的現值加，不新做一本）
+    func recordDismiss(_ candidates: [ExpenseKindCandidate], now: Date = Date()) {
+        let list: [ExpenseKindDismissal] = candidates.map { c in
+            ExpenseKindDismissal(id: c.expenseId, kind: c.kind.raw, at: now)
+        }
+        guard let next = book.dismissing(list) else { return }
+        commit(next, now: now)
+    }
+
+    /// 變動支出頁〔複製〕：新的那筆跟著帶細項（VariableExpenseView.duplicateExpense 叫）
+    func recordCopy(from src: Expense, to copy: Expense, now: Date = Date()) {
+        guard let next = book.copying(from: src, to: copy, now: now) else { return }
+        commit(next, now: now)
+    }
+}
+
+// MARK: - [v25.616] 車子變動「支出類別」的虛擬項（存 vehicleExpenseCategory .other＋細項）
+
+enum VehicleKindPick: Hashable, Identifiable {
+    case category(VehicleVariableCategory)
+    case tax
+    case fine
+
+    var id: String {
+        switch self {
+        case .category(let c): return c.rawValue
+        case .tax: return "稅費"
+        case .fine: return "罰款"
+        }
+    }
+
+    /// categories(for:) 不改；「稅費」「罰款」插在「其他」前（沒有其他就接在最後）
+    static func all(_ power: VehiclePowerType) -> [VehicleKindPick] {
+        var out: [VehicleKindPick] = []
+        var inserted = false
+        for c in VehicleVariableCategory.categories(for: power) {
+            if c == .other {
+                out.append(.tax)
+                out.append(.fine)
+                inserted = true
+            }
+            out.append(.category(c))
+        }
+        if !inserted {
+            out.append(.tax)
+            out.append(.fine)
+        }
+        return out
+    }
+
+    var title: String {
+        switch self {
+        case .category(let c): return c.rawValue
+        case .tax: return "稅費"
+        case .fine: return "罰款"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .category(let c): return c.icon
+        case .tax: return "building.columns"
+        case .fine: return "exclamationmark.triangle"
+        }
+    }
+
+    /// 虛擬項（稅費、罰款）才是 true
+    var isVirtual: Bool {
+        switch self {
+        case .category: return false
+        case .tax, .fine: return true
+        }
+    }
+}
+
+/// 車子的表單規則（AddExpenseView、AddVehicleView、VehicleDetailView 只叫這裡）
+enum VehicleKindForm {
+    /// 車子變動「稅費」的細項：規費｜牌照稅｜燃料費（電車、電動機車不出現）｜其他稅費
+    static func taxOptions(_ power: VehiclePowerType?) -> [ExpenseKind] {
+        var out: [ExpenseKind] = [.fee, .licenseTax]
+        if !ExpenseKindForm.isElectric(power) { out.append(.fuelFee) }
+        out.append(.otherTax)
+        return out
+    }
+
+    /// 車子變動「稅費」預設規費（驗車最常見）
+    static let defaultTaxKind: ExpenseKind = .fee
+
+    /// 「規費（驗車、換照、過戶）」；其他照原字
+    static func taxLabel(_ k: ExpenseKind) -> String {
+        k == .fee ? "規費（驗車、換照、過戶）" : k.raw
+    }
+
+    static let taxFooter = "驗車、換照、過戶的規費，或補繳的牌照稅、燃料費（燃料稅）。每年固定繳的牌照稅建議記成固定支出・每年。"
+    static let fineFooter = "罰單、拖吊、逾期補繳、滯納金都算。"
+
+    /// 車輛區 footer：虛擬項才有（其他照舊）
+    static func footer(_ pick: VehicleKindPick) -> String? {
+        switch pick {
+        case .tax: return taxFooter
+        case .fine: return fineFooter
+        case .category: return nil
+        }
+    }
+
+    /// 地點欄提示字
+    static let placePrompt = "監理站"
+
+    /// 車子卡〔＋ 記一筆〕→「稅費（牌照稅、燃料費）」打開的固定・每年，表單上方那一行
+    static let oneTimeSwitchText = "只繳這一次（例如驗車、換照、過戶）→ 改記一次性"
+
+    /// 〔只繳這一次〕切過去的車子變動「稅費」預設細項
+    static let oneTimeKind: ExpenseKind = .fee
+
+    /// 車子卡〔＋ 記一筆〕→ 稅費（固定・每年）的細項：4 月牌照稅、7 月燃料費（電車沒有）、其他月份牌照稅；機車不照月份猜
+    static func fixedTaxPresetKind(power: VehiclePowerType?, month: Int) -> ExpenseKind {
+        ExpenseKindForm.defaultKind(.vehicle(power), month: month)
+    }
+}
+
+// MARK: - [v25.616] 一鍵整理（車子卡、房屋卡「要確認」各最多一項；點開逐筆〔改成…〕〔不是〕）
+
+/// 一鍵整理清單的一列（卡片算好字；ExpenseKindTidySheet 只排版）
+struct ExpenseKindCandidate: Identifiable, Equatable {
+    let expenseId: UUID
+    let kind: ExpenseKind
+    /// 列名（車子：帳本列標題；房子：去掉房名的名稱）
+    let title: String
+    /// 「2026/10/3・NT$600」
+    let detail: String
+
+    var id: UUID { expenseId }
+}
+
+/// 〔看一下〕打開的那一頁
+struct ExpenseKindTidyRequest: Identifiable, Equatable {
+    /// 「vehicle-<車 id>」「house-<房 id>」
+    let id: String
+    let title: String
+    let candidates: [ExpenseKindCandidate]
+    /// 房屋卡：名稱有地價稅、房屋稅但主分類是「管理費」等的那幾筆名稱（不建議，只寫一句）
+    let notes: [String]
+}
+
+enum ExpenseKindTidy {
+    static let fineWords: [String] = ["罰", "拖吊", "逾期"]
+    static let feeWords: [String] = ["驗車", "換照", "過戶", "規費"]
+
+    /// 車子：名稱或備註看得出來的（罰款優先：「逾期驗車罰款」算罰款）
+    static func vehicleGuess(_ e: Expense) -> ExpenseKind? {
+        let text = e.title + "\n" + e.note
+        if fineWords.contains(where: { w in text.contains(w) }) { return .fine }
+        if feeWords.contains(where: { w in text.contains(w) }) { return .fee }
+        return nil
+    }
+
+    /// 房子：只看名稱（「地價」→ 地價稅、「房屋稅」→ 房屋稅）
+    static func houseGuess(_ e: Expense) -> ExpenseKind? {
+        if e.title.contains("地價") { return .landValueTax }
+        if e.title.contains("房屋稅") { return .houseTax }
+        return nil
+    }
+
+    /// 新的在前（同一天照 id）
+    static func sorted(_ list: [ExpenseKindPick]) -> [ExpenseKindPick] {
+        list.sorted { a, b in
+            if a.expense.date != b.expense.date { return a.expense.date > b.expense.date }
+            return a.expense.id.uuidString < b.expense.id.uuidString
+        }
+    }
+
+    /// 車子：linked＝這台車的記帳（VehicleLinks.expenses；沒連到記帳的鏡像列不在裡面）。
+    /// 變動「其他」、沒細項（kind(of:) 是 nil）、名稱或備註看得出來、沒〔不是〕過
+    static func vehiclePicks(_ linked: [Expense], kinds: ExpenseKindIndex) -> [ExpenseKindPick] {
+        var out: [ExpenseKindPick] = []
+        for e in linked where e.expenseType == .variable && e.vehicleExpenseCategory == .other {
+            guard kinds.kind(of: e) == nil, let k = vehicleGuess(e), !kinds.isDismissed(e.id, k) else { continue }
+            out.append(ExpenseKindPick(expense: e, kind: k))
+        }
+        return sorted(out)
+    }
+
+    /// 房子：連這間的固定「其他」、沒細項、名稱有「地價」「房屋稅」、沒〔不是〕過
+    static func housePicks(estateId: UUID, expenses: [Expense], kinds: ExpenseKindIndex) -> [ExpenseKindPick] {
+        var out: [ExpenseKindPick] = []
+        for e in expenses where e.expenseType == .fixed && e.linkedRealEstateId == estateId && e.fixedCategory == .other {
+            guard kinds.kind(of: e) == nil, let k = houseGuess(e), !kinds.isDismissed(e.id, k) else { continue }
+            out.append(ExpenseKindPick(expense: e, kind: k))
+        }
+        return sorted(out)
+    }
+
+    /// 房子：名稱有地價稅、房屋稅，但主分類是「管理費」等（不是其他）的固定支出（不建議，只寫一句）
+    static func houseOtherCategory(estateId: UUID, expenses: [Expense], kinds: ExpenseKindIndex) -> [Expense] {
+        expenses.filter { e in
+            e.expenseType == .fixed && e.linkedRealEstateId == estateId && e.fixedCategory != .other
+                && kinds.kind(of: e) == nil && houseGuess(e) != nil
+        }
+    }
+
+    /// 「1 筆罰款、1 筆規費」（照 order 的順序）
+    static func countsText(_ picks: [ExpenseKindPick], order: [ExpenseKind]) -> String {
+        var parts: [String] = []
+        for k in order {
+            let n = picks.filter { p in p.kind == k }.count
+            if n > 0 { parts.append("\(n) 筆\(k.raw)") }
+        }
+        return parts.joined(separator: "、")
+    }
+
+    static func distinctKinds(_ picks: [ExpenseKindPick]) -> [ExpenseKind] {
+        var out: [ExpenseKind] = []
+        for p in picks where !out.contains(p.kind) { out.append(p.kind) }
+        return out
+    }
+
+    /// 車子卡「要確認」那一句：「有 2 筆「其他」可以分得更清楚（1 筆罰款、1 筆規費）」；只有一種：「…（罰款）」
+    static func vehicleMessage(_ picks: [ExpenseKindPick]) -> String {
+        let kinds = distinctKinds(picks)
+        let tail: String = kinds.count == 1 ? kinds[0].raw : countsText(picks, order: [.fine, .fee])
+        return "有 \(picks.count) 筆「其他」可以分得更清楚（\(tail)）"
+    }
+
+    /// 房屋卡「要確認」那一句：1 筆「「地價稅」目前算在固定費用，要改成稅費・地價稅嗎？」
+    static func houseMessage(_ picks: [ExpenseKindPick]) -> String {
+        let kinds = distinctKinds(picks)
+        if picks.count == 1, let k = kinds.first {
+            return "「\(k.raw)」目前算在固定費用，要改成稅費・\(k.raw)嗎？"
+        }
+        if kinds.count == 1, let k = kinds.first {
+            return "有 \(picks.count) 筆\(k.raw)目前算在固定費用，要改成稅費嗎？"
+        }
+        return "有 \(picks.count) 筆固定支出可以改成稅費（\(countsText(picks, order: [.landValueTax, .houseTax]))）"
+    }
+
+    static let reviewButton = "看一下"
+    static let vehicleSheetTitle = "分得更清楚"
+    static let houseSheetTitle = "改成稅費"
+    static func retagButton(_ k: ExpenseKind) -> String { "改成" + k.raw }
+    static let dismissButton = "不是"
+    static let allButton = "全部改"
+    static let allConfirmTitle = "全部改？"
+    static func allConfirmMessage(_ n: Int) -> String { "這 \(n) 筆金額、日期不會變，只是分類寫得更清楚。" }
+    static func doneText(_ k: ExpenseKind) -> String { "已改成" + k.raw }
+    static let dismissedText = "不會再問"
+    static let sheetFooter = "只改這筆的分類說法，金額、日期、名稱都不會變；家人還沒更新的 iPad 或手機上仍顯示「其他」。按〔不是〕之後不會再問，想改的話打開那筆換類別就好。"
+    static let houseOtherNote = "想改成稅費，打開那筆換類別就好。"
+
+    /// 一列：detail＝「2026/10/3・NT$600」（金額是台幣）
+    static func candidate(_ p: ExpenseKindPick, title: String, amount: Double) -> ExpenseKindCandidate {
+        ExpenseKindCandidate(expenseId: p.expense.id, kind: p.kind, title: title,
+                             detail: HouseCardFormat.ymd(p.expense.date) + "・" + MoneyFormat.short(amount))
     }
 }

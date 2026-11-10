@@ -377,7 +377,8 @@ struct VehicleDetailView: View {
             AddExpenseView(expenseType: ex.expenseType, editingExpense: ex,
                            preset: Self.editPreset(showVehicleSection))
         case .newExpense(let request):
-            AddExpenseView(expenseType: request.expenseType, preset: request.preset)
+            AddExpenseView(expenseType: request.expenseType, preset: request.preset,
+                           onSwitchToOneTime: oneTimeSwitch(request))
         case .share(let payload):
             ShareSheet(items: payload.items)
         default:
@@ -397,6 +398,9 @@ struct VehicleDetailView: View {
             VehicleChargeAnalyticsView(vehicleId: vehicleId)
         case .resale:
             VehicleResaleView(vehicleId: vehicleId)
+        case .kindTidy(let request):
+            // [v25.616] 一鍵整理（外面 withSheets 已經 .appStores()）
+            ExpenseKindTidySheet(request: request)
         default:
             EmptyView()
         }
@@ -494,13 +498,34 @@ extension VehicleDetailView {
         }
         if let cat = kind.variableCategory {
             var preset = AddVehicleView.makeVariablePreset(for: cat, vehicleId: vehicleId)
+            // [v25.616] 罰款：存「其他」＋細項罰款（表單停在虛擬「罰款」）
+            preset.kind = kind.presetKind
             let v = vehicle
             if v.isSold(asOf: Date()), let sold = v.soldDate { preset.date = sold }
             sheet = .newExpense(VehicleExpenseRequest(expenseType: .variable, preset: preset))
         } else if let fixed = kind.fixedKind {
-            let preset = AddVehicleView.makeFixedPreset(for: fixed, vehicleId: vehicleId)
-            sheet = .newExpense(VehicleExpenseRequest(expenseType: .fixed, preset: preset))
+            // [v25.616] 稅費：固定・每年＋細項（照動力、這個月猜）；上方〔只繳這一次〕換成車子變動「稅費・規費」
+            let v = vehicle
+            let month = ExpenseKindForm.gregorian(.current).component(.month, from: Date())
+            let preset = AddVehicleView.makeFixedPreset(for: fixed, vehicleId: vehicleId, power: v.powerType, month: month)
+            let oneTime: AddExpensePreset? = fixed == .tax ? oneTimePreset(v) : nil
+            sheet = .newExpense(VehicleExpenseRequest(expenseType: .fixed, preset: preset, oneTime: oneTime))
         }
+    }
+
+    /// [v25.616] 〔只繳這一次〕切過去的車子變動「其他」＋細項規費（驗車、換照、過戶）；已售出的日期帶賣出日（照變動那支）
+    fileprivate func oneTimePreset(_ v: Vehicle) -> AddExpensePreset {
+        var preset = AddVehicleView.makeVariablePreset(for: .other, vehicleId: vehicleId)
+        preset.kind = VehicleKindForm.oneTimeKind
+        if v.isSold(asOf: Date()), let sold = v.soldDate { preset.date = sold }
+        return preset
+    }
+
+    /// [v25.616] 〔只繳這一次〕：同一個 .sheet(item:) 換成車子變動「稅費・規費」那張（換 id＝關掉再開新的）。
+    /// 沒帶 oneTime 的不出那一行（照 RealEstateDetailView.oneTimeSwitch）
+    fileprivate func oneTimeSwitch(_ r: VehicleExpenseRequest) -> (() -> Void)? {
+        guard let p = r.oneTime else { return nil }
+        return { sheet = .newExpense(VehicleExpenseRequest(expenseType: .variable, preset: p)) }
     }
 
     // MARK: 帳本列
@@ -667,6 +692,9 @@ extension VehicleDetailView {
             markValueZero()
         case .edit(let focus):
             sheet = .edit(focus)
+        case .reviewKinds(let request):
+            // [v25.616] 一鍵整理：打開那一頁（fixCheck 已經先 requirePremium；confirm nil 直接做）
+            sheet = .kindTidy(request)
         }
     }
 
@@ -1235,6 +1263,8 @@ private enum VehicleSheet: Identifiable {
     case chargeAnalytics
     case resale
     case share(StockCardSharePayload)
+    /// [v25.616] 一鍵整理（ExpenseKindTidySheet）
+    case kindTidy(ExpenseKindTidyRequest)
 
     var id: String {
         switch self {
@@ -1246,6 +1276,7 @@ private enum VehicleSheet: Identifiable {
         case .chargeAnalytics: return "chargeAnalytics"
         case .resale: return "resale"
         case .share(let payload): return "share-" + payload.id.uuidString
+        case .kindTidy(let request): return "kindTidy-" + request.id
         }
     }
 }
@@ -1255,6 +1286,8 @@ private struct VehicleExpenseRequest {
     let id = UUID()
     let expenseType: ExpenseType
     let preset: AddExpensePreset
+    /// [v25.616] 〔只繳這一次〕切過去的車子變動「稅費・規費」（〔＋ 記一筆〕→ 稅費 才帶）
+    var oneTime: AddExpensePreset? = nil
 }
 
 /// 一個確認框（button 是 nil 時只是告訴你一件事，只有「好」）

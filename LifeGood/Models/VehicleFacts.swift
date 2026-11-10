@@ -843,6 +843,12 @@ struct VehicleFacts: Equatable {
         }
     }
 
+    /// [v25.616] 先查細項（「罰款」「規費」「牌照稅」；推的也算），沒有細項照舊 categoryLabel(_:)
+    static func categoryLabel(_ ex: Expense, kinds: ExpenseKindIndex) -> String {
+        if let hit = kinds.kind(of: ex) { return hit.kind.raw }
+        return categoryLabel(ex)
+    }
+
     /// 你自己取的名稱：去掉「項目 N：」「車名-」之後，只剩分類名的不算（決定 19）
     static func ownName(_ ex: Expense, vehicleName: String) -> String? {
         let cleaned = HouseCardFormat.cleanTitle(ex.title, estateName: vehicleName)
@@ -850,6 +856,14 @@ struct VehicleFacts: Equatable {
         guard !cleaned.isEmpty else { return nil }
         if categoryWords.contains(cleaned) || cleaned == ex.categoryName { return nil }
         return cleaned
+    }
+
+    /// [v25.616] 這筆有細項時，去掉車名後只剩九個細項字之一（自動帶的「Swift Sport-罰款」）也不算你取的名字。
+    /// categoryWords 不加這九個字：沒標細項、名稱自己打「罰款」的舊資料照舊顯示「罰款」（不退回「其他」）
+    static func ownName(_ ex: Expense, vehicleName: String, kinds: ExpenseKindIndex) -> String? {
+        guard let own = ownName(ex, vehicleName: vehicleName) else { return nil }
+        if kinds.kind(of: ex) != nil && ExpenseKind.known.contains(ExpenseKind(own)) { return nil }
+        return own
     }
 
     /// 帳本列、接下來的標題：地點 → 你取的名稱 → 備註第一行 → 分類名
@@ -862,6 +876,18 @@ struct VehicleFacts: Equatable {
             if !line.isEmpty { return line }
         }
         return categoryLabel(ex)
+    }
+
+    /// [v25.616] 同 label(_:vehicleName:) 的順序（地點 → 你取的名稱 → 備註第一行 → 分類名），名稱、分類名先查細項
+    static func label(_ ex: Expense, vehicleName: String, kinds: ExpenseKindIndex) -> String {
+        if let p = ex.placeName?.trimmingCharacters(in: .whitespacesAndNewlines), !p.isEmpty { return p }
+        if let own = ownName(ex, vehicleName: vehicleName, kinds: kinds) { return own }
+        let memo = ex.note.trimmingCharacters(in: .whitespacesAndNewlines)
+        if let first = memo.split(separator: "\n").first {
+            let line = String(first).trimmingCharacters(in: .whitespaces)
+            if !line.isEmpty { return line }
+        }
+        return categoryLabel(ex, kinds: kinds)
     }
 
     // MARK: build

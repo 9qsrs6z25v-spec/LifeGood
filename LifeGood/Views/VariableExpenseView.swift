@@ -103,10 +103,13 @@ struct VariableExpenseView: View {
         }
         let q = debouncedSearchText.trimmingCharacters(in: .whitespaces).lowercased()
         if !q.isEmpty {
+            // [v25.616] 搜尋也比對列上的字（「汽車 - 罰款」）
+            let kinds = ExpenseKindStore.shared.index
             list = list.filter { exp in
                 exp.title.lowercased().contains(q)
                     || exp.note.lowercased().contains(q)
                     || exp.categoryName.lowercased().contains(q)
+                    || exp.displayCategoryName(kinds: kinds).lowercased().contains(q)
                     || (exp.placeAddress?.lowercased().contains(q) ?? false)
                     || (exp.placeName?.lowercased().contains(q) ?? false)
                     || (exp.diningMember?.lowercased().contains(q) ?? false)
@@ -414,8 +417,8 @@ struct VariableExpenseView: View {
             Section(header: MoneyDayHeader(date: dayDate, count: expenses.count,
                                            total: formatCurrency(expenses.reduce(0.0) { $0 + $1.amount }))) {
                 ForEach(Array(expenses.enumerated()), id: \.element.id) { rowIdx, expense in
-                    MoneyItemCard(item: MoneyItem.expense(expense, ctx: ctx,
-                                                          badge: Self.timeFormatter.string(from: expense.date)),
+                    MoneyItemCard(item: rowItem(expense, ctx: ctx,
+                                                badge: Self.timeFormatter.string(from: expense.date)),
                                   compact: compact)
                         .listRowInsets(EdgeInsets(top: compact ? 4 : 6, leading: 16,
                                                   bottom: compact ? 4 : 6, trailing: 16))
@@ -573,7 +576,16 @@ struct VariableExpenseView: View {
         // [v25.539] 公升數跟度數一樣帶（同一家加油站加滿，量通常差不多，不同再改）；里程錶照舊不帶
         copy.fuelLiters = expense.fuelLiters
         store.add(copy)
+        // [v25.616] 複製帶細項（原本那筆有細項才寫；推的不寫）
+        ExpenseKindStore.shared.recordCopy(from: expense, to: copy)
         writeDuplicateWithdrawal(for: copy)
+    }
+
+    /// [v25.616] 列上的卡：分類字換成有細項的說法（「汽車 - 罰款」；沒細項照 categoryName）
+    private func rowItem(_ e: Expense, ctx: MoneyItemContext, badge: String?) -> MoneyItem {
+        var item = MoneyItem.expense(e, ctx: ctx, badge: badge)
+        item.category = e.displayCategoryName(kinds: ExpenseKindStore.shared.index)
+        return item
     }
 
     /// [v25.562] 複製出來的支出也要從銀行扣（以前只寫記帳，銀行少扣一次）。比照複製收入（IncomeView.duplicateIncome）：

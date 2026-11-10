@@ -392,6 +392,9 @@ struct RealEstateDetailView: View {
             CutePhotoViewer(draft: draft)
         case .document(let wrapper):
             DocumentQuickLookView(url: wrapper.url)
+        case .kindTidy(let request):
+            // [v25.616] 一鍵整理（外面 withSheets 已經 .appStores()）
+            ExpenseKindTidySheet(request: request)
         default:
             EmptyView()
         }
@@ -911,6 +914,9 @@ extension RealEstateDetailView {
             mergeDuplicates(dups)
         case .edit(let focus):
             sheet = .edit(focus)
+        case .reviewKinds(let request):
+            // [v25.616] 一鍵整理：打開那一頁（只寫細項那個鍵）
+            sheet = .kindTidy(request)
         }
     }
 
@@ -1937,6 +1943,8 @@ private enum HouseSheet: Identifiable {
     case editRenovation(RenovationPhoto)
     case photos(CutePhotoDraft)
     case document(IdentifiableURL)
+    /// [v25.616] 一鍵整理（要確認〔看一下〕）
+    case kindTidy(ExpenseKindTidyRequest)
 
     var id: String {
         switch self {
@@ -1953,6 +1961,7 @@ private enum HouseSheet: Identifiable {
         case .editRenovation(let photo): return "renovation-" + photo.id.uuidString
         case .photos(let draft): return "photos-" + draft.id.uuidString
         case .document(let wrapper): return "document-" + wrapper.id.uuidString
+        case .kindTidy(let request): return "kindTidy-" + request.id
         }
     }
 }

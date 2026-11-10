@@ -615,6 +615,8 @@ struct HouseCheck: Identifiable {
         case soldPriceMissing
         /// 算不出利率
         case rateUnsolvable
+        /// [v25.616] 記成「其他」的地價稅、房屋稅（一鍵整理）
+        case kindTidy
     }
 
     /// D 按下按鈕（先付費、confirm 非 nil 時再確認）之後要做的事，修正需要的 id 都在裡面
@@ -630,6 +632,8 @@ struct HouseCheck: Identifiable {
         case mergeDuplicates([HouseDuplicate])
         /// 打開編輯頁捲到那一欄（actions.edit）
         case edit(HouseEditFocus)
+        /// [v25.616] 打開 ExpenseKindTidySheet（只寫細項那個鍵）
+        case reviewKinds(ExpenseKindTidyRequest)
     }
 
     let kind: Kind
@@ -2944,7 +2948,32 @@ extension HouseCheck {
             out.append(HouseCheck(kind: .rateUnsolvable, message: message, button: "去改", confirm: nil,
                                   fix: .edit(.loanPrincipal)))
         }
+
+        // 8. [v25.616] 一鍵整理
+        if let x = kindTidyCheck(c) { out.append(x) }
         return out
+    }
+
+    /// [v25.616] 連這間的固定「其他」、名稱有「地價」「房屋稅」、沒細項、沒〔不是〕過（最多一項，點開再分）。
+    /// 名稱有但主分類是管理費等的不建議，只列在那一頁下面；只有那種時這一項不出現
+    fileprivate static func kindTidyCheck(_ c: HouseBuildContext) -> HouseCheck? {
+        let picks = ExpenseKindTidy.housePicks(estateId: c.re.id, expenses: c.expenses, kinds: c.kinds)
+        guard !picks.isEmpty else { return nil }
+        let rows: [ExpenseKindCandidate] = picks.map { p in
+            ExpenseKindTidy.candidate(p, title: tidyTitle(p.expense, c: c), amount: c.amount(p.expense))
+        }
+        let others: [String] = ExpenseKindTidy.houseOtherCategory(estateId: c.re.id, expenses: c.expenses, kinds: c.kinds)
+            .map { ex in tidyTitle(ex, c: c) }
+        let request = ExpenseKindTidyRequest(id: "house-" + c.re.id.uuidString, title: ExpenseKindTidy.houseSheetTitle,
+                                             candidates: rows, notes: others)
+        return HouseCheck(kind: .kindTidy, message: ExpenseKindTidy.houseMessage(picks), button: ExpenseKindTidy.reviewButton,
+                          confirm: nil, fix: .reviewKinds(request), icon: "tag")
+    }
+
+    /// 列名：去掉「項目 N：」「房名-」；空的寫「固定支出」
+    fileprivate static func tidyTitle(_ ex: Expense, c: HouseBuildContext) -> String {
+        let t = HouseCardFormat.cleanTitle(ex.title, estateName: c.re.name)
+        return t.isEmpty ? "固定支出" : t
     }
 
     /// 「第 3–5 段房貸」「第 1、3 段房貸」「房貸」「新青安、第 2 段房貸」

@@ -127,7 +127,9 @@ struct VehicleCheck: Identifiable, Equatable {
         // [v25.541] insuranceAsOther：記成「其他」的車險（排第二，緊接在賣了還在扣後面）
         case soldStillCharging, insuranceAsOther, termMissing, principalMissing, belowPrincipal, rateTooHigh,
              orphans, legacyFixed, unassigned, downPayment, valueMissing, soldInFuture,
-             odometerRegression, homeKeyword, foreign, energyGap
+             odometerRegression, homeKeyword, foreign, energyGap,
+             // [v25.616] 記成「其他」、名稱或備註看得出是罰款／規費的（一鍵整理；排最後）
+             kindTidy
     }
     enum Fix: Equatable {
         case stopAtSale(expenseIds: [UUID], soldDate: Date)   // VehicleFixes.stopAtSale
@@ -138,6 +140,7 @@ struct VehicleCheck: Identifiable, Equatable {
         case assign(expenseIds: [UUID])                       // 都算這台
         case markValueZero                                    // 就是 0（報廢）
         case edit(VehicleEditFocus)                           // 去改：售出日、家充、估值
+        case reviewKinds(ExpenseKindTidyRequest)    // [v25.616] 一鍵整理（打開 ExpenseKindTidySheet）
     }
     struct Action: Identifiable, Equatable {
         let title: String           // 「在賣出日停止」「去填」「就是 0（報廢）」…
@@ -332,7 +335,9 @@ enum VehicleLedgerFilter: Hashable, CaseIterable {
 /// 32pt 分類色圓裡的字
 enum VehicleLedgerMark: String, Equatable {
     case purchase = "購", loan = "貸", insurance = "險", tax = "稅", subscription = "訂", rent = "租", fixedOther = "固",
-         fuel = "油", charge = "充", parking = "停", maintenance = "保", repair = "修", wash = "洗", other = "其"
+         fuel = "油", charge = "充", parking = "停", maintenance = "保", repair = "修", wash = "洗", other = "其",
+         // [v25.616] 車子變動「罰款」「規費」（細項；色共用「稅」）
+         fine = "罰", fee = "規"
 
     var glyph: String { rawValue }
 
@@ -352,15 +357,26 @@ enum VehicleLedgerMark: String, Equatable {
             }
         }
     }
+
+    /// [v25.616] 先查細項（罰款→罰、規費→規、其他稅類→稅；推的也算），沒有細項照舊 of(_:)
+    static func of(_ ex: Expense, kinds: ExpenseKindIndex) -> VehicleLedgerMark {
+        guard let hit = kinds.kind(of: ex) else { return of(ex) }
+        switch hit.kind.nature {
+        case .fine: return .fine
+        case .fee: return .fee
+        case .tax: return .tax
+        }
+    }
 }
 
 /// 「＋ 記一筆」選單（順序＝選單順序，J378）
 enum VehicleLedgerAddKind: String, CaseIterable, Identifiable {
-    case charge, fuel, parking, maintenance, repair, wash, other, insurance, tax, parkingRent, subscription, carLoan, photo
+    // [v25.616] fine 加在最後（rawValue "fine"；選單順序看 menu(for:)／menuSections(for:)，不看 case 順序）
+    case charge, fuel, parking, maintenance, repair, wash, other, insurance, tax, parkingRent, subscription, carLoan, photo, fine
 
     var id: String { rawValue }
 
-    /// 「充電」「加油」「停車」「保養」「維修」「洗車」「其他」「保險」「稅費」「車位月租」「訂閱」「車貸」「照片紀錄」
+    /// 「充電」「加油」「停車」「保養」「維修」「洗車」「其他」「保險」「稅費（牌照稅、燃料費）」「車位月租」「訂閱」「車貸」「照片紀錄」「罰款」
     var title: String {
         switch self {
         case .charge: return "充電"
@@ -371,15 +387,18 @@ enum VehicleLedgerAddKind: String, CaseIterable, Identifiable {
         case .wash: return "洗車"
         case .other: return "其他"
         case .insurance: return "保險"
-        case .tax: return "稅費"
+        case .tax: return "稅費（牌照稅、燃料費）"
         case .parkingRent: return "車位月租"
         case .subscription: return "訂閱"
         case .carLoan: return "車貸"
         case .photo: return "照片紀錄"
+        case .fine: return "罰款"
         }
     }
 
     var icon: String {
+        // [v25.616] 罰款的 variableCategory 是 .other（圖示不能跟「其他」一樣）
+        if self == .fine { return "exclamationmark.triangle" }
         if let cat = variableCategory { return cat.icon }
         switch self {
         case .insurance: return "shield.lefthalf.filled"
@@ -401,9 +420,13 @@ enum VehicleLedgerAddKind: String, CaseIterable, Identifiable {
         case .repair: return .repair
         case .wash: return .wash
         case .other: return .other
+        case .fine: return .other     // [v25.616] 存 vehicleExpenseCategory .other＋細項罰款（presetKind）
         default: return nil
         }
     }
+
+    /// [v25.616] 打開表單時帶的細項（AddExpensePreset.kind）：罰款才有
+    var presetKind: ExpenseKind? { self == .fine ? .fine : nil }
 
     /// insurance／tax／parkingRent／subscription／carLoan（AddVehicleView.makeFixedPreset 用）
     var fixedKind: AddVehicleView.FixedPresetKind? {
@@ -419,12 +442,27 @@ enum VehicleLedgerAddKind: String, CaseIterable, Identifiable {
 
     /// 電車：charge…；油車／機車：fuel…；油電兩個都有
     static func menu(for power: VehiclePowerType) -> [VehicleLedgerAddKind] {
+        // [v25.616] 只在照片紀錄前多罰款
         let tail: [VehicleLedgerAddKind] = [.parking, .maintenance, .repair, .wash, .other,
-                                            .insurance, .tax, .parkingRent, .subscription, .carLoan, .photo]
+                                            .insurance, .tax, .parkingRent, .subscription, .carLoan, .fine, .photo]
+        return energyKinds(for: power) + tail
+    }
+
+    /// [v25.616] 卡片選單三段（中間 Divider）：常記的（充電／加油、停車、保養、維修、洗車）｜
+    /// 每年・每月（保險、稅費、車位月租、訂閱、車貸）｜其他（罰款、其他、照片紀錄）。項目跟 menu(for:) 一樣多
+    static func menuSections(for power: VehiclePowerType) -> [[VehicleLedgerAddKind]] {
+        let common: [VehicleLedgerAddKind] = energyKinds(for: power) + [.parking, .maintenance, .repair, .wash]
+        let periodic: [VehicleLedgerAddKind] = [.insurance, .tax, .parkingRent, .subscription, .carLoan]
+        let rest: [VehicleLedgerAddKind] = [.fine, .other, .photo]
+        return [common, periodic, rest]
+    }
+
+    /// 能源那一段：電車充電、油車／機車加油、油電兩個都有
+    private static func energyKinds(for power: VehiclePowerType) -> [VehicleLedgerAddKind] {
         switch power {
-        case .electric, .electricMotorcycle: return [.charge] + tail
-        case .gasoline, .motorcycle: return [.fuel] + tail
-        case .hybrid: return [.charge, .fuel] + tail
+        case .electric, .electricMotorcycle: return [.charge]
+        case .gasoline, .motorcycle: return [.fuel]
+        case .hybrid: return [.charge, .fuel]
         }
     }
 }
@@ -518,6 +556,7 @@ struct VehicleLedger {
     var filters: [VehicleLedgerFilterChip] = []
     var yearsByFilter: [VehicleLedgerFilter: [VehicleLedgerYear]] = [:]
     var addKinds: [VehicleLedgerAddKind] = []    // VehicleLedgerAddKind.menu(for:)
+    var addSections: [[VehicleLedgerAddKind]] = []    // [v25.616] menuSections(for:)
 
     func years(for filter: VehicleLedgerFilter) -> [VehicleLedgerYear] {
         yearsByFilter[filter] ?? []
@@ -597,16 +636,19 @@ struct VehicleCardData {
     var shareFileBase = ""                        // 「車輛卡片_<shareName>」（D 再 sanitize＋時間戳）
 
     static func build(_ v: Vehicle, vehicles: [Vehicle], expense: ExpenseStore, now: Date = Date()) -> VehicleCardData {
-        build(v, vehicles: vehicles, expenses: expense.expenses, ntd: { expense.ntdValue(of: $0) }, now: now)
+        build(v, vehicles: vehicles, expenses: expense.expenses, ntd: { expense.ntdValue(of: $0) },
+              kinds: ExpenseKindStore.shared.index, now: now)
     }
 
+    /// [v25.616] kinds：記帳的細項（罰款、規費、牌照稅…；ExpenseKinds.swift）。純函式不給預設值，sim／preview 明寫 `.empty`
     static func build(_ v: Vehicle, vehicles: [Vehicle], expenses: [Expense], ntd: (Expense) -> Double,
-                      now: Date = Date(), calendar: Calendar = Calendar(identifier: .gregorian)) -> VehicleCardData {
+                      kinds: ExpenseKindIndex, now: Date = Date(),
+                      calendar: Calendar = Calendar(identifier: .gregorian)) -> VehicleCardData {
         let facts = VehicleFacts.build(v, expenses: expenses, ntd: ntd, now: now, calendar: calendar)
         let links = VehicleLinks.make(v, expenses: expenses)
         let money = Dictionary(expenses.map { ($0.id, ntd($0)) }, uniquingKeysWith: { a, _ in a })
         let c = VehicleCardContext.make(v, vehicles: vehicles, facts: facts, links: links, expenses: expenses,
-                                        money: money, now: now, calendar: calendar)
+                                        money: money, kinds: kinds, now: now, calendar: calendar)
         let ledger = VehicleLedger.build(c)
         let checks = VehicleCheck.build(c)
         let scene = sceneData(c)
@@ -676,6 +718,8 @@ private struct VehicleCardContext {
     let legacyLoans: [VehicleFixedExpense]
     /// [v25.541] 這台車記成「其他」的車險（要確認、每月養車的保險提示都讀這一份，依日期）
     let insuranceAsOther: [Expense]
+    /// [v25.616] 記帳的細項（只准問 kind(of:)／taxKind(of:)）
+    let kinds: ExpenseKindIndex
 
     var isSold: Bool { facts.isSold }
     var today: Date { cal.startOfDay(for: now) }
@@ -702,16 +746,17 @@ private struct VehicleCardContext {
     }
 
     static func make(_ v: Vehicle, vehicles: [Vehicle], facts: VehicleFacts, links: VehicleLinks, expenses: [Expense],
-                     money: [UUID: Double], now: Date, calendar: Calendar) -> VehicleCardContext {
+                     money: [UUID: Double], kinds: ExpenseKindIndex, now: Date, calendar: Calendar) -> VehicleCardContext {
         let byId = Dictionary(expenses.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let trimmed = v.name.trimmingCharacters(in: .whitespacesAndNewlines)
         let legacyLoans = links.legacyFixed.filter { $0.category == .carLoan }
-        let asOther = links.expenses.filter { VehicleFixes.isInsuranceAsOther($0) }
+        // [v25.616] L5：已經標了稅類細項（牌照稅、燃料費…，含推的）的不算記成其他的車險
+        let asOther = links.expenses.filter { VehicleFixes.isInsuranceAsOther($0) && kinds.taxKind(of: $0) == nil }
         return VehicleCardContext(v: v, vehicles: vehicles, facts: facts, links: links, expenses: expenses, byId: byId,
                                   money: money, now: now, asOf: facts.asOf, cal: calendar,
                                   name: trimmed.isEmpty ? "未命名車輛" : trimmed,
                                   shareName: VehicleScriptName.shareName(v), legacyLoans: legacyLoans,
-                                  insuranceAsOther: asOther)
+                                  insuranceAsOther: asOther, kinds: kinds)
     }
 }
 
@@ -836,6 +881,12 @@ private enum VehicleCardText {
 
     static func shareTitle(_ ex: Expense) -> String {
         ex.expenseType == .variable ? shareCategory(ex.vehicleExpenseCategory) : VehicleFacts.categoryLabel(ex)
+    }
+
+    /// [v25.616] 先查細項（分享只寫分類字「罰款」「規費」「牌照稅」，不寫名稱、地點），沒有細項照舊 shareTitle(_:)
+    static func shareTitle(_ ex: Expense, kinds: ExpenseKindIndex) -> String {
+        if let hit = kinds.kind(of: ex) { return hit.kind.raw }
+        return shareTitle(ex)
     }
 
     /// 帳本細字的度數／公升（分享也會寫）：充電「32.0 度・20% → 80%」、加油「40.2 公升・每公升 NT$29.1」
@@ -1376,14 +1427,31 @@ extension VehicleCheck {
         if let x = checkHomeKeyword(c) { out.append(x) }
         if let x = checkForeign(c) { out.append(x) }
         if let x = checkEnergyGap(c) { out.append(x) }
+        // [v25.616] 一鍵整理（排最後）
+        if let x = checkKindTidy(c) { out.append(x) }
         return out
+    }
+
+    /// [v25.616] 一鍵整理：記成「其他」、名稱或備註看得出是罰款／規費的（只掃有記帳的；最多一項，點開再分）
+    fileprivate static func checkKindTidy(_ c: VehicleCardContext) -> VehicleCheck? {
+        let picks = ExpenseKindTidy.vehiclePicks(c.links.expenses, kinds: c.kinds)
+        guard !picks.isEmpty else { return nil }
+        let rows: [ExpenseKindCandidate] = picks.map { p in
+            ExpenseKindTidy.candidate(p, title: VehicleFacts.label(p.expense, vehicleName: c.v.name, kinds: c.kinds),
+                                      amount: c.amount(p.expense))
+        }
+        let request = ExpenseKindTidyRequest(id: "vehicle-" + c.v.id.uuidString, title: ExpenseKindTidy.vehicleSheetTitle,
+                                             candidates: rows, notes: [])
+        let action = Action(title: ExpenseKindTidy.reviewButton, confirm: nil, fix: .reviewKinds(request))
+        return VehicleCheck(kind: .kindTidy, message: ExpenseKindTidy.vehicleMessage(picks), actions: [action],
+                            icon: "tag")
     }
 
     /// 賣了還在扣：已售出、連到這台的週期固定支出結束日是空的或比賣出日晚（v25.539 之前賣的車，車貸保險稅費也可能還在扣）
     fileprivate static func checkSoldStillCharging(_ c: VehicleCardContext) -> VehicleCheck? {
         let f = c.facts
         guard f.isSold, let sold = c.v.soldDate, !f.soldStillPayingIds.isEmpty else { return nil }
-        let labels = f.soldStillPayingIds.compactMap { c.byId[$0] }.map { VehicleFacts.label($0, vehicleName: c.v.name) }
+        let labels = f.soldStillPayingIds.compactMap { c.byId[$0] }.map { VehicleFacts.label($0, vehicleName: c.v.name, kinds: c.kinds) }
         let names = VehicleCardText.quotedNames(labels)
         let n = f.soldStillPayingIds.count
         let date = FinanceFormat.ymd(sold)
@@ -1406,7 +1474,7 @@ extension VehicleCheck {
         // 卡片現在把它算成什麼（帳本列的分類名）：其他・每年「稅費」、其他・每月「其他固定」
         var counted: [String] = []
         for ex in list {
-            let label = VehicleFacts.categoryLabel(ex)
+            let label = VehicleFacts.categoryLabel(ex, kinds: c.kinds)
             if !counted.contains(label) { counted.append(label) }
         }
         // 「所以找不到保險」只在改完真的找得到時寫：期間內沒連到保險，而且這幾筆期間內有扣款。
@@ -1429,10 +1497,10 @@ extension VehicleCheck {
     fileprivate static func insuranceAsOtherNames(_ list: [Expense], c: VehicleCardContext) -> String {
         var names: [String] = []
         for ex in list {
-            let label = VehicleFacts.label(ex, vehicleName: c.v.name)
+            let label = VehicleFacts.label(ex, vehicleName: c.v.name, kinds: c.kinds)
             let typed = FinanceFormat.cleanTitle(ex.title, estateName: c.v.name)
                 .trimmingCharacters(in: .whitespacesAndNewlines)
-            let fellBack = label == VehicleFacts.categoryLabel(ex)
+            let fellBack = label == VehicleFacts.categoryLabel(ex, kinds: c.kinds)
             let name = fellBack && !typed.isEmpty ? typed : label
             if !names.contains(name) { names.append(name) }
         }
@@ -1780,7 +1848,7 @@ extension VehicleCardData {
         var overdue: String? = nil
         switch item.kind {
         case .fixed(let id):
-            mark = c.byId[id].map { VehicleLedgerMark.of($0) } ?? .fixedOther
+            mark = c.byId[id].map { VehicleLedgerMark.of($0, kinds: c.kinds) } ?? .fixedOther
             tap = .openExpense(id)
             expenseId = id
         case .loan(let id):
@@ -2313,6 +2381,7 @@ extension VehicleLedger {
             l.yearsByFilter[filter] = yearGroups(rows, total: amount, unit: l.unit, asOf: c.asOf)
         }
         l.addKinds = VehicleLedgerAddKind.menu(for: c.v.powerType)
+        l.addSections = VehicleLedgerAddKind.menuSections(for: c.v.powerType)
         fillSummary(&l, c: c)
         return l
     }
@@ -2385,18 +2454,18 @@ extension VehicleLedger {
     /// 一筆記帳變成一列：標題地點 → 你取的名 → 備註第一行 → 分類名；細字度數／公升、里程、備註（都沒有才寫分類名）
     fileprivate static func expenseEvent(_ ex: Expense, c: VehicleCardContext) -> VehicleLedgerEvent {
         let amount = c.amount(ex)
-        let title = VehicleFacts.label(ex, vehicleName: c.v.name)
+        let title = VehicleFacts.label(ex, vehicleName: c.v.name, kinds: c.kinds)
         let measures = VehicleCardText.measures(ex, amount: amount)
         var shown = measures
         if let km = VehicleCardText.odometer(ex) { shown.append(km) }
         if let memo = VehicleCardText.firstLine(ex.note), memo != title { shown.append(memo) }
-        let category = VehicleFacts.categoryLabel(ex)
+        let category = VehicleFacts.categoryLabel(ex, kinds: c.kinds)
         if shown.isEmpty && category != title { shown.append(category) }
         let photos = ex.photoFileNames.filter { FinanceFormat.isImage($0) }
         return VehicleLedgerEvent(id: "e-\(ex.id.uuidString)", date: ex.date, bucket: bucketOf(ex, power: c.v.powerType),
                                   title: title, detail: shown.joined(separator: "・"), amount: amount,
-                                  source: .expense(ex.id), mark: VehicleLedgerMark.of(ex), photoFileNames: photos,
-                                  expenseId: ex.id, shareTitle: VehicleCardText.shareTitle(ex),
+                                  source: .expense(ex.id), mark: VehicleLedgerMark.of(ex, kinds: c.kinds), photoFileNames: photos,
+                                  expenseId: ex.id, shareTitle: VehicleCardText.shareTitle(ex, kinds: c.kinds),
                                   shareDetail: measures.joined(separator: "・"))
     }
 
@@ -2459,11 +2528,11 @@ extension VehicleLedger {
             let per = c.amount(ex)
             let startYear = cal.component(.year, from: ex.date)
             guard startYear <= endYear else { continue }
-            let name = VehicleFacts.label(ex, vehicleName: c.v.name)
-            let shareName = VehicleCardText.shareTitle(ex)
+            let name = VehicleFacts.label(ex, vehicleName: c.v.name, kinds: c.kinds)
+            let shareName = VehicleCardText.shareTitle(ex, kinds: c.kinds)
             let detail = "\(rec.rawValue) \(MoneyFormat.short(per))"
             let bucket = bucketOf(ex, power: c.v.powerType)
-            let mark = VehicleLedgerMark.of(ex)
+            let mark = VehicleLedgerMark.of(ex, kinds: c.kinds)
             var before = 0
             for y in startYear...min(endYear, startYear + 120) {
                 guard let dec31 = cal.date(from: DateComponents(year: y, month: 12, day: 31)) else { continue }
@@ -2532,10 +2601,12 @@ extension VehicleLedger {
         tiles.append(fixedTile(l, c: c))
         tiles.append(countTile(l, bucket: .energy, label: "油電", sub: energySub(l)))
         tiles.append(countTile(l, bucket: .care, label: "保養・維修", sub: nil))
-        tiles.append(countTile(l, bucket: .other, label: "停車・洗車・其他", sub: nil))
+        // [v25.616] 小字「含罰款 NT$600」（沒有罰款照舊「N 筆」）；分享圖那份照舊「N 筆」
+        tiles.append(countTile(l, bucket: .other, label: "停車・洗車・其他", sub: fineSub(l)))
         l.tiles = tiles
         let shareFixed = fixedTile(l, c: c, forShare: true)
-        l.shareTiles = tiles.map { $0.label == shareFixed.label ? shareFixed : $0 }
+        let shareOther = countTile(l, bucket: .other, label: "停車・洗車・其他", sub: nil)
+        l.shareTiles = tiles.map { shareTile($0, fixed: shareFixed, other: shareOther) }
         var parts: [VehicleLedgerPart] = []
         for b in VehicleLedgerBucket.allCases {
             let v = l.amount(b)
@@ -2593,7 +2664,8 @@ extension VehicleLedger {
             count += 1
             let amount = Double(n) * c.amount(ex)
             if let t = top, t.amount >= amount { continue }
-            let name = forShare ? VehicleCardText.shareTitle(ex) : VehicleFacts.label(ex, vehicleName: c.v.name)
+            let name = forShare ? VehicleCardText.shareTitle(ex, kinds: c.kinds)
+                : VehicleFacts.label(ex, vehicleName: c.v.name, kinds: c.kinds)
             top = (name: name, periods: n, amount: amount)
         }
         let value = l.amount(.fixed)
@@ -2616,6 +2688,24 @@ extension VehicleLedger {
         if charges > 0 { parts.append("\(charges) 次充電") }
         if fills > 0 { parts.append("\(fills) 次加油") }
         return parts.isEmpty ? nil : parts.joined(separator: "・")
+    }
+
+    /// [v25.616] 「停車・洗車・其他」格的小字：這一組裡圓圈「罰」的記帳列加起來「含罰款 NT$600」；沒有 nil（照舊「N 筆」）
+    fileprivate static func fineSub(_ l: VehicleLedger) -> String? {
+        var sum = 0.0
+        var found = false
+        for e in l.events where e.bucket == .other && e.mark == .fine && isRecord(e) {
+            sum += e.amount
+            found = true
+        }
+        return found ? "含罰款 " + MoneyFormat.short(sum) : nil
+    }
+
+    /// [v25.616] 分享圖的格子：「定期」換分類名那份、「停車・洗車・其他」換不寫含罰款那份，其他照畫面
+    fileprivate static func shareTile(_ t: VehicleTile, fixed: VehicleTile, other: VehicleTile) -> VehicleTile {
+        if t.label == fixed.label { return fixed }
+        if t.label == other.label { return other }
+        return t
     }
 
     /// 油電、保養・維修、停車・洗車・其他：沒有任何列時寫「—」「還沒有紀錄」、不能點；小字預設「N 筆」
@@ -2844,7 +2934,7 @@ extension VehicleCardData {
             guard !files.isEmpty else { continue }
             count += files.count
             items.append(VehicleMediaData.Item(id: "expense-\(ex.id.uuidString)", source: .expense(ex.id),
-                                               title: VehicleFacts.label(ex, vehicleName: c.v.name), date: ex.date,
+                                               title: VehicleFacts.label(ex, vehicleName: c.v.name, kinds: c.kinds), date: ex.date,
                                                dateText: FinanceFormat.shortDate(ex.date, now: c.now),
                                                category: nil, fileNames: files, note: ex.note, isCover: false))
         }

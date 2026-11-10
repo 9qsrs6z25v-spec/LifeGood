@@ -660,6 +660,14 @@ struct AddVehicleView: View {
         }
     }
 
+    /// [v25.616] 卡片〔＋ 記一筆〕用：「稅費」多帶細項（4 月牌照稅、7 月燃料費、其他月份牌照稅；電車沒有燃料費、機車不照月份猜）。
+    /// 舊的那支不動：舊鏡像補建（VehicleFixes.backfillPreset）照舊不帶細項
+    static func makeFixedPreset(for kind: FixedPresetKind, vehicleId: UUID, power: VehiclePowerType?, month: Int) -> AddExpensePreset {
+        var preset = makeFixedPreset(for: kind, vehicleId: vehicleId)
+        if kind == .tax { preset.kind = VehicleKindForm.fixedTaxPresetKind(power: power, month: month) }
+        return preset
+    }
+
     /// [v25.538] 這幾種從車子打開記帳時，直接顯示車輛區（度數、電量、里程），不用再切進階模式
     private static let vehicleSectionCategories: Set<VehicleVariableCategory> = [.electricity, .fuel, .maintenance, .repair]
 

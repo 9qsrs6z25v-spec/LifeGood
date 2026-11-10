@@ -112,6 +112,12 @@ struct AddExpenseView: View {
     /// [v25.615] 同一年已經記過一筆一次性的地價稅／房屋稅（存檔前問一次）
     @State private var taxDupAsk: TaxDuplicateAsk?
     @State private var taxDupResolved = false
+    /// [v25.616] 車子變動「支出類別」選了虛擬項（.tax／.fine；存的是 vehicleExpenseCategory .other＋細項；nil＝沒選）
+    @State private var vehicleVirtualPick: VehicleKindPick?
+    /// [v25.616] 車子「稅費」的細項（預設規費；不在清單裡時 effectiveVehicleKind 用預設）
+    @State private var selectedVehicleKind: ExpenseKind = VehicleKindForm.defaultTaxKind
+    /// [v25.616] 打開舊資料帶回的車子稅費細項（清單沒有它時也列出來）
+    @State private var loadedVehicleKind: ExpenseKind?
     @State private var selectedRecurrence: Recurrence = .monthly
     /// [v25.347] 固定支出的停止（結束日＝最後一次扣款日）
     @State private var hasEndDate = false
@@ -475,7 +481,7 @@ struct AddExpenseView: View {
                 Button {
                     DispatchQueue.main.async { go() }
                 } label: {
-                    Label(ExpenseKindForm.oneTimeSwitchText, systemImage: "arrow.uturn.right")
+                    Label(oneTimeSwitchText, systemImage: "arrow.uturn.right")
                 }
             }
         }
@@ -488,6 +494,117 @@ struct AddExpenseView: View {
         }
         taxDupResolved = true
         saveExpense()
+    }
+
+    // MARK: - [v25.616] 車子「稅費」「罰款」（radar/judge_govfee.md §C9；build/govfee2/brief.md §2 G1；規則都在 VehicleKindForm）
+
+    /// 這筆連著的那台車的動力（稅費細項清單照這個；沒連車 nil）
+    private var vehicleKindPower: VehiclePowerType? {
+        guard let vid = targetVehicleId else { return nil }
+        return financeStore.vehicles.first(where: { $0.id == vid })?.powerType
+    }
+
+    /// 車子變動、連著車、選了虛擬「稅費」「罰款」（存的是 vehicleExpenseCategory .other＋細項）
+    private var isVehicleVirtual: Bool {
+        expenseType == .variable && targetVehicleId != nil && vehicleVirtualPick != nil
+            && selectedVehicleExpenseCategory == .other
+    }
+
+    /// 稅費細項清單（照那台車的動力：電車沒有燃料費）；打開舊資料帶回的細項不在清單裡時加在最後
+    private var vehicleTaxOptions: [ExpenseKind] {
+        var list: [ExpenseKind] = VehicleKindForm.taxOptions(vehicleKindPower)
+        if let k = loadedVehicleKind, !list.contains(k) { list.append(k) }
+        return list
+    }
+
+    /// 實際算數的稅費細項：選的在清單裡用選的，不然用預設（規費；切車不用 onChange）
+    private var effectiveVehicleKind: ExpenseKind {
+        if vehicleTaxOptions.contains(selectedVehicleKind) { return selectedVehicleKind }
+        return VehicleKindForm.defaultTaxKind
+    }
+
+    /// 車子變動選了虛擬項時的細項（罰款，或稅費的那個細項）；沒選 nil
+    private var chosenVehicleKind: ExpenseKind? {
+        guard isVehicleVirtual, let p = vehicleVirtualPick else { return nil }
+        switch p {
+        case .fine: return ExpenseKind.fine
+        case .tax: return effectiveVehicleKind
+        case .category: return nil
+        }
+    }
+
+    /// 存檔寫 tag 用：固定「稅費」（chosenKind，重複提示照舊只看它）或車子變動虛擬項
+    private var savedKind: ExpenseKind? {
+        chosenKind ?? chosenVehicleKind
+    }
+
+    /// 選了「罰款」（照片那一段基本模式也打開，好拍罰單）
+    private var isVehicleFine: Bool {
+        chosenVehicleKind == ExpenseKind.fine
+    }
+
+    /// autoTitleSignature 用（拆出來，不讓那個陣列多一個運算式）
+    private var vehicleKindSignature: String {
+        chosenVehicleKind?.raw ?? ""
+    }
+
+    /// Picker 停在哪一項：選了虛擬項（存的是其他）就停在虛擬項，不然照存的分類。
+    /// 還沒選車時也照你選的顯示（細項、footer、存檔的細項要連著車才算：isVehicleVirtual）
+    private var shownVehiclePick: VehicleKindPick {
+        if expenseType == .variable && selectedVehicleExpenseCategory == .other, let p = vehicleVirtualPick {
+            return p
+        }
+        return VehicleKindPick.category(selectedVehicleExpenseCategory)
+    }
+
+    private var vehiclePickSelection: Binding<VehicleKindPick> {
+        Binding(get: { shownVehiclePick }, set: { pick in pickVehicleKind(pick) })
+    }
+
+    /// 選了「稅費」「罰款」＝存其他＋記下虛擬項；選一般類別＝放掉虛擬項
+    private func pickVehicleKind(_ pick: VehicleKindPick) {
+        switch pick {
+        case .tax, .fine:
+            vehicleVirtualPick = pick
+            selectedVehicleExpenseCategory = .other
+        case .category(let c):
+            vehicleVirtualPick = nil
+            selectedVehicleExpenseCategory = c
+        }
+    }
+
+    private var vehicleTaxKindSelection: Binding<ExpenseKind> {
+        Binding(get: { effectiveVehicleKind }, set: { selectedVehicleKind = $0 })
+    }
+
+    /// 「支出類別」清單：categories(for:)（照選的那台車；沒選車當油車，同以前）在「其他」前插稅費、罰款
+    private var vehicleKindPickerOptions: [VehicleKindPick] {
+        let power: VehiclePowerType? = financeStore.vehicles.first(where: { $0.id == selectedVehicleId })?.powerType
+        return VehicleKindPick.all(power ?? .gasoline)
+    }
+
+    /// 車輛區 footer：選了虛擬項才有（其他照舊）
+    private var vehicleVirtualFooter: String? {
+        guard isVehicleVirtual, let p = vehicleVirtualPick else { return nil }
+        return VehicleKindForm.footer(p)
+    }
+
+    /// 稅費的細項選單（跟固定「稅費」、房子「水電類型」同一個樣子）
+    @ViewBuilder
+    private var vehicleTaxKindPicker: some View {
+        if isVehicleVirtual && vehicleVirtualPick == VehicleKindPick.tax {
+            Picker("細項", selection: vehicleTaxKindSelection) {
+                ForEach(vehicleTaxOptions) { k in
+                    Text(VehicleKindForm.taxLabel(k)).tag(k)
+                }
+            }
+        }
+    }
+
+    /// 〔只繳這一次〕那一行的字：連車寫「驗車、換照、過戶」，其他照 25.615（土地增值稅）
+    private var oneTimeSwitchText: String {
+        if case .vehicle = fixedKindLink { return VehicleKindForm.oneTimeSwitchText }
+        return ExpenseKindForm.oneTimeSwitchText
     }
 
     /// [v25.538] 變動支出算不算連到車：關聯資產是汽車，而且分類還是「汽車」。
@@ -674,7 +791,7 @@ struct AddExpenseView: View {
                     // [v25.424] 旅遊期間的花費可以直接掛到那一趟行程上
                     if showTripLinkSection { tripLinkSection }
                     // 進階模式：分類區塊下方加照片廊
-                    if advancedMode {
+                    if advancedMode || isVehicleFine {
                         photoGallerySection
                     }
                 } else {
@@ -793,8 +910,10 @@ struct AddExpenseView: View {
             .onChange(of: selectedVariableCategory) { _, _ in
                 if placeLatitude != nil { placeScopeStamp = placeScopeKey }
             }
-            .onChange(of: selectedVehicleExpenseCategory) { _, _ in
+            .onChange(of: selectedVehicleExpenseCategory) { _, newValue in
                 if placeLatitude != nil { placeScopeStamp = placeScopeKey }
+                // [v25.616] 別處把類別改成不是「其他」：虛擬「稅費」「罰款」跟著放掉
+                if newValue != .other { vehicleVirtualPick = nil }
             }
             .onChange(of: selectedAssetLink) { _, newValue in
                 if newValue == .vehicle {
@@ -844,7 +963,10 @@ struct AddExpenseView: View {
             // [v25.615] 固定「稅費」：換細項、換房子，名稱跟著換（自己打的不動）
             String(describing: fixedTaxPicked),
             fixedTaxKindSignature,
-            String(describing: fixedLinkRealEstateId)
+            String(describing: fixedLinkRealEstateId),
+            // [v25.616] 車子「稅費」「罰款」：換虛擬項、換細項，名稱跟著換（自己打的不動）
+            String(describing: vehicleVirtualPick),
+            vehicleKindSignature
         ]
         return parts.joined(separator: "|")
     }
@@ -886,6 +1008,8 @@ struct AddExpenseView: View {
     private var vehicleDefaultTitle: String? {
         guard !isInsurance, let id = targetVehicleId,
               let vehicle = financeStore.vehicles.first(where: { $0.id == id }) else { return nil }
+        // [v25.616] 車子「稅費」「罰款」用細項字（「Swift Sport-罰款」「Swift Sport-規費」）
+        if expenseType == .variable, let k = chosenVehicleKind { return "\(vehicle.name)-\(k.raw)" }
         if expenseType == .variable { return "\(vehicle.name)-\(selectedVehicleExpenseCategory.rawValue)" }
         if isCarLoan { return "\(vehicle.name)-車貸" }
         // [v25.615] 選了「稅費」用細項字（「Swift Sport-牌照稅」；沒選照舊「Swift Sport-其他」）
@@ -1360,6 +1484,8 @@ struct AddExpenseView: View {
     /// 汽車地點欄的提示字。未連結車輛時（基本模式）還沒有支出類別，給一個泛用提示。
     private var vehiclePlacePrompt: String {
         guard selectedAssetLink == .vehicle else { return "地點（停車場 / 充電站 / 加油站）" }
+        // [v25.616] 「稅費」「罰款」：監理站
+        if isVehicleVirtual { return VehicleKindForm.placePrompt }
         switch selectedVehicleExpenseCategory {
         case .fuel: return "加油站"
         case .electricity: return "充電站"
@@ -1670,6 +1796,8 @@ struct AddExpenseView: View {
     /// 汽車地點欄的圖示：依支出類別換，未連結車輛時用通用地標
     private var vehiclePlaceIcon: String {
         guard selectedAssetLink == .vehicle else { return "mappin.and.ellipse" }
+        // [v25.616] 「稅費」building.columns、「罰款」exclamationmark.triangle
+        if isVehicleVirtual, let p = vehicleVirtualPick { return p.icon }
         switch selectedVehicleExpenseCategory {
         case .fuel: return "fuelpump.fill"
         case .electricity: return "bolt.car.fill"
@@ -3034,14 +3162,10 @@ struct AddExpenseView: View {
                     }
                 }
 
-                let selectedVehicle = financeStore.vehicles.first { $0.id == selectedVehicleId }
-                let availableCategories = VehicleVariableCategory.categories(
-                    for: selectedVehicle?.powerType ?? .gasoline
-                )
-
-                Picker("支出類別", selection: $selectedVehicleExpenseCategory) {
-                    ForEach(availableCategories) { cat in
-                        Label(cat.rawValue, systemImage: cat.icon).tag(cat)
+                // [v25.616] 「其他」前多虛擬「稅費」「罰款」（存其他＋細項；清單＝VehicleKindPick.all，categories(for:) 不改）
+                Picker("支出類別", selection: vehiclePickSelection) {
+                    ForEach(vehicleKindPickerOptions) { pick in
+                        Label(pick.title, systemImage: pick.icon).tag(pick)
                     }
                 }
                 .onChange(of: selectedVehicleId) { _, newVehicleId in
@@ -3057,6 +3181,7 @@ struct AddExpenseView: View {
                         selectedVehicleExpenseCategory = fallback
                     }
                 }
+                vehicleTaxKindPicker
 
                 // [v25.312] 電費類別的充電資訊：度數＋電量 %（皆選填），
                 // 供車輛卡片算每度電價、推估電池容量等 KPI 與趨勢圖
@@ -3117,7 +3242,7 @@ struct AddExpenseView: View {
         } header: {
             sectionHeader(title: "汽車資訊（連動理財模式）", accentColor: .teal)
         } footer: {
-            Text(vehicleSectionFooter)
+            Text(vehicleVirtualFooter ?? vehicleSectionFooter)
         }
     }
 
@@ -3198,16 +3323,18 @@ struct AddExpenseView: View {
                 }
             }
             if let v = financeStore.vehicles.first(where: { $0.id == targetVehicleId }) {
-                Picker("支出類別", selection: $selectedVehicleExpenseCategory) {
-                    ForEach(VehicleVariableCategory.categories(for: v.powerType)) { cat in
-                        Label(cat.rawValue, systemImage: cat.icon).tag(cat)
+                // [v25.616] 同 vehicleLinkSection：「其他」前多虛擬「稅費」「罰款」
+                Picker("支出類別", selection: vehiclePickSelection) {
+                    ForEach(VehicleKindPick.all(v.powerType)) { pick in
+                        Label(pick.title, systemImage: pick.icon).tag(pick)
                     }
                 }
+                vehicleTaxKindPicker
             }
         } header: {
             sectionHeader(title: "汽車（連動理財模式）", accentColor: .teal)
         } footer: {
-            Text("選了車，這筆才會算進那台車。")
+            Text(vehicleVirtualFooter ?? "選了車，這筆才會算進那台車。")
         }
     }
 
@@ -4135,8 +4262,9 @@ struct AddExpenseView: View {
         // [v25.615] 細項存在另一個鍵（ExpenseKinds.swift；Expense 一個欄位都沒加）：先 dismiss，下一個 runloop 才寫。
         // 每一次存檔都叫（沒選細項時它自己判斷要不要寫墓碑）
         let kindSaved = expense
-        let kindChosen = chosenKind
-        DispatchQueue.main.async { ExpenseKindStore.shared.recordSave(kindSaved, kind: kindChosen) }
+        // [v25.616] 車子變動「稅費」「罰款」也一起（savedKind）；v2 規則（墓碑多管車子其他、推的那筆改掉記〔不是〕）
+        let kindChosen = savedKind
+        DispatchQueue.main.async { ExpenseKindStore.shared.recordFormSave(kindSaved, kind: kindChosen) }
         syncBankWithdrawal(for: expense, previous: editingExpense)
         // [v25.567] 改了一筆保費：連著它的財富保單照寫一份舊欄位（里程碑保費、帳本繳法／從哪扣／下次；給醫療地圖、舊 iPad、網頁版）。
         // 先 dismiss，下一個 runloop 才寫（store 先抓進區域常數）；沒連保單的 policyExpenseChanged 自己什麼都不做
@@ -4800,6 +4928,14 @@ struct AddExpenseView: View {
                 selectedVehicleId = carId
                 if let veCat = expense.vehicleExpenseCategory ?? mirrorCategory {
                     selectedVehicleExpenseCategory = veCat
+                    // [v25.616] 車子「稅費」「罰款」：對得上（kind(of:)）就停在那個虛擬項
+                    if veCat == .other, let hit = ExpenseKindStore.shared.index.kind(of: expense) {
+                        vehicleVirtualPick = hit.kind == ExpenseKind.fine ? VehicleKindPick.fine : VehicleKindPick.tax
+                        if hit.kind != .fine {
+                            selectedVehicleKind = hit.kind
+                            loadedVehicleKind = hit.kind
+                        }
+                    }
                     // [v25.539] 帶回欄位改用不丟位數的寫法：%g 只留 6 位有效數字，
                     // 里程 123,456.7 會變 123457、1,234,567 會變 1.23457e+06，存一次就被改掉
                     if let kwh = expense.evKwh { evKwhText = Self.editableNumber(kwh) }
@@ -5036,6 +5172,12 @@ struct AddExpenseView: View {
             fixedTaxPicked = true
             selectedKind = k
             taxKindSeeded = true
+            applyAutoTitleIfLinked()
+        }
+        // [v25.616] 車子卡〔＋ 記一筆〕→ 罰款、〔只繳這一次〕→ 稅費・規費：停在那個虛擬項，名稱空白帶「Swift Sport-罰款」
+        if let k = preset.kind, preset.vehicleExpenseCategory == .other {
+            vehicleVirtualPick = k == ExpenseKind.fine ? VehicleKindPick.fine : VehicleKindPick.tax
+            if k != .fine { selectedVehicleKind = k }
             applyAutoTitleIfLinked()
         }
     }

@@ -1421,26 +1421,34 @@ struct VehicleLedgerSection: View {
             Text(ledger.recordsTitle)
                 .font(.subheadline.weight(.bold))
             Spacer(minLength: 8)
-            addMenu(ledger.addKinds)
+            addMenu(ledger.addSections)
         }
         .padding(.horizontal, 14)
         .padding(.top, 14)
         .padding(.bottom, 8)
     }
 
-    private func addMenu(_ kinds: [VehicleLedgerAddKind]) -> some View {
+    /// [v25.616] 三段（常記的｜每年・每月｜其他），段跟段中間 Divider
+    private func addMenu(_ sections: [[VehicleLedgerAddKind]]) -> some View {
         let a = actions
         return FinanceAddMenuPill(title: "記一筆", canEdit: a.canEdit, askPremium: a.askPremium) {
-            ForEach(kinds, id: \.id) { kind in
-                // [v25.614] 選單收起來那一輪先過，下一輪才開（照 StockLedgerCard.addLater）
-                Button {
-                    DispatchQueue.main.async {
-                        a.addLedger(kind)
-                    }
-                } label: {
-                    Label(kind.title, systemImage: kind.icon)
+            ForEach(Array(sections.enumerated()), id: \.offset) { i, kinds in
+                if i > 0 { Divider() }
+                ForEach(kinds, id: \.id) { kind in
+                    addButton(kind, a)
                 }
             }
+        }
+    }
+
+    private func addButton(_ kind: VehicleLedgerAddKind, _ a: VehicleCardActions) -> some View {
+        // [v25.614] 選單收起來那一輪先過，下一輪才開（照 StockLedgerCard.addLater）
+        Button {
+            DispatchQueue.main.async {
+                a.addLedger(kind)
+            }
+        } label: {
+            Label(kind.title, systemImage: kind.icon)
         }
     }
 
@@ -1875,7 +1883,8 @@ private enum VCColors {
     }
 
     /// 帳本 32pt 圓：購 6B4BE0、貸 2F7FE8、險 E0457A、稅 C9590F、訂 14A3A3、租 5B6CC9、固 7A86A8、油 DC7428、充 1F9D57、
-    /// 停 8290B3、保 4F5BD5、修 2F9BD8、洗 0E8FA8、其 8891A7（停、其、油比樣稿深一點才有 3:1）。深色只把對深色底不到 4.5:1 的調亮
+    /// 停 8290B3、保 4F5BD5、修 2F9BD8、洗 0E8FA8、其 8891A7（停、其、油比樣稿深一點才有 3:1）。深色只把對深色底不到 4.5:1 的調亮。
+    /// [v25.616] 罰、規同稅
     static func mark(_ m: VehicleLedgerMark, pal: TripBoardPalette) -> Color {
         switch m {
         case .purchase: return pick(0x6B4BE0, 0x856BE5, pal)
@@ -1892,6 +1901,8 @@ private enum VCColors {
         case .repair: return pick(0x2F9BD8, 0x2F9BD8, pal)
         case .wash: return pick(0x0E8FA8, 0x0E8FA8, pal)
         case .other: return pick(0x8891A7, 0x8891A7, pal)
+        case .fine: return pick(0xC9590F, 0xD05C0F, pal)
+        case .fee: return pick(0xC9590F, 0xD05C0F, pal)
         }
     }
 
