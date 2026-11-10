@@ -92,6 +92,9 @@ struct UnifiedExport: Codable {
         var expenses: [Expense]
         var incomes: [Income]
         var currencyRates: [CurrencyRate]?
+        /// [v25.615] 記帳那筆的細項（ExpenseKindBook；同步鍵 lifegood_expense_kinds_v1）。舊備份沒有，所以是 Optional；
+        /// 只帶這份檔案裡那幾筆支出的（照定期轉帳跟著帳本走）
+        var expenseKinds: ExpenseKindBook?
     }
 
     struct FinanceBundle: Codable {
@@ -188,7 +191,9 @@ struct UnifiedExport: Codable {
             expense: ExpenseBundle(
                 expenses: expenses,
                 incomes: scope.ownsAllExpenses ? expense.incomes : [],
-                currencyRates: scope.ownsAllExpenses ? expense.currencyRates : nil),
+                currencyRates: scope.ownsAllExpenses ? expense.currencyRates : nil,
+                // [v25.615] 細項只帶這份檔案裡那幾筆支出的；一筆支出都沒帶就不帶
+                expenseKinds: expenses.isEmpty ? nil : ExpenseKindStore.shared.exportBook(for: Set(expenses.map(\.id)))),
             finance: FinanceBundle(
                 insurances: scope.carriesFinance ? finance.insurances : [],
                 stocks: scope.carriesFinance ? finance.stocks : [],
@@ -937,6 +942,14 @@ enum UnifiedImporter {
                         + payload.expense.expenses
                 }
             }
+            // [v25.615] 細項：備份裡有才換（舊備份沒有＝不動本機的）。整批記帳歸這份檔案管才整包換；旅遊那幾筆照 id 換
+            if let kb = payload.expense.expenseKinds {
+                if scope.ownsAllExpenses {
+                    ExpenseKindStore.shared.importReplacingAll(kb)
+                } else if scope.carriesSomeExpenses {
+                    ExpenseKindStore.shared.importReplacing(ids: Set(payload.expense.expenses.map(\.id)), with: kb)
+                }
+            }
             if scope.carriesFinance {
                 finance.insurances = payload.finance.insurances
                 finance.stocks = payload.finance.stocks
@@ -1054,6 +1067,10 @@ enum UnifiedImporter {
                 let newIncomes = mergeItems(existing: expense.incomes, incoming: payload.expense.incomes)
                 expense.incomes.append(contentsOf: newIncomes)
                 result.incomes = newIncomes.count
+            }
+            // [v25.615] 細項：照 id 合併（同一筆取後改的、墓碑勝過比它舊的；一樣新留本機的）
+            if let kb = payload.expense.expenseKinds {
+                ExpenseKindStore.shared.importMerging(kb)
             }
 
             life.withBatch {

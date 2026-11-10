@@ -285,6 +285,14 @@ extension MoneyArtTheme {
         }
     }
 
+    /// [v25.615] 固定支出頁的分組標頭：「稅費」組用變動支出稅費那張（MoneyArtTheme.tax）；原本 of(FixedCategory?) 不動
+    static func of(_ g: FixedGroup) -> MoneyArtTheme {
+        switch g {
+        case .category(let c): return of(c)
+        case .tax: return .tax
+        }
+    }
+
     static func of(_ c: IncomeCategory) -> MoneyArtTheme {
         switch c {
         case .salary: return .salary

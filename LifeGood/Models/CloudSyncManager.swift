@@ -15,6 +15,9 @@ final class CloudSyncManager: ObservableObject {
     static let syncKeys: [String] = [
         // ExpenseStore
         "lifegood_expenses",
+        // [v25.615] 記帳那筆的細項（地價稅、罰款…；ExpenseKindBook，ExpenseKinds.swift；單獨一個鍵：還沒更新的 iPad 不認得、不會碰。
+        // Expense 一個欄位都沒加。收到增量更新時 ExpenseKindStore.reloadFromCloud 照 id＋updatedAt 合併，不整包換掉；第一次同步〔合併〕見 resolveInitialSync）
+        "lifegood_expense_kinds_v1",
         "lifegood_incomes",
         "lifegood_currency_rates",
         // FinanceStore
@@ -392,6 +395,11 @@ final class CloudSyncManager: ObservableObject {
                 if CompetencySync.handles(key),
                    let merged = CompetencySync.mergeInitialBlob(key: key, local: defaults.data(forKey: key),
                                                                 cloud: cloudBlobs[key], localWins: localWins) {
+                    defaults.set(merged, forKey: key)
+                // [v25.615] 記帳的細項那一包最上層也是物件：照 id 合併（ExpenseKindSync；解不開才退回 mergeBlob）。要退回這一件：刪這個 else if
+                } else if ExpenseKindSync.handles(key),
+                          let merged = ExpenseKindSync.mergeInitialBlob(local: defaults.data(forKey: key),
+                                                                        cloud: cloudBlobs[key], localWins: localWins) {
                     defaults.set(merged, forKey: key)
                 } else if let merged = Self.mergeBlob(local: defaults.data(forKey: key),
                                                       cloud: cloudBlobs[key],

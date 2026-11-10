@@ -361,7 +361,8 @@ struct RealEstateDetailView: View {
         case .share(let payload):
             ShareSheet(items: payload.items)
         case .newExpense(let request):
-            AddExpenseView(expenseType: request.expenseType, preset: request.preset)
+            AddExpenseView(expenseType: request.expenseType, preset: request.preset,
+                           onSwitchToOneTime: oneTimeSwitch(request))
         case .editExpense(let ex):
             AddExpenseView(expenseType: ex.expenseType, editingExpense: ex)
         case .floorItem(let target):
@@ -509,18 +510,41 @@ extension RealEstateDetailView {
             presentNewMortgage()
         case .utility:
             sheet = .newUtility(UUID())
+        case .tax where !estate.isSold:
+            // [v25.615] 稅費（地價稅、房屋稅）開固定・每年、細項照這個月猜；上方〔只繳這一次〕換成變動・房子「稅費」。
+            // 賣掉的房子照舊走下面的變動（日期帶賣出日）
+            let month = ExpenseKindForm.gregorian(.current).component(.month, from: Date())
+            let preset = AddExpensePreset(
+                fixedCategory: .other,
+                recurrence: .yearly,
+                linkedRealEstateId: estateId,
+                fixedAssetLink: .realEstate,
+                kind: ExpenseKindForm.defaultKind(.realEstate, month: month)
+            )
+            sheet = .newExpense(NewExpenseRequest(expenseType: .fixed, preset: preset, oneTime: variablePreset(.tax)))
         default:
             guard let category = kind.category else { return }
-            var preset = AddExpensePreset(
-                variableCategory: .realEstate,
-                realEstateExpenseCategory: category,
-                linkedRealEstateId: estateId,
-                assetLink: .realEstate,
-                realEstateLinkExisting: true
-            )
+            var preset = variablePreset(category)
             if estate.isSold, let sold = estate.soldDate { preset.date = sold }
             sheet = .newExpense(NewExpenseRequest(expenseType: .variable, preset: preset))
         }
+    }
+
+    /// 「＋ 記一筆」的變動支出（房子子分類先帶好、連這間）
+    private func variablePreset(_ category: RealEstateExpenseCategory) -> AddExpensePreset {
+        AddExpensePreset(
+            variableCategory: .realEstate,
+            realEstateExpenseCategory: category,
+            linkedRealEstateId: estateId,
+            assetLink: .realEstate,
+            realEstateLinkExisting: true
+        )
+    }
+
+    /// [v25.615] 〔只繳這一次〕：同一個 .sheet(item:) 換成變動・房子「稅費」那張（換 id＝關掉再開新的）。沒帶 oneTime 的不出那一行
+    private func oneTimeSwitch(_ r: NewExpenseRequest) -> (() -> Void)? {
+        guard let p = r.oneTime else { return nil }
+        return { sheet = .newExpense(NewExpenseRequest(expenseType: .variable, preset: p)) }
     }
 
     // MARK: 帳本列
@@ -1938,6 +1962,8 @@ private struct NewExpenseRequest {
     let id = UUID()
     let expenseType: ExpenseType
     let preset: AddExpensePreset
+    /// [v25.615] 〔只繳這一次〕切過去的變動 preset（房屋卡〔＋ 記一筆〕→ 稅費 才帶）
+    var oneTime: AddExpensePreset? = nil
 }
 
 /// 一個確認框（button 是 nil 時只是告訴你一件事，只有「好」）

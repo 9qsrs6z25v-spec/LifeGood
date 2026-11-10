@@ -298,6 +298,8 @@ enum HouseLedgerAddKind: String, CaseIterable, Identifiable {
         case .housePayment: return "房屋價金（頭期款、簽約金）"
         case .purchaseCost: return "買房費用（仲介、代書、契稅）"
         case .mortgageSegment: return "房貸一段"
+        // [v25.615] 稅費改開固定・每年（RealEstateDetailView.presentAdd）；category／icon 不改
+        case .tax: return "稅費（地價稅、房屋稅）"
         default: return category?.rawValue ?? rawValue
         }
     }
@@ -1133,12 +1135,13 @@ struct HouseCardData {
     var media = HouseMediaData()
 
     static func build(_ re: RealEstate, expense: ExpenseStore, now: Date = Date()) -> HouseCardData {
-        build(re, expenses: expense.expenses, ntd: { expense.ntdValue(of: $0) }, now: now)
+        build(re, expenses: expense.expenses, ntd: { expense.ntdValue(of: $0) }, kinds: ExpenseKindStore.shared.index, now: now)
     }
 
-    static func build(_ re: RealEstate, expenses: [Expense], ntd: (Expense) -> Double, now: Date = Date(), calendar: Calendar = .current) -> HouseCardData {
+    /// [v25.615] kinds：記帳的細項（地價稅…；ExpenseKinds.swift）。純函式不給預設值，sim／preview 明寫 `.empty`
+    static func build(_ re: RealEstate, expenses: [Expense], ntd: (Expense) -> Double, kinds: ExpenseKindIndex, now: Date = Date(), calendar: Calendar = .current) -> HouseCardData {
         let facts = HouseFacts.build(re, expenses: expenses, now: now, calendar: calendar)
-        let c = HouseBuildContext.make(re, facts: facts, expenses: expenses, ntd: ntd, now: now, calendar: calendar)
+        let c = HouseBuildContext.make(re, facts: facts, expenses: expenses, ntd: ntd, kinds: kinds, now: now, calendar: calendar)
         let trimmed = re.name.trimmingCharacters(in: .whitespacesAndNewlines)
         let name = trimmed.isEmpty ? "未命名房屋" : trimmed
         let ledger = HouseLedger.build(c)
@@ -1202,13 +1205,15 @@ private struct HouseBuildContext {
     let cal: Calendar
     /// 帳本不列的支出：房貸固定支出（含舊版單筆連結、只在記帳那邊連到這間的）、賣出虧損那一筆
     let excluded: Set<UUID>
+    /// [v25.615] 記帳的細項（只准問 kind(of:)／taxKind(of:)）
+    let kinds: ExpenseKindIndex
 
     var notStarted: Bool { facts.hasMortgage && !facts.hasStarted }
 
     func amount(_ ex: Expense) -> Double { ntd[ex.id] ?? ex.amount }
 
     static func make(_ re: RealEstate, facts: HouseFacts, expenses: [Expense], ntd: (Expense) -> Double,
-                     now: Date, calendar: Calendar) -> HouseBuildContext {
+                     kinds: ExpenseKindIndex, now: Date, calendar: Calendar) -> HouseBuildContext {
         let byId = Dictionary(expenses.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let money = Dictionary(expenses.map { ($0.id, ntd($0)) }, uniquingKeysWith: { a, _ in a })
         var excluded = RealEstateSale.mortgageExpenseIds(of: re, expenses: expenses)
@@ -1217,7 +1222,7 @@ private struct HouseBuildContext {
         }
         if let sale = re.saleLinkedExpenseId { excluded.insert(sale) }
         return HouseBuildContext(re: re, facts: facts, expenses: expenses, byId: byId, ntd: money,
-                                 now: now, asOf: facts.asOf, cal: calendar, excluded: excluded)
+                                 now: now, asOf: facts.asOf, cal: calendar, excluded: excluded, kinds: kinds)
     }
 
     /// 這一天在 asOf 當天或之前
@@ -1844,14 +1849,21 @@ extension HouseCardData {
         let upkeepM = upkeep / Double(months)
 
         // 固定費用：連到這間、不是貸款、這個月還沒過結束日的週期固定支出，換算成每月
+        // [v25.615] 有稅類細項的（地價稅…）改算進「稅費・保險」，不進固定費用（只算一邊）
         var fixed = 0.0
+        var fixedTax = 0.0
         let thisMonth = HouseFacts.monthStart(c.asOf, cal)
         for ex in c.expenses where ex.linkedRealEstateId == re.id && ex.isRecurringFixed
             && ex.fixedCategory != .loan && !c.excluded.contains(ex.id) {
             guard let rec = ex.recurrence else { continue }
             if let end = ex.endDate, cal.startOfDay(for: end) < thisMonth { continue }
             guard c.onOrBeforeAsOf(ex.date) else { continue }
-            fixed += c.amount(ex) / Double(max(1, rec.periodMonths))
+            let monthly = c.amount(ex) / Double(max(1, rec.periodMonths))
+            if c.kinds.taxKind(of: ex) != nil {
+                fixedTax += monthly
+            } else {
+                fixed += monthly
+            }
         }
 
         // 房貸：這個月的月貸 M；算得出利率時拆成利息 B×r 和還本金
@@ -1873,7 +1885,7 @@ extension HouseCardData {
         }
         raw.append((kind: .fixed, label: "管理費等固定費用", value: fixed, tap: .ledgerFilter(.holding)))
         raw.append((kind: .utility, label: "水電瓦斯", value: utilityM, tap: .ledgerFilter(.holding)))
-        raw.append((kind: .taxInsurance, label: "稅費・保險", value: taxInsM, tap: .ledgerFilter(.holding)))
+        raw.append((kind: .taxInsurance, label: "稅費・保險", value: taxInsM + fixedTax, tap: .ledgerFilter(.holding)))
         raw.append((kind: .upkeep, label: "維修・清潔・其他", value: upkeepM, tap: .ledgerFilter(.holding)))
         raw = raw.filter { $0.value > 0.5 }
         let rawTotal = raw.reduce(0.0) { $0 + $1.value }
@@ -1906,11 +1918,20 @@ extension HouseCardData {
             l.splitHint = "填上當初借多少，就能分出利息和本金"
         }
         let oneYear = cal.date(byAdding: .year, value: 1, to: re.purchaseDate) ?? re.purchaseDate
-        let hasTax = ledger.events.contains { $0.mark == .tax }
+        // [v25.615] 記了稅類細項的固定支出（地價稅…）也算：扣款日還沒到也不寫這句
+        let hasTax = ledger.events.contains { $0.mark == .tax } || hasTaxKindFixed(c)
         if c.asOf < oneYear && !hasTax {
             l.firstYearHint = "買進還不到一年，房屋稅（5 月）和地價稅（11 月）可能還沒繳到，這裡會先偏低。"
         }
         return l
+    }
+
+    /// [v25.615] 連這間、還在繳、有稅類細項（地價稅、房屋稅…）的週期固定支出
+    fileprivate static func hasTaxKindFixed(_ c: HouseBuildContext) -> Bool {
+        c.expenses.contains { ex in
+            ex.linkedRealEstateId == c.re.id && ex.isRecurringFixed && !ex.isFixedEnded
+                && !c.excluded.contains(ex.id) && c.kinds.taxKind(of: ex) != nil
+        }
     }
 
     fileprivate static func rentalData(_ c: HouseBuildContext, livingTotal: Double) -> HouseRentalData? {
@@ -2694,9 +2715,14 @@ extension HouseLedger {
             let amount = c.amount(ex)
             let startYear = greg.component(.year, from: ex.date)
             guard startYear <= endYear else { continue }
+            // [v25.615] 有稅類細項（地價稅…）→ 圓圈「稅」、細字「地價稅・每年 NT$3,600」；沒細項的照舊
+            let taxKind = c.kinds.taxKind(of: ex)
+            let rowMark: HouseLedgerMark = taxKind == nil ? .fixed : .tax
+            let rowCategory: RealEstateExpenseCategory? = taxKind == nil ? nil : RealEstateExpenseCategory.tax
+            let fixedName = ex.fixedCategory?.rawValue ?? "固定支出"
+            let kindName = taxKind?.raw ?? fixedName
             let cleaned = HouseCardFormat.cleanTitle(ex.title, estateName: c.re.name)
-            let base = cleaned.isEmpty ? (ex.fixedCategory?.rawValue ?? "固定支出") : cleaned
-            let kindName = ex.fixedCategory?.rawValue ?? "固定支出"
+            let base = cleaned.isEmpty ? kindName : cleaned
             let detail = "\(kindName)・\(rec.rawValue) \(MoneyFormat.short(amount))"
             var before = 0
             for y in startYear...min(endYear, startYear + 120) {
@@ -2707,8 +2733,8 @@ extension HouseLedger {
                 guard k > 0 else { continue }
                 let lastDue = c.cal.date(byAdding: component, value: step * (total - 1), to: ex.date) ?? min(dec31, c.asOf)
                 out.append(HouseLedgerEvent(id: "fixed-" + ex.id.uuidString + "-\(y)", date: lastDue, bucket: .holding,
-                                            category: nil, title: base + "・\(k) 期", detail: detail,
-                                            amount: Double(k) * amount, source: .fixedYear(ex.id, y), mark: .fixed,
+                                            category: rowCategory, title: base + "・\(k) 期", detail: detail,
+                                            amount: Double(k) * amount, source: .fixedYear(ex.id, y), mark: rowMark,
                                             expenseId: ex.id))
             }
         }

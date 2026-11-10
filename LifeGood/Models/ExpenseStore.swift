@@ -32,6 +32,15 @@ class ExpenseStore: ObservableObject {
             name: .cloudSyncDidPullChanges,
             object: nil
         )
+        // [v25.615] 細項（地價稅、罰款…）存在另一個鍵（ExpenseKinds.swift）：那一包變了（自己存、iCloud 合併、備份）只跳 modifyID，
+        // 用 modifyID 當 task key／onChange 的畫面（房屋卡、固定支出頁…）就會重算。不指派 expenses、不存、不推
+        _ = ExpenseKindStore.shared
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(kindBookChanged(_:)),
+            name: .expenseKindsDidChange,
+            object: nil
+        )
     }
 
     deinit {
@@ -81,6 +90,11 @@ class ExpenseStore: ObservableObject {
         }
     }
 
+    /// [v25.615] 細項那一包變了：只讓畫面重算（新的 private 函式；不指派 expenses、不 save、不推）
+    @objc private func kindBookChanged(_ note: Notification) {
+        modifyID = UUID()
+    }
+
     // MARK: - 支出 CRUD
 
     func add(_ expense: Expense) {
@@ -105,6 +119,8 @@ class ExpenseStore: ObservableObject {
         expenses.removeAll { $0.id == expense.id }
         // [v25.538] 車子身上指到這筆的鏡像一起清（見 VehicleMirrors）
         VehicleMirrors.removeMirrors(of: [expense.id])
+        // [v25.615] 有細項的寫墓碑（另一台還沒同步的舊細項不會長回來）
+        ExpenseKindStore.shared.recordDelete(ids: [expense.id])
     }
 
     func delete(at offsets: IndexSet, from list: [Expense]) {
@@ -115,6 +131,8 @@ class ExpenseStore: ObservableObject {
         }
         expenses.removeAll { idsToDelete.contains($0.id) }
         VehicleMirrors.removeMirrors(of: idsToDelete)
+        // [v25.615] 有細項的寫墓碑
+        ExpenseKindStore.shared.recordDelete(ids: idsToDelete)
     }
 
     // MARK: - 收入 CRUD
@@ -1025,5 +1043,7 @@ class ExpenseStore: ObservableObject {
         isLoading = false
         save()
         saveCurrencyRates()
+        // [v25.615] 細項那一包一起清（寫一包空的推上去）
+        ExpenseKindStore.shared.clearAll()
     }
 }

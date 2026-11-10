@@ -70,6 +70,9 @@ struct AddExpenseView: View {
     /// [v2 小工具] 從小工具／控制項點進來（網址帶 src=widget）：表單出現後金額欄自動聚焦、數字鍵盤直接跳出。
     /// 放在 preset 後面、有預設值：既有呼叫端都不用改
     var focusAmountOnAppear: Bool = false
+    /// [v25.615] 房屋卡〔＋ 記一筆〕→ 稅費 才帶（預設 nil，既有呼叫端不用改）：按表單上方〔只繳這一次〕叫它，
+    /// 房屋卡把 sheet 換成變動・房子「稅費」那張（oneTimeSwitchSection；只在新增、選了「稅費」時出現）
+    var onSwitchToOneTime: (() -> Void)? = nil
 
     // MARK: - 基本欄位
 
@@ -96,6 +99,19 @@ struct AddExpenseView: View {
         .medical, .education, .social, .other
     ]
     @State private var selectedFixedCategory: FixedCategory = .rent
+    /// [v25.615] 固定支出選了「稅費」（存 fixedCategory .other＋細項；ExpenseKinds.swift）
+    @State private var fixedTaxPicked = false
+    /// [v25.615] 「稅費」的細項（清單照連的資產換；不在清單裡時 effectiveKind 用預設）
+    @State private var selectedKind: ExpenseKind = .landValueTax
+    /// [v25.615] 打開舊資料時帶回的細項（清單沒有它時也列出來，不會被默默換掉）
+    @State private var loadedKind: ExpenseKind?
+    /// [v25.615] 細項已經照月份猜過一次（第一次選「稅費」才猜；之後切走再切回來，留著你選的）
+    @State private var taxKindSeeded = false
+    /// [v25.615] 週期自己動過（選「稅費」時還是預設每月、沒動過才改每年）
+    @State private var recurrenceTouched = false
+    /// [v25.615] 同一年已經記過一筆一次性的地價稅／房屋稅（存檔前問一次）
+    @State private var taxDupAsk: TaxDuplicateAsk?
+    @State private var taxDupResolved = false
     @State private var selectedRecurrence: Recurrence = .monthly
     /// [v25.347] 固定支出的停止（結束日＝最後一次扣款日）
     @State private var hasEndDate = false
@@ -333,6 +349,147 @@ struct AddExpenseView: View {
         )
     }
 
+    // MARK: - [v25.615] 固定支出「稅費」（radar/judge_govfee.md §C8；build/govfee1/brief.md §2 G1；規則都在 ExpenseKindForm）
+
+    /// 這筆固定支出連著什麼（決定細項清單）：連車 → 那台的動力；連房子（而且選了物件）→ 房子；其他（含連儲蓄險）→ 沒連
+    private var fixedKindLink: ExpenseKindForm.Link {
+        if let vid = targetVehicleId {
+            return .vehicle(financeStore.vehicles.first(where: { $0.id == vid })?.powerType)
+        }
+        if expenseType == .fixed && showFixedAssetLink && effectiveFixedAssetLink == .realEstate
+            && fixedLinkRealEstateId != nil {
+            return .realEstate
+        }
+        return .none
+    }
+
+    /// 固定支出、選了「稅費」（存的是 fixedCategory .other）
+    private var isFixedTax: Bool {
+        expenseType == .fixed && fixedTaxPicked && selectedFixedCategory == .other
+    }
+
+    /// 細項清單（照連的資產）；打開舊資料帶回的細項不在清單裡時加在最後
+    private var fixedKindOptions: [ExpenseKind] {
+        var list: [ExpenseKind] = ExpenseKindForm.fixedOptions(fixedKindLink)
+        if let k = loadedKind, !list.contains(k) { list.append(k) }
+        return list
+    }
+
+    /// 表單日期的月份（西曆；預設細項照這個猜）
+    private var kindMonth: Int {
+        ExpenseKindForm.gregorian(.current).component(.month, from: date)
+    }
+
+    /// 實際算數的細項：選的在清單裡用選的，不然用預設（換連結不用 onChange，同 effectiveFixedAssetLink）
+    private var effectiveKind: ExpenseKind {
+        if fixedKindOptions.contains(selectedKind) { return selectedKind }
+        return ExpenseKindForm.defaultKind(fixedKindLink, month: kindMonth)
+    }
+
+    private var kindSelection: Binding<ExpenseKind> {
+        Binding(get: { effectiveKind }, set: { selectedKind = $0 })
+    }
+
+    /// autoTitleSignature 用（拆出來：那個陣列很長，型別檢查不要多一個三元運算）
+    private var fixedTaxKindSignature: String {
+        isFixedTax ? effectiveKind.raw : ""
+    }
+
+    /// 存檔寫 tag 用：選了「稅費」才有細項
+    private var chosenKind: ExpenseKind? {
+        isFixedTax ? effectiveKind : nil
+    }
+
+    /// 類別選單（「稅費」插在「管理費」後、「其他」前）。選「稅費」＝fixedCategory .other＋細項；
+    /// 換類別照舊走 fixedCategorySelection（連車的「其他」改保險先換車險那段）
+    private var fixedPickSelection: Binding<FixedPick> {
+        Binding(
+            get: { isFixedTax ? FixedPick.tax : FixedPick.category(selectedFixedCategory) },
+            set: { pick in pickFixed(pick) }
+        )
+    }
+
+    private func pickFixed(_ pick: FixedPick) {
+        switch pick {
+        case .tax:
+            if !taxKindSeeded {
+                selectedKind = ExpenseKindForm.defaultKind(fixedKindLink, month: kindMonth)
+                taxKindSeeded = true
+            }
+            selectedRecurrence = ExpenseKindForm.recurrenceAfterPickingTax(selectedRecurrence, touched: recurrenceTouched)
+            fixedTaxPicked = true
+            fixedCategorySelection.wrappedValue = .other
+        case .category(let c):
+            fixedTaxPicked = false
+            fixedCategorySelection.wrappedValue = c
+        }
+    }
+
+    /// 週期選單：自己動過就記下來（之後選「稅費」不再自動改每年）
+    private var recurrenceSelection: Binding<Recurrence> {
+        Binding(get: { selectedRecurrence }, set: { r in
+            selectedRecurrence = r
+            recurrenceTouched = true
+        })
+    }
+
+    /// 選了「稅費」、沒連車（連車的走 vehicleDefaultTitle）時名稱空白用的字：「一日拾樂-地價稅」／「地價稅」
+    private var fixedTaxDefaultTitle: String? {
+        guard isFixedTax, targetVehicleId == nil else { return nil }
+        let k: String = effectiveKind.raw
+        guard fixedKindLink == .realEstate, let rid = fixedLinkRealEstateId,
+              let re = financeStore.realEstates.first(where: { $0.id == rid }) else { return k }
+        let name: String = re.name.trimmingCharacters(in: .whitespaces)
+        return name.isEmpty ? k : name + "-" + k
+    }
+
+    /// 日期不在那個稅的月份：日期下一行灰字＋〔改成 2026/5/31〕（不自動改日期）
+    private var fixedTaxDateHint: ExpenseKindForm.DateHint? {
+        guard isFixedTax else { return nil }
+        return ExpenseKindForm.dateHint(effectiveKind, date: date, today: Date(), calendar: .current)
+    }
+
+    /// 細項選單（跟房子「水電類型」同一個樣子）
+    private var fixedTaxKindPicker: some View {
+        let link: ExpenseKindForm.Link = fixedKindLink
+        return Picker("細項", selection: kindSelection) {
+            ForEach(fixedKindOptions) { k in
+                Text(ExpenseKindForm.label(k, link: link)).tag(k)
+            }
+        }
+    }
+
+    /// 分類那段的 footer（固定支出一定寫：iOS 18 下拉選單不一定顯示第二行灰字）
+    @ViewBuilder
+    private var fixedCategoryFooter: some View {
+        if expenseType == .fixed {
+            Text(ExpenseKindForm.fixedFooter)
+        }
+    }
+
+    /// 房屋卡〔＋ 記一筆〕→ 稅費 打開的：表單上方〔只繳這一次（例如土地增值稅）→ 改記一次性〕
+    @ViewBuilder
+    private var oneTimeSwitchSection: some View {
+        if let go = onSwitchToOneTime, !isEditing, isFixedTax {
+            Section {
+                Button {
+                    DispatchQueue.main.async { go() }
+                } label: {
+                    Label(ExpenseKindForm.oneTimeSwitchText, systemImage: "arrow.uturn.right")
+                }
+            }
+        }
+    }
+
+    /// 重複提示選了（shift：從下一年開始）：記下來、再存一次（這次不會再問）
+    private func pickTaxDuplicate(_ shift: Bool) {
+        if shift, let next = Calendar.current.date(byAdding: .year, value: 1, to: date) {
+            date = next
+        }
+        taxDupResolved = true
+        saveExpense()
+    }
+
     /// [v25.538] 變動支出算不算連到車：關聯資產是汽車，而且分類還是「汽車」。
     /// 基本模式看不到關聯資產，選了車又把分類改成別的，就當不連（分類鈕會順手放掉車子，改回汽車再接上）。
     private var variableVehicleLinked: Bool {
@@ -489,6 +646,7 @@ struct AddExpenseView: View {
                             .listRowInsets(EdgeInsets())
                     }
                 }
+                oneTimeSwitchSection
                 basicInfoSection
 
                 // 變動支出：先選關聯資產，再選分類（基本模式隱藏關聯資產選擇）
@@ -654,6 +812,7 @@ struct AddExpenseView: View {
             .onDisappear { completerDebounceTask?.cancel() }
             // [v25.563] 改固定支出金額時問「從今天起／全部都改」（D9）；選了才真的存
             .modifier(AmountFromDialog(ask: $amountAsk, onPick: pickAmountFrom))
+            .modifier(TaxDuplicateDialog(ask: $taxDupAsk, onPick: pickTaxDuplicate))
             // [v25.564] 卡費提醒〔改成標已繳〕、對存摺提示〔再對一次〕
             .modifier(AddExpenseWealthSheetModifier(sheet: $wealthSheet, showPremium: $showWealthPremium,
                                                     onClosed: { wealthSheetClosed() }))
@@ -666,7 +825,8 @@ struct AddExpenseView: View {
     /// 供單一 .onChange 觀測（取代原本十多條 .onChange，避免 body 型別檢查逾時）。
     /// 備註（note）僅在房貸情境下納入，維持原本「note 變動只在房貸時重算標題」的行為。
     private var autoTitleSignature: String {
-        [
+        // [v25.615] 寫明 [String]：陣列又多三個元素，元素型別不要讓編譯器一個一個猜
+        let parts: [String] = [
             String(describing: selectedVehicleId),
             String(describing: selectedVehicleExpenseCategory),
             String(describing: selectedRealEstateLinkId),
@@ -680,8 +840,13 @@ struct AddExpenseView: View {
             String(describing: selectedFixedCategory),
             String(describing: selectedLoanSubCategory),
             // [v25.538] 基本模式把分類從「汽車」改走就不連車了（variableVehicleLinked），預設名稱要跟著換
-            String(describing: selectedVariableCategory)
-        ].joined(separator: "|")
+            String(describing: selectedVariableCategory),
+            // [v25.615] 固定「稅費」：換細項、換房子，名稱跟著換（自己打的不動）
+            String(describing: fixedTaxPicked),
+            fixedTaxKindSignature,
+            String(describing: fixedLinkRealEstateId)
+        ]
+        return parts.joined(separator: "|")
     }
 
     /// 若此筆支出連結到理財模式中的房地產，回傳自動生成的名稱「項目 N：型號-類別」（唯讀）。
@@ -723,6 +888,8 @@ struct AddExpenseView: View {
               let vehicle = financeStore.vehicles.first(where: { $0.id == id }) else { return nil }
         if expenseType == .variable { return "\(vehicle.name)-\(selectedVehicleExpenseCategory.rawValue)" }
         if isCarLoan { return "\(vehicle.name)-車貸" }
+        // [v25.615] 選了「稅費」用細項字（「Swift Sport-牌照稅」；沒選照舊「Swift Sport-其他」）
+        if isFixedTax { return "\(vehicle.name)-\(effectiveKind.raw)" }
         return "\(vehicle.name)-\(selectedFixedCategory.rawValue)"
     }
 
@@ -752,7 +919,8 @@ struct AddExpenseView: View {
         // [v25.538] 車子（決定 19）：名稱是你的。只有空白、還是上次自動填的、
         // 或（連著車時）舊版的「項目 N：…」，才換成現在的「車名-分類名」；不連車了就清回空白
         let current = title.trimmingCharacters(in: .whitespaces)
-        let def = vehicleDefaultTitle
+        // [v25.615] 固定「稅費」沒連車：「一日拾樂-地價稅」（同一套規則：自己打的不動）
+        let def = vehicleDefaultTitle ?? fixedTaxDefaultTitle
         let isAuto = current.isEmpty || current == autoVehicleTitle || current == def
             || (def != nil && Self.isLegacyAutoTitle(current))
         guard isAuto else { return }
@@ -822,6 +990,10 @@ struct AddExpenseView: View {
             // 日期（永遠顯示，儲蓄險除外）
             if !isSavingsInsurance {
                 DatePicker(showLoanCalcFields ? "開始日期" : "日期", selection: $date, displayedComponents: .date)
+                // [v25.615] 選了「稅費」、日期不在那個稅的月份：灰字＋〔改成 2026/5/31〕（按了才改）
+                if let hint = fixedTaxDateHint {
+                    TaxDateHintRow(hint: hint) { date = hint.target }
+                }
             }
 
             // 名稱（進階模式或固定支出或飲食類才顯示，移到日期下方）
@@ -923,7 +1095,7 @@ struct AddExpenseView: View {
 
     /// 名稱欄的提示字：連到車子時寫出留空會用的名稱（決定 19）
     private var namePlaceholder: String {
-        if let def = vehicleDefaultTitle { return "名稱（留空自動用「\(def)」）" }
+        if let def = vehicleDefaultTitle ?? fixedTaxDefaultTitle { return "名稱（留空自動用「\(def)」）" }
         return expenseType == .variable ? "名稱（留空自動以分類為名）" : "名稱"
     }
 
@@ -2310,14 +2482,16 @@ struct AddExpenseView: View {
                     }
                 }
             } else {
-                Picker("類別", selection: fixedCategorySelection) {
-                    ForEach(FixedCategory.allCases) { cat in
-                        Label(cat.rawValue, systemImage: cat.icon).tag(cat)
+                // [v25.615] 「稅費」插在「管理費」後、「其他」前（選了存 .other＋細項）
+                Picker("類別", selection: fixedPickSelection) {
+                    ForEach(FixedPick.all) { pick in
+                        Label(pick.title, systemImage: pick.icon).tag(pick)
                     }
                 }
+                if isFixedTax { fixedTaxKindPicker }
 
                 if !isSavingsInsurance {
-                    Picker("週期", selection: $selectedRecurrence) {
+                    Picker("週期", selection: recurrenceSelection) {
                         ForEach(Recurrence.allCases, id: \.self) { r in
                             Text(r.rawValue).tag(r)
                         }
@@ -2330,6 +2504,9 @@ struct AddExpenseView: View {
                           accentColor: expenseType == .variable
                             ? selectedVariableCategory.accentColor
                             : .blue)
+        } footer: {
+            // [v25.615] 固定支出：「稅費」包含哪些（一定寫）
+            fixedCategoryFooter
         }
     }
 
@@ -3670,7 +3847,8 @@ struct AddExpenseView: View {
         var trimmedTitle = title.trimmingCharacters(in: .whitespaces)
 
         // [v25.538] 連到車子、名稱空白：用「車名-分類名」（決定 19；車險不套，見 vehicleDefaultTitle）
-        if trimmedTitle.isEmpty, let def = vehicleDefaultTitle {
+        // [v25.615] 固定「稅費」沒連車：「一日拾樂-地價稅」／「地價稅」
+        if trimmedTitle.isEmpty, let def = vehicleDefaultTitle ?? fixedTaxDefaultTitle {
             trimmedTitle = def
             title = def
         }
@@ -3738,6 +3916,15 @@ struct AddExpenseView: View {
         let candidateAmount = amountForSave(rawAmount, finalAmountText: finalAmountText)
         if let ask = amountChangeAsk(candidate: candidateAmount, title: trimmedTitle) {
             amountAsk = ask
+            return
+        }
+
+        // [v25.615] 新增固定「稅費」連房子：第一期那一年這間房已經記過一筆一次性的地價稅／房屋稅 → 先問一次
+        if !isEditing, !taxDupResolved, let k = chosenKind, fixedKindLink == .realEstate,
+           let y = ExpenseKindForm.duplicateYear(kind: k, estateId: fixedLinkRealEstateId, firstDate: date,
+                                                 expenses: store.expenses, kinds: ExpenseKindStore.shared.index,
+                                                 calendar: .current) {
+            taxDupAsk = TaxDuplicateAsk(kind: k, year: y)
             return
         }
 
@@ -3945,6 +4132,11 @@ struct AddExpenseView: View {
         // [v25.564] 新增的變動支出：記住這次的付款方式（下次新增帶入）
         if expenseType == .variable && !isEditing { rememberPayment() }
         if isEditing { store.update(expense) } else { store.add(expense) }
+        // [v25.615] 細項存在另一個鍵（ExpenseKinds.swift；Expense 一個欄位都沒加）：先 dismiss，下一個 runloop 才寫。
+        // 每一次存檔都叫（沒選細項時它自己判斷要不要寫墓碑）
+        let kindSaved = expense
+        let kindChosen = chosenKind
+        DispatchQueue.main.async { ExpenseKindStore.shared.recordSave(kindSaved, kind: kindChosen) }
         syncBankWithdrawal(for: expense, previous: editingExpense)
         // [v25.567] 改了一筆保費：連著它的財富保單照寫一份舊欄位（里程碑保費、帳本繳法／從哪扣／下次；給醫療地圖、舊 iPad、網頁版）。
         // 先 dismiss，下一個 runloop 才寫（store 先抓進區域常數）；沒連保單的 policyExpenseChanged 自己什麼都不做
@@ -4481,6 +4673,8 @@ struct AddExpenseView: View {
         }
         date = expense.date
         if let vc = expense.variableCategory { selectedVariableCategory = vc }
+        // [v25.615] nil 防線（§2.4）：讀不到類別的舊資料不停在預設的飲食
+        if expense.expenseType == .variable && expense.variableCategory == nil { selectedVariableCategory = .other }
         if let ts = expense.taxSavingSubCategory { selectedTaxSavingSubCategory = ts }
         if let ss = expense.socialSubCategory { selectedSocialSubCategory = ss }
         if let raw = expense.socialRecipient, !raw.isEmpty {
@@ -4491,7 +4685,19 @@ struct AddExpenseView: View {
         }
         taxDeductibleOverride = expense.taxDeductibleOverride
         if let fc = expense.fixedCategory { selectedFixedCategory = fc }
+        // [v25.615] nil 防線（§2.4）：讀不到類別的舊資料不停在預設的房租（存下去會被當成租金扣除）
+        if expense.expenseType == .fixed && expense.fixedCategory == nil { selectedFixedCategory = .other }
+        // [v25.615] 細項：對得上（ExpenseKindIndex.kind(of:)）就停在「稅費」＋那個細項
+        if expense.expenseType == .fixed, let hit = ExpenseKindStore.shared.index.kind(of: expense), hit.kind.isTaxOrFee {
+            fixedTaxPicked = true
+            selectedKind = hit.kind
+            loadedKind = hit.kind
+            taxKindSeeded = true
+        }
         if let rec = expense.recurrence { selectedRecurrence = rec }
+        // [v25.615] 打開舊資料：週期是那筆自己的（不是預設每月）。改選「稅費」時不自動改每年
+        //（金額沒跟著改：每月 300 的那筆會變成每年 300）
+        if expense.expenseType == .fixed { recurrenceTouched = true }
         if let sub = expense.insuranceSubCategory { selectedInsuranceSubCategory = sub }
         if let sub = expense.loanSubCategory { selectedLoanSubCategory = sub }
         // 多選人員：以「、」分隔；向下相容單名格式（split 仍會回傳一個元素）
@@ -4626,6 +4832,8 @@ struct AddExpenseView: View {
                 if let reCat = expense.realEstateExpenseCategory {
                     selectedRealEstateExpenseCategory = reCat
                 }
+                // [v25.615] nil 防線（§2.4）：讀不到子分類的舊資料不停在預設的裝修
+                if expense.realEstateExpenseCategory == nil { selectedRealEstateExpenseCategory = .other }
                 // [v25.530] 水電瓦斯：選擇器帶出原本那筆繳費紀錄的類型，存檔時沿用、不重猜
                 selectedUtilityType = financeStore.realEstates
                     .flatMap { $0.utilityPayments }
@@ -4823,6 +5031,13 @@ struct AddExpenseView: View {
             // 以及使用者是不是已經挑過地點了）
             fillPlaceFromStop(linkedTripStopId)
         }
+        // [v25.615] 房屋卡〔＋ 記一筆〕→ 稅費：停在「稅費」＋照月份猜的細項，名稱空白帶「一日拾樂-地價稅」
+        if let k = preset.kind, preset.fixedCategory == .other {
+            fixedTaxPicked = true
+            selectedKind = k
+            taxKindSeeded = true
+            applyAutoTitleIfLinked()
+        }
     }
 }
 
@@ -4921,6 +5136,8 @@ struct AddExpensePreset {
     /// [v25.564] 財富：〔補記差額〕先填好金額、標題
     var amount: Double?
     var title: String?
+    /// [v25.615] 房屋卡〔＋ 記一筆〕→ 稅費：細項（照月份猜地價稅／房屋稅）；放最後，既有呼叫端不用改
+    var kind: ExpenseKind?
 }
 
 // MARK: - 水電瓦斯類型判斷
@@ -5041,6 +5258,58 @@ fileprivate struct PlaceSuggestion: Identifiable {
         case .past: return .green
         case .apple: return .orange
         }
+    }
+}
+
+// MARK: - [v25.615] 固定「稅費」的日期灰字、同年重複提示（拆成小 View／modifier：記帳表單 body 很長）
+
+/// 日期下一行：「房屋稅每年 5/1–5/31 繳。」〔改成 2026/5/31〕（按了才改日期）
+struct TaxDateHintRow: View {
+    let hint: ExpenseKindForm.DateHint
+    let onApply: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(hint.text)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Spacer(minLength: 4)
+            Button(hint.buttonTitle, action: onApply)
+                .font(.caption)
+                .buttonStyle(.borderless)
+        }
+    }
+}
+
+/// 「2025 已經記過一筆地價稅（一次性），要從 2026 開始嗎？」（每次問都是新的 id）
+struct TaxDuplicateAsk: Identifiable {
+    let id = UUID()
+    let kind: ExpenseKind
+    let year: Int
+
+    var title: String { ExpenseKindForm.duplicateTitle(kind: kind, year: year) }
+    /// 〔從 2026 開始〕
+    var shiftLabel: String { ExpenseKindForm.duplicateShiftButton(year: year) }
+    /// 〔照填的〕
+    var keepLabel: String { ExpenseKindForm.duplicateKeepButton }
+}
+
+/// 〔從 2026 開始〕〔照填的〕〔取消〕；選了叫 onPick（true＝從下一年開始），取消什麼都不做（不存）。照 AmountFromDialog
+struct TaxDuplicateDialog: ViewModifier {
+    @Binding var ask: TaxDuplicateAsk?
+    let onPick: (Bool) -> Void
+
+    func body(content: Content) -> some View {
+        content.confirmationDialog(ask?.title ?? "", isPresented: shown, titleVisibility: .visible,
+                                   presenting: ask) { a in
+            Button(a.shiftLabel) { onPick(true) }
+            Button(a.keepLabel) { onPick(false) }
+            Button("取消", role: .cancel) {}
+        }
+    }
+
+    private var shown: Binding<Bool> {
+        Binding(get: { ask != nil }, set: { if !$0 { ask = nil } })
     }
 }
 

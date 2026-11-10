@@ -57,7 +57,8 @@ struct FixedExpenseView: View {
     @State private var emptyIconPulse = false
     @State private var emptyPulseTask: Task<Void, Never>?
     @State private var categoryListAppeared = false
-    @State private var cachedGroupedByCategory: [(key: FixedCategory, value: [Expense])] = []
+    /// [v25.615] 分組 key 改 FixedGroup：有稅類／規費細項的「其他」歸「稅費」組（ExpenseKinds.swift）
+    @State private var cachedGroupedByCategory: [(key: FixedGroup, value: [Expense])] = []
     /// [v25.526] 最上面的看板（天空＋列車）。放在 .task(id: store.modifyID) 裡算
     @State private var board = FixedBoardData()
     /// [v25.524] 緊湊模式（變動支出、收入、固定支出三頁共用一個開關）
@@ -72,10 +73,12 @@ struct FixedExpenseView: View {
         return f
     }()
 
-    private func buildGroupedByCategory() -> [(key: FixedCategory, value: [Expense])] {
+    private func buildGroupedByCategory() -> [(key: FixedGroup, value: [Expense])] {
         let now = Date()
-        let grouped = Dictionary(grouping: store.fixedExpenses) { expense in
-            expense.fixedCategory ?? .other
+        // [v25.615] 細項只問 ExpenseKindStore.shared.index；每一筆只歸一組
+        let kinds = ExpenseKindStore.shared.index
+        let grouped = Dictionary(grouping: store.fixedExpenses) { (expense: Expense) -> FixedGroup in
+            FixedGroup.of(expense, kinds: kinds)
         }
         let sums = grouped.mapValues { exps in
             // 排序用 NT$ 等值（外幣儲蓄險換算後比較才公平）
@@ -291,10 +294,10 @@ struct FixedExpenseView: View {
         let ctx = MoneyItemContext(lifeStore: lifeStore, store: store)
 
         ForEach(Array(cachedGroupedByCategory.enumerated()), id: \.element.key) { groupIdx, pair in
-            let (category, expenses) = pair
-            Section(header: MoneyGroupHeader(theme: MoneyArtTheme.of(category), title: category.rawValue,
+            let (group, expenses) = pair
+            Section(header: MoneyGroupHeader(theme: MoneyArtTheme.of(group), title: group.title,
                                              count: expenses.count,
-                                             total: headerTotalText(category: category, expenses: expenses) + "/月")) {
+                                             total: headerTotalText(group: group, expenses: expenses) + "/月")) {
                 ForEach(Array(expenses.enumerated()), id: \.element.id) { rowIdx, expense in
                     MoneyItemCard(item: MoneyItem.fixed(expense, ctx: ctx, financeStore: financeStore),
                                   compact: compact)
@@ -335,10 +338,11 @@ struct FixedExpenseView: View {
     /// 就已換算成 NT$（見 AddExpenseView.saveExpense() 的 amount 計算），currencyCode 卻仍
     /// 保留原幣別代碼。直接用 currencyCode 分組會把已換算的 NT$ 金額誤標成外幣顯示
     /// （例如 100 美元保費換算後存成 NT$3,100，卻顯示成「USD 3,100」），所以用 headerCurrencyCode 分組。
-    private func headerTotalText(category: FixedCategory, expenses: [Expense]) -> String {
+    private func headerTotalText(group: FixedGroup, expenses: [Expense]) -> String {
         let now = Date()
         let active = expenses.filter { $0.date <= now && !$0.isFixedEnded }
-        guard category == .insurance else {
+        // [v25.615] 「稅費」組照一般分類算每月等值（地價稅 3,600＋房屋稅 1,200 → NT$400）
+        guard group == .category(.insurance) else {
             return formatCurrency(active.reduce(0) { $0 + monthlyEquivalent($1) })
         }
         let byCurrency = Dictionary(grouping: active) { headerCurrencyCode($0) }
@@ -473,7 +477,22 @@ struct FixedExpenseCard: View {
         let f = NumberFormatter(); f.numberStyle = .decimal; f.maximumFractionDigits = 0; return f
     }()
 
+    /// [v25.615] 這一筆有稅類／規費細項（只問 ExpenseKindStore.shared.index；ExpenseKinds.swift）
+    private var isTaxKind: Bool { ExpenseKindStore.shared.index.taxKind(of: current) != nil }
+    /// [v25.615] 有細項時類別寫「稅費・地價稅」；沒有細項＝nil（照舊寫 fixedCategory）
+    private var kindTitle: String? {
+        let kinds = ExpenseKindStore.shared.index
+        guard kinds.kind(of: current) != nil else { return nil }
+        return current.displayCategoryName(kinds: kinds)
+    }
+    /// [v25.615] 標題圖示：稅費用 building.columns.fill，其他照舊
+    private var titleIcon: String {
+        isTaxKind ? "building.columns.fill" : (current.fixedCategory?.icon ?? "pin.circle.fill")
+    }
+
     private var accent: Color {
+        // [v25.615] 稅費：MoneyArtTheme.tax 的 tint 5E6478
+        if isTaxKind { return Color(red: 0.37, green: 0.39, blue: 0.47) }
         switch current.fixedCategory {
         case .rent:         return .blue
         case .utilities:    return Color(red: 1.0, green: 0.75, blue: 0.10)
@@ -502,7 +521,7 @@ struct FixedExpenseCard: View {
                 .padding()
             }
             .background(Color(.systemGroupedBackground))
-            .navigationTitle(current.fixedCategory?.rawValue ?? "固定支出")
+            .navigationTitle(kindTitle ?? current.fixedCategory?.rawValue ?? "固定支出")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) { Button("關閉") { dismiss() } }
@@ -613,7 +632,7 @@ struct FixedExpenseCard: View {
         lines.append("📌 固定支出｜\(current.title.isEmpty ? "未命名項目" : current.title)")
         lines.append("━━━━━━━━━━")
         lines.append("💵 金額：\(formattedAmount)")
-        lines.append("🏷 類別：\(current.fixedCategory?.rawValue ?? "未分類")")
+        lines.append("🏷 類別：\(kindTitle ?? current.fixedCategory?.rawValue ?? "未分類")")
         if let recurrence = current.recurrence { lines.append("🔁 週期：\(recurrence.rawValue)") }
         lines.append("🗓 起始日期：\(Self.dateFmt.string(from: current.date))")
         if current.effectivelyTaxDeductible { lines.append("🧾 節稅：列入節稅追蹤") }
@@ -653,7 +672,7 @@ struct FixedExpenseCard: View {
                     .fill(LinearGradient(colors: [accent.opacity(0.22), accent.opacity(0.10)],
                                          startPoint: .topLeading, endPoint: .bottomTrailing))
                     .frame(width: 48, height: 48)
-                Image(systemName: current.fixedCategory?.icon ?? "pin.circle.fill")
+                Image(systemName: titleIcon)
                     .font(.system(size: 20, weight: .semibold)).foregroundStyle(accent)
             }
             VStack(alignment: .leading, spacing: 4) {
