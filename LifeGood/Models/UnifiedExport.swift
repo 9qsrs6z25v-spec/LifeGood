@@ -305,7 +305,9 @@ enum UnifiedExporter {
         // 記帳 - 支出
         csv += "## 支出 (Expenses)\n"
         // [v25.539] 加 fuelLiters（加油加了幾公升，選填；JSON 是 Expense 整筆編碼，自動帶上）
-        csv += "id,title,amount,date,type,category,recurrence,fuelLiters,note\n"
+        // [v25.617] 最後多一欄「細項」（地價稅、罰款…；舊欄位一字不變、位置不變）
+        csv += "id,title,amount,date,type,category,recurrence,fuelLiters,note,細項\n"
+        let kinds = ExpenseKindIndex(book: expense.expenseKinds ?? ExpenseKindBook())
         for e in expense.expenses.sorted(by: { $0.date < $1.date }) {
             let fields: [String] = [
                 e.id.uuidString,
@@ -316,7 +318,8 @@ enum UnifiedExporter {
                 e.categoryName,
                 e.recurrence?.rawValue ?? "",
                 e.fuelLiters.map { String(format: "%.2f", $0) } ?? "",
-                esc(e.note)
+                esc(e.note),
+                esc(kinds.kind(of: e)?.kind.raw ?? "")
             ]
             csv += fields.joined(separator: ",") + "\n"
         }

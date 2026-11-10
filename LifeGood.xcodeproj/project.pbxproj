@@ -272,6 +272,7 @@
 		A01B000001001658 /* ExpenseAmountEdit.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001658 /* ExpenseAmountEdit.swift */; };
 		A01B000001001659 /* ExpenseKinds.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001659 /* ExpenseKinds.swift */; };
 		A01B000001001660 /* ExpenseKindTidySheet.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001660 /* ExpenseKindTidySheet.swift */; };
+		A01B000001001661 /* TaxPaidSections.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001661 /* TaxPaidSections.swift */; };
 		A01B000001001619 /* OrgMoveCardParts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001619 /* OrgMoveCardParts.swift */; };
 		A01B000001001621 /* OrgMoveWizardRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001621 /* OrgMoveWizardRows.swift */; };
 		A01B000001001623 /* OrgMoveDueViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001623 /* OrgMoveDueViews.swift */; };
@@ -676,6 +677,7 @@
 		A01A000001001658 /* ExpenseAmountEdit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExpenseAmountEdit.swift; sourceTree = "<group>"; };
 		A01A000001001659 /* ExpenseKinds.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExpenseKinds.swift; sourceTree = "<group>"; };
 		A01A000001001660 /* ExpenseKindTidySheet.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = ExpenseKindTidySheet.swift; sourceTree = "<group>"; };
+		A01A000001001661 /* TaxPaidSections.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TaxPaidSections.swift; sourceTree = "<group>"; };
 		A01A000001001619 /* OrgMoveCardParts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveCardParts.swift; sourceTree = "<group>"; };
 		A01A000001001621 /* OrgMoveWizardRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveWizardRows.swift; sourceTree = "<group>"; };
 		A01A000001001623 /* OrgMoveDueViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveDueViews.swift; sourceTree = "<group>"; };
@@ -1203,6 +1205,7 @@
 				A01A000001000099 /* SubordinateOverviewView.swift */,
 				A01A00000100009A /* BusinessCardView.swift */,
 				A01A00000100009B /* TaxOverviewView.swift */,
+				A01A000001001661 /* TaxPaidSections.swift */,
 				A01A000001000035 /* GradeTitleView.swift */,
 				A01A000001000036 /* SpouseResumeView.swift */,
 				A01A000001000037 /* ChildrenResumeView.swift */,
@@ -1735,6 +1738,7 @@
 				A01B000001001658 /* ExpenseAmountEdit.swift in Sources */,
 				A01B000001001659 /* ExpenseKinds.swift in Sources */,
 				A01B000001001660 /* ExpenseKindTidySheet.swift in Sources */,
+				A01B000001001661 /* TaxPaidSections.swift in Sources */,
 				A01B000001001619 /* OrgMoveCardParts.swift in Sources */,
 				A01B000001001621 /* OrgMoveWizardRows.swift in Sources */,
 				A01B000001001623 /* OrgMoveDueViews.swift in Sources */,
@@ -2137,7 +2141,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 1369;
+				CURRENT_PROJECT_VERSION = 1370;
 				DEBUG_INFORMATION_FORMAT = dwarf;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
 				ENABLE_TESTABILITY = YES;
@@ -2158,7 +2162,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MARKETING_VERSION = 25.616;
+				MARKETING_VERSION = 25.617;
 				MTL_ENABLE_DEBUG_INFO = INCLUDE_SOURCE;
 				MTL_FAST_MATH = YES;
 				ONLY_ACTIVE_ARCH = YES;
@@ -2202,7 +2206,7 @@
 				CLANG_WARN_UNREACHABLE_CODE = YES;
 				CLANG_WARN__DUPLICATE_METHOD_MATCH = YES;
 				COPY_PHASE_STRIP = NO;
-				CURRENT_PROJECT_VERSION = 1369;
+				CURRENT_PROJECT_VERSION = 1370;
 				DEBUG_INFORMATION_FORMAT = "dwarf-with-dsym";
 				ENABLE_NS_ASSERTIONS = NO;
 				ENABLE_STRICT_OBJC_MSGSEND = YES;
@@ -2217,7 +2221,7 @@
 				GCC_WARN_UNUSED_VARIABLE = YES;
 				IPHONEOS_DEPLOYMENT_TARGET = 18.0;
 				LOCALIZATION_PREFERS_STRING_CATALOGS = YES;
-				MARKETING_VERSION = 25.616;
+				MARKETING_VERSION = 25.617;
 				MTL_ENABLE_DEBUG_INFO = NO;
 				MTL_FAST_MATH = YES;
 				SDKROOT = iphoneos;

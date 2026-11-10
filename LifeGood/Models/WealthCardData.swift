@@ -531,7 +531,7 @@ struct WealthCardData {
                               masked: masked, rateDate: AppQuoteClock.ratesUpdatedAt,
                               depositBankIds: Set(life.wealthDeposits.all.map { $0.bankId }),
                               vault: life.wealthVault.entry(m.id),
-                              tripNames: Self.tripNames(life.tripPlans))
+                              tripNames: Self.tripNames(life.tripPlans), kinds: ExpenseKindStore.shared.index)
         switch m.financeSubCategory ?? .bank {
         case .creditCard:
             guard let c = facts.card(id) else { return nil }
@@ -569,6 +569,8 @@ private struct WealthCardCtx {
     let vault: WealthVaultEntry
     /// [v25.571] 旅遊規劃的名字（刷卡那一列的小字寫「交通・韓國三日遊」；記帳那筆連了哪一趟就寫哪一趟）
     var tripNames: [UUID: String] = [:]
+    /// [v25.617] 記帳的細項（刷卡那一列的分類字「稅費」；build 傳 ExpenseKindStore.shared.index）
+    var kinds: ExpenseKindIndex = ExpenseKindIndex.empty
 }
 
 // MARK: - 字
@@ -622,6 +624,12 @@ enum WealthCardText {
             }
         }
         return e.variableCategory?.rawValue ?? "其他"
+    }
+
+    /// [v25.617] 先看細項：固定「其他」有稅類／規費細項的寫「稅費」；其他照 categoryName(_:)
+    static func categoryName(_ e: Expense?, kinds: ExpenseKindIndex) -> String {
+        if let e, e.expenseType == .fixed, FixedGroup.of(e, kinds: kinds) == .tax { return FixedGroup.tax.title }
+        return categoryName(e)
     }
 
     /// 定期扣款多久一次「每月 6 日」「每季 6 日」「每年 8/15」
@@ -807,7 +815,7 @@ extension WealthCardData {
     fileprivate static func entryRow(_ e: WealthCardEntry, x: WealthCardCtx, shifted: Bool) -> WealthCardRow {
         let exp = x.expensesById[e.expenseId]
         let title = exp?.title ?? "刷卡"
-        let cat = WealthCardText.categoryName(exp)
+        let cat = WealthCardText.categoryName(exp, kinds: x.kinds)
         let theme = exp.map { MoneyArtTheme.of($0) } ?? MoneyArtTheme.misc
         let isFixed = exp?.expenseType == .fixed
         let amount = x.masked ? WealthCardText.dots : WealthFormat.grouped(e.amount.rounded(), decimals: 0)
@@ -1126,7 +1134,7 @@ extension WealthCardData {
         var themes: [String: MoneyArtTheme] = [:]
         for e in entries {
             let exp = x.expensesById[e.expenseId]
-            let cat = WealthCardText.categoryName(exp)
+            let cat = WealthCardText.categoryName(exp, kinds: x.kinds)
             sums[cat, default: 0] += e.amount
             if themes[cat] == nil { themes[cat] = exp.map { MoneyArtTheme.of($0) } ?? MoneyArtTheme.misc }
         }

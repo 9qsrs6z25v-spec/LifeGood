@@ -93,14 +93,6 @@ struct TaxOverviewView: View {
 
     // MARK: - 商業邏輯（不動）
 
-    private var taxExpenses: [Expense] {
-        expenseStore.expenses.filter {
-            $0.variableCategory == .tax &&
-            Calendar.current.component(.year, from: $0.date) == selectedYear
-        }
-        .sorted { $0.date > $1.date }
-    }
-
     private var taxSavingExpenses: [Expense] {
         expenseStore.expenses.filter {
             $0.variableCategory == .taxSaving &&
@@ -159,26 +151,8 @@ struct TaxOverviewView: View {
         }
     }
 
-    private func taxByMonth(_ exps: [Expense]) -> [(month: Int, amount: Double)] {
-        let cal = Calendar.current
-        // 用 Dictionary(grouping:) 一次分組取代「12 次全量 filter」，避免 O(12n) 重複掃描
-        let byMonth = Dictionary(grouping: exps) { cal.component(.month, from: $0.date) }
-        var result: [(Int, Double)] = []
-        for m in 1...12 {
-            let amount = (byMonth[m] ?? []).reduce(0) { $0 + $1.amount }
-            if amount > 0 { result.append((m, amount)) }
-        }
-        return result
-    }
-
     private var realEstateCount: Int { financeStore.realEstates.filter { !$0.isSold }.count }
     private var vehicleCount: Int { financeStore.vehicles.filter { !$0.isSold }.count }
-    /// [v25.538] 汽機車燃料費只有會燒油的車要繳（油車、油電的混合動力、機車），電車、電動機車不用
-    private var hasFuelVehicle: Bool {
-        financeStore.vehicles.contains { v in
-            !v.isSold && (v.powerType == .gasoline || v.powerType == .hybrid || v.powerType == .motorcycle)
-        }
-    }
 
     private var estimatedAnnualIncome: Double {
         // 對齊 yearEquivalentAmount(_:year:) 的口徑：monthly／yearly 這種週期性收入也要以
@@ -202,6 +176,52 @@ struct TaxOverviewView: View {
         }
     }
 
+    // MARK: - [v25.617] 稅費紀錄（TaxPaid；ExpenseKinds.swift）
+    // 一般變動稅費＋房子變動稅費＋固定稅費（一期一列）＋車子規費；罰款另一行；檢核三態與排除。
+    // 規則都在 ExpenseKinds.swift 的 TaxPaid（sim_govfee3 驗），這裡只叫一次、只排版。
+
+    private var taxSummary: TaxPaidSummary {
+        TaxPaid.summary(year: selectedYear, expenses: expenseStore.expenses, kinds: ExpenseKindStore.shared.index,
+                        rates: FinanceRates(expenseStore), estates: financeStore.realEstates,
+                        vehicles: financeStore.vehicles, hasIncome: estimatedAnnualIncome > 0,
+                        now: Date(), calendar: Calendar.current)
+    }
+    private var estateNames: [UUID: String] { Dictionary(financeStore.realEstates.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a }) }
+    private var vehicleNames: [UUID: String] { Dictionary(financeStore.vehicles.map { ($0.id, $0.name) }, uniquingKeysWith: { a, _ in a }) }
+    private var expensesById: [UUID: Expense] { Dictionary(expenseStore.expenses.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a }) }
+
+    /// 稅費紀錄／罰款每一列的字（名稱、日期、來源膠囊、金額）；罰款列名照那筆名稱（空的寫「罰款」）
+    private func rowTexts(_ list: [TaxPaidRecord], fines: Bool) -> [TaxPaidRowText] {
+        let byId: [UUID: Expense] = expensesById
+        let eNames: [UUID: String] = estateNames
+        let vNames: [UUID: String] = vehicleNames
+        return list.map { (r: TaxPaidRecord) -> TaxPaidRowText in
+            let exp: Expense? = byId[r.expenseId]
+            let title: String = fines ? fineTitle(exp) : TaxPaid.rowTitle(r, expense: exp)
+            let chips: [String] = TaxPaid.sourceChips(r.source, estateNames: eNames, vehicleNames: vNames)
+            return TaxPaidRowText(id: r.id, title: title, dateText: fmtDate(r.periodDate),
+                                  chips: chips, amountText: fmt(r.amountNTD))
+        }
+    }
+
+    private func fineTitle(_ e: Expense?) -> String {
+        let t: String = e?.title.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return t.isEmpty ? "罰款" : t
+    }
+
+    /// 檢核每一列的顏色（照 25.616 以前的對應）
+    private func checkColor(_ title: String) -> Color {
+        switch title {
+        case "綜合所得稅申報": return .indigo
+        case "房屋稅繳納": return .blue
+        case "汽機車使用牌照稅": return .orange
+        case "地價稅繳納": return .purple
+        case "汽機車燃料費": return .teal
+        case "二代健保補充保費": return .green
+        default: return .gray
+        }
+    }
+
     // MARK: - 主體
 
     var body: some View {
@@ -209,14 +229,13 @@ struct TaxOverviewView: View {
         let breakdown = taxSavingBySub
         let savingTotal = taxSavingExpenses.reduce(0.0) { $0 + $1.amount }
             + breakdown.values.reduce(0.0) { $0 + $1.fixed }
-        // taxExpenses 是 filter+sort（O(n log n)），一次算好供 annualSummaryCard／
-        // taxRecordsSection／monthlyBreakdown 共用，避免同一次 body 求值各自重跑三次。
-        let exps = taxExpenses
+        // [v25.617] 稅費紀錄、罰款、月份分佈、檢核一次算好（TaxPaid；ExpenseKinds.swift），各區塊共用
+        let sum = taxSummary
         return NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
                     yearPicker
-                    annualSummaryCard(savingTotal, exps: exps)
+                    annualSummaryCard(savingTotal, sum: sum)
                         .opacity(heroCardAppeared ? 1 : 0)
                         .offset(y: heroCardAppeared ? 0 : 20)
                         .onAppear {
@@ -224,10 +243,11 @@ struct TaxOverviewView: View {
                                 heroCardAppeared = true
                             }
                         }
-                    taxRecordsSection(exps)
-                    monthlyBreakdown(exps)
+                    taxRecordsSection(sum)
+                    monthlyBreakdown(sum.byMonth)
                     taxSavingSection(savingTotal, breakdown: breakdown)
-                    taxChecklistSection
+                    taxChecklistSection(sum)
+                    TaxNotesBlock()
                     deductionTipsSection(breakdown: breakdown)
                 }
                 .padding(.vertical)
@@ -352,8 +372,9 @@ struct TaxOverviewView: View {
 
     // MARK: - 年度摘要英雄卡（升級：紅橘漸層 + 散景裝飾 + KPI 統計行）
 
-    private func annualSummaryCard(_ savingTotal: Double, exps: [Expense]) -> some View {
-        let taxTotal = exps.reduce(0) { $0 + $1.amount }
+    private func annualSummaryCard(_ savingTotal: Double, sum: TaxPaidSummary) -> some View {
+        // [v25.617] 年度稅費＝TaxPaid 的 total（不含罰款；罰款另一行在稅費紀錄下面）
+        let taxTotal = sum.total
         let taxRatio = estimatedAnnualIncome > 0 ? taxTotal / estimatedAnnualIncome * 100 : 0
 
         return VStack(spacing: 0) {
@@ -416,7 +437,7 @@ struct TaxOverviewView: View {
                 HeroKpiCell(label: "持有車輛", value: "\(vehicleCount) 台",
                             icon: "car.fill", valueColor: Color(red: 1.00, green: 0.72, blue: 0.20))
                 HeroKpiDivider()
-                HeroKpiCell(label: "稅費筆數", value: "\(exps.count) 筆",
+                HeroKpiCell(label: "稅費筆數", value: "\(sum.records.count) 筆",
                             icon: "doc.text.fill", valueColor: Color(red: 1.00, green: 0.78, blue: 0.75))
                 HeroKpiDivider()
                 HeroKpiCell(label: "節稅累積", value: fmt(savingTotal),
@@ -433,12 +454,16 @@ struct TaxOverviewView: View {
 
     // MARK: - 稅費紀錄（升級：漸層圖示圓 + 日期膠囊 + 空狀態佔位）
 
-    private func taxRecordsSection(_ exps: [Expense]) -> some View {
-        VStack(alignment: .leading, spacing: 0) {
+    private func taxRecordsSection(_ sum: TaxPaidSummary) -> some View {
+        // [v25.617] 一期一列（TaxPaid.records）＋來源膠囊；罰款另一行（點開列出），不算進上面的年度稅費
+        let rows: [TaxPaidRowText] = rowTexts(sum.records, fines: false)
+        let fineRows: [TaxPaidRowText] = rowTexts(sum.fines, fines: true)
+        let showsRecurringFooter: Bool = sum.records.contains { TaxPaid.isRecurring($0.source) }
+        return VStack(alignment: .leading, spacing: 0) {
             sectionHeader("稅費紀錄", icon: "list.bullet.rectangle", color: .red,
-                          count: exps.isEmpty ? nil : exps.count)
+                          count: rows.isEmpty ? nil : rows.count)
 
-            if exps.isEmpty {
+            if rows.isEmpty {
                 // [v2] 雙層脈衝光環空狀態（對齊 VariableExpenseView.emptyStateView 規格）
                 VStack(spacing: 16) {
                     ZStack {
@@ -478,55 +503,17 @@ struct TaxOverviewView: View {
                 .padding(.vertical, 30)
             } else {
                 // [v2] 44pt 漸層圓 + 左側 4pt 強調條 + 交錯進場動畫（對齊 ExpenseRow / FixedExpenseRow）
-                ForEach(Array(exps.enumerated()), id: \.element.id) { idx, exp in
-                    HStack(spacing: 0) {
-                        RoundedRectangle(cornerRadius: 2)
-                            .fill(LinearGradient(
-                                colors: [Color.red.opacity(0.85), Color.red.opacity(0.35)],
-                                startPoint: .top, endPoint: .bottom))
-                            .frame(width: 4)
-                            .padding(.vertical, 10)
-                            .padding(.trailing, 14)
-                        HStack(spacing: 12) {
-                            ZStack {
-                                Circle()
-                                    .fill(LinearGradient(
-                                        colors: [Color.red.opacity(0.20), Color.red.opacity(0.08)],
-                                        startPoint: .topLeading, endPoint: .bottomTrailing))
-                                    .frame(width: 44, height: 44)
-                                    .shadow(color: Color.red.opacity(0.20), radius: 6, x: 0, y: 3)
-                                Image(systemName: "doc.text.fill")
-                                    .font(.system(size: 18, weight: .semibold))
-                                    .foregroundStyle(Color.red.opacity(0.85))
-                            }
-                            VStack(alignment: .leading, spacing: 3) {
-                                // [v25.520] 名稱過長改跑馬燈（原本 lineLimit(1) 切成「…」）
-                                MarqueeText(exp.title)
-                                    .font(.subheadline.weight(.semibold))
-                                Text(fmtDate(exp.date))
-                                    .font(.system(size: 10, weight: .medium))
-                                    .foregroundStyle(.secondary)
-                                    .padding(.horizontal, 7).padding(.vertical, 2)
-                                    .background(Color(.tertiarySystemFill))
-                                    .clipShape(Capsule())
-                            }
-                            Spacer(minLength: 4)
-                            Text(fmt(exp.amount))
-                                .font(.system(size: 15, weight: .bold, design: .rounded))
-                                .foregroundStyle(Color.red.opacity(0.85))
-                                .contentTransition(.numericText())
-                        }
-                        .padding(.trailing, 14)
-                        .padding(.vertical, 10)
-                    }
-                    .opacity(taxRowsAppeared ? 1 : 0)
-                    .offset(y: taxRowsAppeared ? 0 : 12)
-                    .animation(
-                        .spring(response: 0.44, dampingFraction: 0.82).delay(0.05 * Double(idx)),
-                        value: taxRowsAppeared
-                    )
+                // [v25.617] 一列拆成 TaxPaidRecordRow（TaxPaidSections.swift）：多來源膠囊
+                ForEach(Array(rows.enumerated()), id: \.element.id) { idx, row in
+                    TaxPaidRecordRow(row: row)
+                        .opacity(taxRowsAppeared ? 1 : 0)
+                        .offset(y: taxRowsAppeared ? 0 : 12)
+                        .animation(
+                            .spring(response: 0.44, dampingFraction: 0.82).delay(0.05 * Double(idx)),
+                            value: taxRowsAppeared
+                        )
 
-                    if idx < exps.count - 1 {
+                    if idx < rows.count - 1 {
                         Divider().padding(.leading, 72)
                     }
                 }
@@ -536,6 +523,21 @@ struct TaxOverviewView: View {
                         taxRowsAppeared = true
                     }
                 }
+
+                if showsRecurringFooter {
+                    Text(TaxPaidText.recurringFooter)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .padding(.horizontal, 14)
+                        .padding(.bottom, 10)
+                }
+            }
+
+            if !fineRows.isEmpty {
+                Divider().padding(.horizontal, 14)
+                TaxFinesBlock(line: TaxPaidText.finesLine(fmt(sum.finesTotal), count: sum.fines.count),
+                              rows: fineRows)
             }
         }
         .background(Color(.systemBackground))
@@ -547,8 +549,8 @@ struct TaxOverviewView: View {
     // MARK: - 月份分佈（升級：漸層 Capsule + 進場動畫 + 月份膠囊徽章）
 
     @ViewBuilder
-    private func monthlyBreakdown(_ exps: [Expense]) -> some View {
-        let byMonth = taxByMonth(exps)
+    private func monthlyBreakdown(_ byMonth: [TaxPaidMonth]) -> some View {
+        // [v25.617] 照 TaxPaid.byMonth（固定那一期照扣款日；不含罰款）
         if !byMonth.isEmpty {
             VStack(alignment: .leading, spacing: 0) {
                 sectionHeader("月份分佈", icon: "calendar", color: .orange,
@@ -634,85 +636,45 @@ struct TaxOverviewView: View {
 
     // MARK: - 年度稅務檢核（升級：彩色圖示圓 + 月份膠囊 + 列間 Divider）
 
-    private var taxChecklistSection: some View {
-        // [v25.538] 使用牌照稅 4 月開徵、汽車燃料使用費 7 月開徵（以前兩個月份寫反）；
-        // 燃料費只有油車、油電、機車要繳，沒有這種車就不列（電車、電動機車不用繳）
-        var list: [(month: String, title: String, relevant: Bool, color: Color)] = [
-            ("5月",  "綜合所得稅申報",     selectedYear < Calendar.current.component(.year, from: Date()), .indigo),
-            ("5月",  "房屋稅繳納",         realEstateCount > 0,        .blue),
-            ("4月",  "汽機車使用牌照稅",    vehicleCount > 0,            .orange),
-            ("11月", "地價稅繳納",         realEstateCount > 0,        .purple),
-            ("全年", "二代健保補充保費",    estimatedAnnualIncome > 0,  .green),
-        ]
-        if hasFuelVehicle {
-            list.insert((month: "7月", title: "汽機車燃料費", relevant: true, color: .teal), at: 4)
-        }
-        let items = list
-
-        let relevantCount = items.filter(\.relevant).count
+    private func taxChecklistSection(_ sum: TaxPaidSummary) -> some View {
+        // [v25.538] 使用牌照稅 4 月開徵、汽車燃料使用費 7 月開徵（以前兩個月份寫反）
+        // [v25.617] 清單、狀態（已記／還沒到／還沒看到紀錄／不用查／應注意）、排除都在 TaxPaid.checks；
+        // 燃料費只查油車、油電（機車、電車不要求）。下面一句一句的提示＝sum.hints（可能是稅費、名稱有「罰」）
+        let items: [TaxCheckItem] = sum.checks
+        let hints: [String] = sum.hints
+        let attentionCount: Int = items.filter { $0.state == .missing || $0.state == .reminder }.count
         return VStack(alignment: .leading, spacing: 0) {
             sectionHeader("年度稅務檢核", icon: "checkmark.square.fill", color: .green,
-                          count: relevantCount > 0 ? relevantCount : nil)
+                          count: attentionCount > 0 ? attentionCount : nil)
 
             // [v2] 交錯淡入進場動畫（對齊 taxRecordsSection stagger 規格）
-            ForEach(items.indices, id: \.self) { i in
-                let item = items[i]
-                HStack(spacing: 12) {
-                    // 狀態圖示圓
-                    ZStack {
-                        Circle()
-                            .fill(
-                                item.relevant
-                                ? LinearGradient(colors: [item.color.opacity(0.20), item.color.opacity(0.08)],
-                                                 startPoint: .topLeading, endPoint: .bottomTrailing)
-                                : LinearGradient(colors: [Color(.systemFill), Color(.systemFill)],
-                                                 startPoint: .topLeading, endPoint: .bottomTrailing)
-                            )
-                            .frame(width: 36, height: 36)
-                        Image(systemName: item.relevant ? "checkmark.circle.fill" : "circle")
-                            .font(.system(size: 16, weight: .medium))
-                            .foregroundStyle(item.relevant ? item.color : Color(.tertiaryLabel))
-                    }
-
-                    VStack(alignment: .leading, spacing: 3) {
-                        Text(item.title)
-                            .font(.subheadline.weight(item.relevant ? .semibold : .regular))
-                            .foregroundStyle(item.relevant ? .primary : .secondary)
-                        // 月份膠囊
-                        Text(item.month)
-                            .font(.system(size: 9, weight: .semibold))
-                            .foregroundStyle(item.relevant ? item.color : .secondary)
-                            .padding(.horizontal, 7).padding(.vertical, 2)
-                            .background((item.relevant ? item.color : Color.secondary).opacity(0.10))
-                            .clipShape(Capsule())
-                    }
-
-                    Spacer(minLength: 4)
-
-                    if item.relevant {
-                        Text("應注意")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.orange)
-                            .padding(.horizontal, 8).padding(.vertical, 3)
-                            .background(Color.orange.opacity(0.12))
-                            .clipShape(Capsule())
-                            .overlay(Capsule().stroke(Color.orange.opacity(0.22), lineWidth: 0.6))
-                    }
-                }
-                .padding(.horizontal, 14)
-                .padding(.vertical, 10)
-                .opacity(checklistRowsAppeared ? 1 : 0)
-                .offset(y: checklistRowsAppeared ? 0 : 12)
-                .animation(
-                    .spring(response: 0.44, dampingFraction: 0.82).delay(0.05 * Double(i)),
-                    value: checklistRowsAppeared
-                )
+            // [v25.617] 用 TaxCheckItem.id（＝標題）：燃料費那一列會因年份有無，不用 index 當身分
+            ForEach(Array(items.enumerated()), id: \.element.id) { i, item in
+                TaxCheckRow(item: item, color: checkColor(item.title))
+                    .padding(.horizontal, 14)
+                    .padding(.vertical, 10)
+                    .opacity(checklistRowsAppeared ? 1 : 0)
+                    .offset(y: checklistRowsAppeared ? 0 : 12)
+                    .animation(
+                        .spring(response: 0.44, dampingFraction: 0.82).delay(0.05 * Double(i)),
+                        value: checklistRowsAppeared
+                    )
 
                 if i < items.count - 1 {
                     Divider().padding(.leading, 62)
                 }
             }
             .padding(.bottom, 4)
+
+            if !hints.isEmpty {
+                VStack(alignment: .leading, spacing: 6) {
+                    ForEach(hints, id: \.self) { h in
+                        TaxHintRow(text: h)
+                    }
+                }
+                .padding(.horizontal, 14)
+                .padding(.bottom, 12)
+            }
         }
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))

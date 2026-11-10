@@ -847,6 +847,7 @@ extension MoneyItem {
 
     /// 變動支出（也用在總覽的最近交易）
     static func expense(_ e: Expense, ctx: MoneyItemContext, badge: String?) -> MoneyItem {
+        let kinds = ExpenseKindStore.shared.index    // [v25.617] 列上的字「汽車 - 罰款」「房地產 - 地價稅」
         let seed = Self.seed(e.id)
         let title = Self.title(e)
         // 位置：自己的座標，沒有就借綁定的那一站
@@ -889,7 +890,7 @@ extension MoneyItem {
 
         return MoneyItem(
             id: e.id, theme: MoneyArtTheme.of(e), seed: seed, title: title,
-            amount: amountText(e, ctx: ctx), category: e.categoryName,
+            amount: amountText(e, ctx: ctx), category: e.displayCategoryName(kinds: kinds),
             detail: parts.isEmpty ? nil : parts.joined(separator: "・"),
             badge: badge, chips: chips,
             photoURL: photos.first.map { Expense.photoURL(for: $0) },
@@ -902,9 +903,10 @@ extension MoneyItem {
     /// 固定支出
     static func fixed(_ e: Expense, ctx: MoneyItemContext, financeStore: FinanceStore,
                       now: Date = Date()) -> MoneyItem {
+        let kinds = ExpenseKindStore.shared.index    // [v25.617] 列上的字「稅費・地價稅」、插畫照 FixedGroup（稅費那張）
         let seed = Self.seed(e.id)
         let title = Self.title(e)
-        let theme = MoneyArtTheme.of(e.fixedCategory)
+        let theme = MoneyArtTheme.of(FixedGroup.of(e, kinds: kinds))
         let cal = Calendar.current
         let isSavingsIns = e.fixedCategory == .insurance && e.insuranceSubCategory == .savings
         let foreign = e.currencyCode != "NT$" && e.currencyCode != "TWD" && !e.currencyCode.isEmpty
@@ -988,7 +990,7 @@ extension MoneyItem {
 
         return MoneyItem(
             id: e.id, theme: theme, seed: seed, title: title,
-            amount: amountText(e, ctx: ctx), unit: unit, category: e.categoryName,
+            amount: amountText(e, ctx: ctx), unit: unit, category: e.displayCategoryName(kinds: kinds),
             detail: detail, badge: e.recurrence?.rawValue, chips: chips,
             photoURL: e.photoFileNames.first { !$0.lowercased().hasSuffix(".pdf") }
                 .map { Expense.photoURL(for: $0) },

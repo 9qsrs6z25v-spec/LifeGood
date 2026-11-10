@@ -661,14 +661,16 @@ class ExpenseStore: ObservableObject {
     }
 
     /// 固定支出依分類加總（用 projectedAmount 投射至所選時間單位，所以比例不受區間影響）
-    func fixedBreakdown(for period: TimePeriod) -> [(category: FixedCategory, amount: Double)] {
+    /// [v25.617] 分組改 FixedGroup：有稅類／規費細項的「其他」歸「稅費」（各組合計跟以前一樣，只是稅費從其他拆出來；讀不到類別的照舊不算）
+    func fixedBreakdown(for period: TimePeriod) -> [(group: FixedGroup, amount: Double)] {
         let calendar = Calendar.current
         let now = Date()
-        var dict: [FixedCategory: Double] = [:]
+        let kinds = ExpenseKindStore.shared.index
+        var dict: [FixedGroup: Double] = [:]
         for e in expenses where e.expenseType == .fixed && e.recurrence != nil
             && e.isFixedActive(on: now, calendar: calendar) {
-            guard let cat = e.fixedCategory else { continue }
-            dict[cat, default: 0] += projectedAmount(for: e, in: period)
+            guard e.fixedCategory != nil else { continue }
+            dict[FixedGroup.of(e, kinds: kinds), default: 0] += projectedAmount(for: e, in: period)
         }
         return dict.map { ($0.key, $0.value) }.sorted { $0.1 > $1.1 }
     }

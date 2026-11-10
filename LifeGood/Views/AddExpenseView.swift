@@ -118,6 +118,10 @@ struct AddExpenseView: View {
     @State private var selectedVehicleKind: ExpenseKind = VehicleKindForm.defaultTaxKind
     /// [v25.616] 打開舊資料帶回的車子稅費細項（清單沒有它時也列出來）
     @State private var loadedVehicleKind: ExpenseKind?
+    /// [v25.617] 房子變動「稅費」的細項（nil＝不指定，預設）
+    @State private var selectedReKind: ExpenseKind?
+    /// [v25.617] 打開舊資料帶回的房子稅費細項（清單沒有它時也列出來）
+    @State private var loadedReKind: ExpenseKind?
     @State private var selectedRecurrence: Recurrence = .monthly
     /// [v25.347] 固定支出的停止（結束日＝最後一次扣款日）
     @State private var hasEndDate = false
@@ -534,8 +538,9 @@ struct AddExpenseView: View {
     }
 
     /// 存檔寫 tag 用：固定「稅費」（chosenKind，重複提示照舊只看它）或車子變動虛擬項
+    /// [v25.617] 也收房子變動「稅費」的細項（chosenReKind）
     private var savedKind: ExpenseKind? {
-        chosenKind ?? chosenVehicleKind
+        chosenKind ?? chosenVehicleKind ?? chosenReKind
     }
 
     /// 選了「罰款」（照片那一段基本模式也打開，好拍罰單）
@@ -605,6 +610,46 @@ struct AddExpenseView: View {
     private var oneTimeSwitchText: String {
         if case .vehicle = fixedKindLink { return VehicleKindForm.oneTimeSwitchText }
         return ExpenseKindForm.oneTimeSwitchText
+    }
+
+    // MARK: - [v25.617] 房子變動「稅費」的細項（規則在 RealEstateKindForm）
+
+    /// 細項清單（允許表 re.稅費）；打開舊資料帶回的不在清單裡時加在最後
+    private var reKindOptions: [ExpenseKind] {
+        var list: [ExpenseKind] = RealEstateKindForm.options
+        if let k = loadedReKind, !list.contains(k) {
+            list.append(k)
+        }
+        return list
+    }
+
+    /// 存檔寫 tag 用：變動、連房子、支出類別「稅費」才有；「不指定」＝nil
+    private var chosenReKind: ExpenseKind? {
+        guard expenseType == .variable, selectedAssetLink == .realEstate,
+              selectedRealEstateExpenseCategory == .tax else { return nil }
+        return selectedReKind
+    }
+
+    /// 房子變動「稅費」的細項選單（跟「水電類型」同一個樣子；第一項「不指定」）
+    @ViewBuilder
+    private var reTaxKindPicker: some View {
+        if selectedRealEstateExpenseCategory == .tax {
+            Picker("細項", selection: $selectedReKind) {
+                Text(RealEstateKindForm.unspecifiedLabel).tag(nil as ExpenseKind?)
+                ForEach(reKindOptions) { k in
+                    Text(RealEstateKindForm.label(k)).tag(k as ExpenseKind?)
+                }
+            }
+        }
+    }
+
+    /// 房地產那段的 footer：原本那句；選了「稅費」或「買房費用」多一行買房費用的提醒
+    private var realEstateSectionFooter: String {
+        let head: String = realEstateLinkExisting
+            ? "房屋價金將同步至已支出房屋金額章節，其餘類別同步至變動支出章節。"
+            : "儲存後將自動在理財模式建立房地產物件，並將本筆支出同步至對應章節。"
+        guard RealEstateKindForm.showsPurchaseCostFooter(selectedRealEstateExpenseCategory) else { return head }
+        return head + "\n" + RealEstateKindForm.purchaseCostFooter
     }
 
     /// [v25.538] 變動支出算不算連到車：關聯資產是汽車，而且分類還是「汽車」。
@@ -3138,12 +3183,12 @@ struct AddExpenseView: View {
                     }
                 }
             }
+            // [v25.617] 選了「稅費」多「細項」（第一項「不指定」）
+            reTaxKindPicker
         } header: {
             sectionHeader(title: "房地產（連動理財模式）", accentColor: .purple)
         } footer: {
-            Text(realEstateLinkExisting
-                 ? "房屋價金將同步至已支出房屋金額章節，其餘類別同步至變動支出章節。"
-                 : "儲存後將自動在理財模式建立房地產物件，並將本筆支出同步至對應章節。")
+            Text(realEstateSectionFooter)
         }
     }
 
@@ -4264,7 +4309,8 @@ struct AddExpenseView: View {
         let kindSaved = expense
         // [v25.616] 車子變動「稅費」「罰款」也一起（savedKind）；v2 規則（墓碑多管車子其他、推的那筆改掉記〔不是〕）
         let kindChosen = savedKind
-        DispatchQueue.main.async { ExpenseKindStore.shared.recordFormSave(kindSaved, kind: kindChosen) }
+        // [v25.617] v3 規則（墓碑多管房子變動「稅費」）：recordFormSaveV3
+        DispatchQueue.main.async { ExpenseKindStore.shared.recordFormSaveV3(kindSaved, kind: kindChosen) }
         syncBankWithdrawal(for: expense, previous: editingExpense)
         // [v25.567] 改了一筆保費：連著它的財富保單照寫一份舊欄位（里程碑保費、帳本繳法／從哪扣／下次；給醫療地圖、舊 iPad、網頁版）。
         // 先 dismiss，下一個 runloop 才寫（store 先抓進區域常數）；沒連保單的 policyExpenseChanged 自己什麼都不做
@@ -4967,6 +5013,11 @@ struct AddExpenseView: View {
                 }
                 if let reCat = expense.realEstateExpenseCategory {
                     selectedRealEstateExpenseCategory = reCat
+                    // [v25.617] 房子變動「稅費」：對得上（kind(of:)）就停在那個細項
+                    if reCat == .tax, let hit = ExpenseKindStore.shared.index.kind(of: expense) {
+                        selectedReKind = hit.kind
+                        loadedReKind = hit.kind
+                    }
                 }
                 // [v25.615] nil 防線（§2.4）：讀不到子分類的舊資料不停在預設的裝修
                 if expense.realEstateExpenseCategory == nil { selectedRealEstateExpenseCategory = .other }
@@ -5179,6 +5230,10 @@ struct AddExpenseView: View {
             vehicleVirtualPick = k == ExpenseKind.fine ? VehicleKindPick.fine : VehicleKindPick.tax
             if k != .fine { selectedVehicleKind = k }
             applyAutoTitleIfLinked()
+        }
+        // [v25.617] 房子變動「稅費」帶細項（現在沒有入口傳，先接好）
+        if let k = preset.kind, preset.realEstateExpenseCategory == .tax {
+            selectedReKind = k
         }
     }
 }

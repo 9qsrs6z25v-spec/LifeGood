@@ -140,7 +140,7 @@ struct ChartView: View {
     @State private var chartPageHeights: [ChartMode: CGFloat] = [:]
     /// 快取圓餅圖資料，避免 chartCarousel 與隱藏量測層各算一次（每次都是 O(n) 掃描）
     @State private var variableBreakdownCache: [(category: VariableCategory, amount: Double)] = []
-    @State private var fixedBreakdownCache: [(category: FixedCategory, amount: Double)] = []
+    @State private var fixedBreakdownCache: [(group: FixedGroup, amount: Double)] = []
     @State private var typeBreakdownAppeared = false
     // 各圖表空白態脈衝動畫獨立管理，避免量測層同時渲染三個圖表時共用旗標造成動畫互搶與閃爍
     @State private var trendEmptyPulse = false
@@ -752,7 +752,7 @@ struct ChartView: View {
             } else {
                 let total = entries.reduce(0) { $0 + $1.amount }
                 // [v3] 傳入 rowsAppearedBinding 控制圖例行交錯進場
-                pieChartBody(entries: entries.map { ($0.category.rawValue, MoneyArtTheme.of($0.category), $0.amount) },
+                pieChartBody(entries: entries.map { ($0.group.title, MoneyArtTheme.of($0.group), $0.amount) },
                              total: total, rowsAppeared: rowsAppearedBinding)
             }
         }

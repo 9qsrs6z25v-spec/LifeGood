@@ -19,6 +19,7 @@ import Foundation
 // [v3] 每一筆多寫 lockTitle：鎖定畫面「下一筆要繳」關掉「顯示名稱」時的類別字（v3 brief G1-7）——
 //      記帳固定支出寫分類（「訂閱服務」「電信費」…，沒分類或「其他」寫「固定支出」），
 //      理財寫「保費」「保單滿期」「房貸」，車子照 VehicleUpcoming.kind 寫「車貸」「保養」「車子費用」。
+// [v25.617] 固定「其他」有稅類／規費細項的寫「稅費」、色用 MoneyArtTheme.tax（FixedGroup）
 //
 // [財富 v4] v25.565（wealth/build/v4/brief.md §6 G2；judge §6.5、§7.1）：
 //   • 理財那幾件多兩種：卡費（.cardBill，一張卡一期一列：「CUBE 卡費」「自己繳・含 Spotify、Netflix」「NT$18,600」／
@@ -273,6 +274,7 @@ enum WidgetBillsBuilder {
                                     book: WealthBook, today: Date,
                                     horizonEnd: Date, calendar cal: Calendar) -> [WidgetBill] {
         var out: [WidgetBill] = []
+        let kinds = ExpenseKindStore.shared.index    // [v25.617] 稅費組的色、鎖定畫面「稅費」
         for ex in expense.expenses where ex.isRecurringFixed && !excluded.contains(ex.id) {
             let history: [WealthPayFrom]? = cardIds.isEmpty ? nil : book.links(ex.id)
             var next = ex.nextFixedDueDate(onOrAfter: today, calendar: cal)
@@ -281,7 +283,7 @@ enum WidgetBillsBuilder {
                 let dueDay = cal.startOfDay(for: due)
                 guard dueDay < horizonEnd else { break }
                 if !isCardCharged(ex, on: dueDay, cardIds: cardIds, history: history) {
-                    out.append(ledgerBill(ex, due: dueDay, expense: expense))
+                    out.append(ledgerBill(ex, due: dueDay, expense: expense, kinds: kinds))
                 }
                 n += 1
                 guard let after = cal.date(byAdding: .day, value: 1, to: dueDay) else { break }
@@ -300,8 +302,8 @@ enum WidgetBillsBuilder {
         return cardIds.contains(target)
     }
 
-    private static func ledgerBill(_ ex: Expense, due: Date, expense: ExpenseStore) -> WidgetBill {
-        let theme = MoneyArtTheme.of(ex.fixedCategory)
+    private static func ledgerBill(_ ex: Expense, due: Date, expense: ExpenseStore, kinds: ExpenseKindIndex) -> WidgetBill {
+        let theme = MoneyArtTheme.of(FixedGroup.of(ex, kinds: kinds))
         return WidgetBill(id: "x-" + ex.id.uuidString + "@" + WidgetDateText.dayKey(due),
                           kind: .fixed,
                           title: ex.stopRowLabel(suppressing: []).primary,
@@ -313,7 +315,7 @@ enum WidgetBillsBuilder {
                           tint: theme.tint,
                           tintDark: theme.top,
                           link: WidgetLink.fixedExpense(ex.id).absoluteString,
-                          lockTitle: ledgerLockTitle(ex.fixedCategory))
+                          lockTitle: ledgerLockTitle(ex.fixedCategory, group: FixedGroup.of(ex, kinds: kinds)))
     }
 
     /// [v3] 記帳固定支出的類別字：分類名（「訂閱服務」「電信費」「貸款」「保險」「房租」「水電瓦斯」「管理費」）；
@@ -321,5 +323,10 @@ enum WidgetBillsBuilder {
     private static func ledgerLockTitle(_ category: FixedCategory?) -> String {
         guard let category, category != .other else { return "固定支出" }
         return category.rawValue
+    }
+
+    /// [v25.617] 有稅類／規費細項的「其他」寫「稅費」（L6；不寫金額、卡名、房名、車名）；其他照 ledgerLockTitle(_:)
+    private static func ledgerLockTitle(_ category: FixedCategory?, group: FixedGroup) -> String {
+        group == .tax ? FixedGroup.tax.title : ledgerLockTitle(category)
     }
 }

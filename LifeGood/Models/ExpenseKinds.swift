@@ -1013,6 +1013,7 @@ enum ExpenseKindTidy {
     static func vehiclePicks(_ linked: [Expense], kinds: ExpenseKindIndex) -> [ExpenseKindPick] {
         var out: [ExpenseKindPick] = []
         for e in linked where e.expenseType == .variable && e.vehicleExpenseCategory == .other {
+            if kinds.isTombstoned(e.id) { continue }   // [v25.617] 在表單拿掉過細項（墓碑）＝明確說不是，不再建議
             guard kinds.kind(of: e) == nil, let k = vehicleGuess(e), !kinds.isDismissed(e.id, k) else { continue }
             out.append(ExpenseKindPick(expense: e, kind: k))
         }
@@ -1023,6 +1024,7 @@ enum ExpenseKindTidy {
     static func housePicks(estateId: UUID, expenses: [Expense], kinds: ExpenseKindIndex) -> [ExpenseKindPick] {
         var out: [ExpenseKindPick] = []
         for e in expenses where e.expenseType == .fixed && e.linkedRealEstateId == estateId && e.fixedCategory == .other {
+            if kinds.isTombstoned(e.id) { continue }   // [v25.617] 在表單拿掉過細項（墓碑）＝明確說不是，不再建議
             guard kinds.kind(of: e) == nil, let k = houseGuess(e), !kinds.isDismissed(e.id, k) else { continue }
             out.append(ExpenseKindPick(expense: e, kind: k))
         }
@@ -1090,4 +1092,529 @@ enum ExpenseKindTidy {
         ExpenseKindCandidate(expenseId: p.expense.id, kind: p.kind, title: title,
                              detail: HouseCardFormat.ymd(p.expense.date) + "・" + MoneyFormat.short(amount))
     }
+}
+
+// MARK: - [v25.617] 政府稅費 v3：稅務頁、房子變動「稅費」細項（radar/judge_govfee.md §C10；build/govfee3/brief.md；
+//   sim_govfee3.py 一個函式一個函式對照）
+//
+// • 上面 v25.615／v25.616 的東西一行都沒改，只加：isTombstoned（一鍵整理候選跳過墓碑：vehiclePicks／housePicks 各多一行）、
+//   房子變動「稅費」的細項（RealEstateKindForm）、v3 存檔規則（handledBasesV3／formSavingTagV3／recordFormSaveV3）、
+//   稅務頁的純函式（TaxPaid、TaxPaidText）。
+// • 年度稅費＝TaxPaid.records：① 一般變動「稅費」② 房子變動「稅費」③ 固定「其他」有稅類／規費細項（含推的牌照稅、燃料費），
+//   照扣款日一期一列、每期金額照金額歷史（WealthSchedule.amount）、算到今天、截結束日 ④ 車子變動「其他」有規費／稅類細項。
+//   金額一律走 WealthSchedule.ntd（＝ExpenseStore.ntdValue 的規則：只有外幣儲蓄險是原幣存的；其他記帳存檔時就換成台幣，不再乘一次）。
+//   最後照 (expenseId, periodDate) 去重，留簽名順序在前的那個來源（車子 → 房子 → 一般 → 固定）。
+// • 不收：買房費用、罰款（另一行 TaxPaid.fines）、沒細項也推不出來的「其他・每年」（檢核寫「可能是稅費」，不算進大字；
+//   拿掉過細項（墓碑）、推的按過〔不是〕的不寫：TaxPaid.saidNotTax，跟一鍵整理跳過墓碑同一個意思）。
+// • 節稅（effectivelyTaxDeductible、taxSavingBySub、MoneyBoards）一行都沒碰。
+// • 隱私：這裡的字只在 App 內稅務頁；通知、小工具、手錶、鎖定畫面、靈動島一個字都沒加（鎖定畫面只多「稅費」兩個字，
+//   在 WidgetBillsBuilder，不寫金額、卡名、房名、車名）。
+
+extension ExpenseKindIndex {
+    /// [v25.617] 這筆有墓碑（表單拿掉細項、刪除後）：一鍵整理不再建議（使用者明確說不是）
+    func isTombstoned(_ id: UUID) -> Bool {
+        guard let t = rawTag(id) else { return false }
+        return t.kind == nil
+    }
+}
+
+extension ExpenseKindForm {
+    /// v3 表單管得到的簽名：多了房子變動「稅費」（v3 的細項在新版打開、改成「不指定」或別的類別存檔要寫墓碑）
+    static let handledBasesV3: Set<String> = handledBasesV2.union(["re." + RealEstateExpenseCategory.tax.rawValue])
+}
+
+extension ExpenseKindBook {
+    /// v3 AddExpenseView 存檔（取代 v2 的 formSavingTag；規則同 v2，只是墓碑多管房子變動「稅費」）。回 nil＝不用寫
+    /// ① 有選細項 → savingTag ② 沒選、原始 tag 有 kind、base 在 handledBasesV3 → 墓碑
+    /// ③ 沒選、連墓碑都沒有、這筆推得出來 → 記〔不是〕 ④ 其他 → 不寫
+    func formSavingTagV3(for e: Expense, kind: ExpenseKind?, now: Date) -> ExpenseKindBook? {
+        if let k = kind { return savingTag(for: e, kind: k, now: now) }
+        if let r = rawTag(e.id) {
+            guard r.kind != nil, ExpenseKindForm.handledBasesV3.contains(r.base ?? "") else { return nil }
+            var out = self
+            out.upsert(Self.tombstone(of: r, now: now))
+            return out
+        }
+        guard let hit = ExpenseKindIndex(book: self).kind(of: e), hit.inferred else { return nil }
+        return dismissing([ExpenseKindDismissal(id: e.id, kind: hit.kind.raw, at: now)])
+    }
+}
+
+extension ExpenseKindStore {
+    /// [v25.617] AddExpenseView 存檔（取代 v25.616 的 recordFormSave 那一行；dismiss 之後、下一個 runloop 叫；只准這一處）
+    func recordFormSaveV3(_ e: Expense, kind: ExpenseKind?, now: Date = Date()) {
+        guard let next = book.formSavingTagV3(for: e, kind: kind, now: now) else { return }
+        commit(next, now: now)
+    }
+}
+
+// MARK: - [v25.617] 房子變動「稅費」的細項（Picker 那一項的字不改，仍是「稅費」）
+
+enum RealEstateKindForm {
+    /// 細項清單（＝允許表 re.稅費；第一項「不指定」＝nil，是預設）
+    static let options: [ExpenseKind] = [.landValueTax, .houseTax, .landIncrementTax, .houseLandTax, .fee, .otherTax]
+    /// 第一項
+    static let unspecifiedLabel = "不指定"
+
+    /// 「地價稅（11 月）」「房屋稅（5 月）」「土地增值稅」…（同固定「稅費」連房子的寫法）
+    static func label(_ k: ExpenseKind) -> String {
+        ExpenseKindForm.label(k, link: .realEstate)
+    }
+
+    /// 選了「稅費」或「買房費用」時 footer 多這一句
+    static let purchaseCostFooter = "買房那次的契稅、印花稅、代書、登記規費 → 選「買房費用」，留收據，以後賣房可以算成本。"
+
+    static func showsPurchaseCostFooter(_ c: RealEstateExpenseCategory) -> Bool {
+        c == .tax || c == .purchaseCost
+    }
+}
+
+// MARK: - [v25.617] 稅務頁：年度稅費、罰款另一行、檢核
+
+/// 稅務頁「稅費紀錄」從哪裡來
+enum TaxPaidSource: Equatable {
+    /// ① 一般變動「稅費」
+    case general
+    /// ② 房子變動「稅費」（連的那間）
+    case house(UUID?)
+    /// ③ 固定支出（週期；連的房子、車子）
+    case recurring(Recurrence, estateId: UUID?, vehicleId: UUID?)
+    /// ④ 車子變動「其他」＋規費／稅類細項（連的那台）
+    case vehicle(UUID?)
+}
+
+/// 稅務頁一列：變動一筆一列、固定一期一列
+struct TaxPaidRecord: Identifiable, Equatable {
+    let expenseId: UUID
+    /// 變動＝那筆的日期；固定＝那一期的扣款日
+    let periodDate: Date
+    /// 台幣（WealthSchedule.ntd；固定照那一期的金額歷史）
+    let amountNTD: Double
+    let source: TaxPaidSource
+    /// 細項（一般／房子變動「稅費」沒標的是 nil）
+    let kind: ExpenseKind?
+
+    /// 去重的鍵（同一筆、同一期只算一次）
+    var id: String { expenseId.uuidString + "@" + String(Int(periodDate.timeIntervalSince1970.rounded())) }
+}
+
+/// 月份分佈一格
+struct TaxPaidMonth: Equatable {
+    let month: Int
+    let amount: Double
+}
+
+/// 年度稅務檢核的狀態
+enum TaxCheckState: Equatable {
+    /// 已記
+    case recorded
+    /// 還沒到（今年那個月還沒到、或看的是明年以後）
+    case notYet
+    /// 還沒看到紀錄
+    case missing
+    /// 不用查（note 寫為什麼：8/31 後才買、電車…）
+    case notNeeded
+    /// 應注意（綜所稅、二代健保：沒有記帳可以對，照 25.616 以前）
+    case reminder
+    /// 沒有房子、車子（灰的，照 25.616 以前）
+    case irrelevant
+
+    /// 右邊膠囊的字（irrelevant 不寫）
+    var text: String? {
+        switch self {
+        case .recorded: return "已記"
+        case .notYet: return "還沒到"
+        case .missing: return "還沒看到紀錄"
+        case .notNeeded: return "不用查"
+        case .reminder: return "應注意"
+        case .irrelevant: return nil
+        }
+    }
+
+    /// 圖示要不要用那一列的顏色（照 25.616 以前的 relevant）
+    var isActive: Bool { self != .irrelevant }
+}
+
+/// 檢核一列
+struct TaxCheckItem: Identifiable, Equatable {
+    /// ＝title（一年裡不會重複）
+    let id: String
+    let title: String
+    /// 「11月」「全年」（照 25.616 以前的寫法）
+    let month: String
+    /// 對應的細項（綜所稅、二代健保 nil）
+    let kind: ExpenseKind?
+    let state: TaxCheckState
+    /// 灰字（「可能記了兩次（2 筆），打開確認。」「8/31 以後才買的…」）
+    let note: String?
+}
+
+/// 稅務頁一次要用的數（TaxPaid.summary 算一次，畫面只排版）
+struct TaxPaidSummary {
+    /// 年度稅費（新到舊）
+    let records: [TaxPaidRecord]
+    /// 另外繳的罰款（新到舊；不算進年度稅費）
+    let fines: [TaxPaidRecord]
+    let total: Double
+    let finesTotal: Double
+    /// 有金額的月份（1→12）
+    let byMonth: [TaxPaidMonth]
+    let checks: [TaxCheckItem]
+    /// 檢核下面的提示（可能是稅費、名稱有「罰」的稅費）
+    let hints: [String]
+}
+
+enum TaxPaid {
+    /// 西曆年（ExpenseKindForm.gregorian 不用：要跟稅務頁的 selectedYear 用同一個 Calendar.current）
+    static func year(_ d: Date, _ calendar: Calendar) -> Int { calendar.component(.year, from: d) }
+
+    // ── 四個來源（各自判斷；去重在 records 最後）──
+
+    /// ① 一般變動「稅費」（照 25.616 以前 taxExpenses：variableCategory 是稅費）；標成罰款的不收
+    static func isGeneral(_ e: Expense, kinds: ExpenseKindIndex) -> Bool {
+        guard e.expenseType == .variable, e.variableCategory == .tax else { return false }
+        return kinds.kind(of: e)?.kind.nature != .fine
+    }
+
+    /// ② 房子變動「稅費」（買房費用不收）
+    static func isHouse(_ e: Expense, kinds: ExpenseKindIndex) -> Bool {
+        guard e.expenseType == .variable, e.realEstateExpenseCategory == .tax else { return false }
+        return kinds.kind(of: e)?.kind.nature != .fine
+    }
+
+    /// ③ 固定「其他」有稅類／規費細項（含推的牌照稅、燃料費）
+    static func isFixedTax(_ e: Expense, kinds: ExpenseKindIndex) -> Bool {
+        e.isRecurringFixed && e.fixedCategory == .other && kinds.taxKind(of: e) != nil
+    }
+
+    /// ④ 車子變動「其他」有規費／稅類細項
+    static func isVehicleTax(_ e: Expense, kinds: ExpenseKindIndex) -> Bool {
+        e.expenseType == .variable && e.vehicleExpenseCategory == .other && kinds.taxKind(of: e) != nil
+    }
+
+    /// 固定那筆在 year 那一年、到 now（含）為止的每一期扣款日：第一期＝起始日（貸款是下一期），第 k 期＝第一期＋k 個週期一次加，
+    /// 結束日當期照算（同 Expense.fixedPeriodCount）。最多 1200 期
+    static func fixedDueDates(_ e: Expense, year: Int, now: Date, calendar: Calendar) -> [Date] {
+        guard e.isRecurringFixed, let rec = e.recurrence else { return [] }
+        let (component, step) = rec.componentValue
+        let first: Date = e.fixedCategory == .loan
+            ? (calendar.date(byAdding: component, value: step, to: e.date) ?? e.date)
+            : e.date
+        let limit: Date = calendar.startOfDay(for: min(now, e.endDate ?? now))
+        var out: [Date] = []
+        var k = 0
+        while k < 1200 {
+            guard let due = calendar.date(byAdding: component, value: step * k, to: first) else { break }
+            if calendar.startOfDay(for: due) > limit { break }
+            let y = Self.year(due, calendar)
+            if y > year { break }
+            if y == year { out.append(due) }
+            k += 1
+        }
+        return out
+    }
+
+    /// 新到舊（同一天照 id）
+    static func sorted(_ list: [TaxPaidRecord]) -> [TaxPaidRecord] {
+        list.sorted { a, b in
+            if a.periodDate != b.periodDate { return a.periodDate > b.periodDate }
+            return a.expenseId.uuidString < b.expenseId.uuidString
+        }
+    }
+
+    /// 那一年的稅費紀錄（年度稅費的大字、稅費筆數、月份分佈都看這一份）
+    static func records(year: Int, expenses: [Expense], kinds: ExpenseKindIndex, rates: FinanceRates,
+                        now: Date, calendar: Calendar) -> [TaxPaidRecord] {
+        var vehicle: [TaxPaidRecord] = []
+        var house: [TaxPaidRecord] = []
+        var general: [TaxPaidRecord] = []
+        var fixed: [TaxPaidRecord] = []
+        for e in expenses {
+            if e.expenseType == .variable {
+                guard Self.year(e.date, calendar) == year else { continue }
+                let amount: Double = WealthSchedule.ntd(of: e, raw: e.amount, rates: rates)
+                let k: ExpenseKind? = kinds.kind(of: e)?.kind
+                if isVehicleTax(e, kinds: kinds) {
+                    vehicle.append(TaxPaidRecord(expenseId: e.id, periodDate: e.date, amountNTD: amount,
+                                                 source: .vehicle(e.linkedVehicleId), kind: k))
+                }
+                if isHouse(e, kinds: kinds) {
+                    house.append(TaxPaidRecord(expenseId: e.id, periodDate: e.date, amountNTD: amount,
+                                               source: .house(e.linkedRealEstateId), kind: k))
+                }
+                if isGeneral(e, kinds: kinds) {
+                    general.append(TaxPaidRecord(expenseId: e.id, periodDate: e.date, amountNTD: amount,
+                                                 source: .general, kind: k))
+                }
+            } else if isFixedTax(e, kinds: kinds), let rec = e.recurrence {
+                let k: ExpenseKind? = kinds.taxKind(of: e)
+                let history: [AmountSnapshot] = e.amountHistory.sorted { $0.date < $1.date }
+                let src: TaxPaidSource = .recurring(rec, estateId: e.linkedRealEstateId, vehicleId: e.linkedVehicleId)
+                for due in fixedDueDates(e, year: year, now: now, calendar: calendar) {
+                    let raw: Double = WealthSchedule.amount(at: due, current: e.amount, sortedHistory: history)
+                    fixed.append(TaxPaidRecord(expenseId: e.id, periodDate: due,
+                                               amountNTD: WealthSchedule.ntd(of: e, raw: raw, rates: rates),
+                                               source: src, kind: k))
+                }
+            }
+        }
+        var seen: Set<String> = []
+        var out: [TaxPaidRecord] = []
+        for r in vehicle + house + general + fixed where !seen.contains(r.id) {
+            seen.insert(r.id)
+            out.append(r)
+        }
+        return sorted(out)
+    }
+
+    /// 那一年另外繳的罰款（細項是罰款的變動支出；不算進年度稅費）
+    static func fines(year: Int, expenses: [Expense], kinds: ExpenseKindIndex, rates: FinanceRates,
+                      calendar: Calendar) -> [TaxPaidRecord] {
+        var out: [TaxPaidRecord] = []
+        for e in expenses where e.expenseType == .variable && Self.year(e.date, calendar) == year {
+            guard let hit = kinds.kind(of: e), hit.kind.nature == .fine else { continue }
+            let src: TaxPaidSource = e.vehicleExpenseCategory != nil ? .vehicle(e.linkedVehicleId) : .general
+            out.append(TaxPaidRecord(expenseId: e.id, periodDate: e.date,
+                                     amountNTD: WealthSchedule.ntd(of: e, raw: e.amount, rates: rates),
+                                     source: src, kind: hit.kind))
+        }
+        return sorted(out)
+    }
+
+    static func total(_ list: [TaxPaidRecord]) -> Double {
+        list.reduce(0.0) { $0 + $1.amountNTD }
+    }
+
+    /// 月份分佈（照那一期的扣款日；固定那筆在 11 月扣就在 11 月）
+    static func byMonth(_ list: [TaxPaidRecord], calendar: Calendar) -> [TaxPaidMonth] {
+        var sums: [Int: Double] = [:]
+        for r in list { sums[calendar.component(.month, from: r.periodDate), default: 0] += r.amountNTD }
+        var out: [TaxPaidMonth] = []
+        for m in 1...12 {
+            let a: Double = sums[m] ?? 0
+            if a > 0 { out.append(TaxPaidMonth(month: m, amount: a)) }
+        }
+        return out
+    }
+
+    // ── 檢核 ──
+
+    /// 沒標細項的那筆從名稱看（只給檢核「已記」用；不寫、不改紀錄的 kind）
+    static func wordKind(_ title: String) -> ExpenseKind? {
+        if title.contains("地價") { return .landValueTax }
+        if title.contains("房屋稅") { return .houseTax }
+        if title.contains("牌照") { return .licenseTax }
+        if title.contains("燃料") { return .fuelFee }
+        return nil
+    }
+
+    /// 檢核用的細項：有標照標的，沒標看名稱
+    static func checkKind(_ r: TaxPaidRecord, byId: [UUID: Expense]) -> ExpenseKind? {
+        if let k = r.kind { return k }
+        guard let e = byId[r.expenseId] else { return nil }
+        return wordKind(e.title)
+    }
+
+    /// 那一年還算持有（買進那年 ≤ year；賣掉的那年起不查）
+    static func ownsEstate(_ re: RealEstate, year: Int, calendar: Calendar) -> Bool {
+        guard Self.year(re.purchaseDate, calendar) <= year else { return false }
+        if let sold = re.soldDate, Self.year(sold, calendar) <= year { return false }
+        return true
+    }
+
+    static func ownsVehicle(_ v: Vehicle, year: Int, calendar: Calendar) -> Bool {
+        guard Self.year(v.purchaseDate, calendar) <= year else { return false }
+        if let sold = v.soldDate, Self.year(sold, calendar) <= year { return false }
+        return true
+    }
+
+    static let landAfterAugNote = "8/31 以後才買的，那年的地價稅是前屋主繳的。"
+    static let houseBuyYearNote = "買進那年的房屋稅可能已跟前屋主結算。"
+    static let electricLicenseNote = "電動車目前免徵牌照稅，以稅單為準。"
+    static func duplicateNote(_ n: Int) -> String { "可能記了兩次（\(n) 筆），打開確認。" }
+
+    /// 一個細項的狀態：已記／還沒到／還沒看到紀錄（需要查的資產一個都沒有：有說明＝不用查，沒說明＝灰的）
+    static func state(kind: ExpenseKind, needed: Bool, excusedNote: String?, recorded: Bool,
+                      year: Int, now: Date, calendar: Calendar) -> (TaxCheckState, String?) {
+        if recorded { return (.recorded, nil) }
+        guard needed else {
+            if let n = excusedNote { return (.notNeeded, n) }
+            return (.irrelevant, nil)
+        }
+        let ty = Self.year(now, calendar)
+        let tm = calendar.component(.month, from: now)
+        let due: Int = kind.dueMonth ?? 12
+        if year > ty || (year == ty && tm < due) { return (.notYet, nil) }
+        return (.missing, nil)
+    }
+
+    /// 年度稅務檢核（順序照 25.616 以前：綜所稅、房屋稅、牌照稅、地價稅、燃料費、二代健保）。
+    /// 排除：8/31 以後才買的房那年不查地價稅；買進那年的房屋稅寫「可能已跟前屋主結算」；電車牌照稅寫「目前免徵」；
+    /// 燃料費只查油車、油電（機車、電車不要求；都沒有就不列）；賣掉的那年起不查。同一年同細項兩筆以上 →「可能記了兩次」
+    static func checks(year: Int, records: [TaxPaidRecord], expenses: [Expense], estates: [RealEstate],
+                       vehicles: [Vehicle], hasIncome: Bool, now: Date, calendar: Calendar) -> [TaxCheckItem] {
+        let byId: [UUID: Expense] = Dictionary(expenses.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        var ids: [ExpenseKind: Set<UUID>] = [:]
+        for r in records {
+            if let k = checkKind(r, byId: byId) { ids[k, default: []].insert(r.expenseId) }
+        }
+        let owned: [RealEstate] = estates.filter { ownsEstate($0, year: year, calendar: calendar) }
+        let cars: [Vehicle] = vehicles.filter { ownsVehicle($0, year: year, calendar: calendar) }
+        let landNeeded: Bool = owned.contains { re in
+            !(Self.year(re.purchaseDate, calendar) == year && calendar.component(.month, from: re.purchaseDate) >= 9)
+        }
+        let houseNeeded: Bool = owned.contains { re in Self.year(re.purchaseDate, calendar) < year }
+        let licenseNeeded: Bool = cars.contains { v in !ExpenseKindForm.isElectric(v.powerType) }
+        let fuelNeeded: Bool = cars.contains { v in v.powerType == .gasoline || v.powerType == .hybrid }
+
+        func item(_ title: String, _ month: String, _ k: ExpenseKind, needed: Bool, excused: String?) -> TaxCheckItem {
+            let n: Int = ids[k]?.count ?? 0
+            let (st, note) = state(kind: k, needed: needed, excusedNote: excused, recorded: n > 0,
+                                   year: year, now: now, calendar: calendar)
+            let dup: String? = n >= 2 ? duplicateNote(n) : nil
+            return TaxCheckItem(id: title, title: title, month: month, kind: k, state: st, note: dup ?? note)
+        }
+
+        var out: [TaxCheckItem] = []
+        let ty = Self.year(now, calendar)
+        out.append(TaxCheckItem(id: "綜合所得稅申報", title: "綜合所得稅申報", month: "5月", kind: nil,
+                                state: year < ty ? .reminder : .irrelevant, note: nil))
+        out.append(item("房屋稅繳納", "5月", .houseTax, needed: houseNeeded,
+                        excused: owned.isEmpty ? nil : houseBuyYearNote))
+        out.append(item("汽機車使用牌照稅", "4月", .licenseTax, needed: licenseNeeded,
+                        excused: cars.isEmpty ? nil : electricLicenseNote))
+        out.append(item("地價稅繳納", "11月", .landValueTax, needed: landNeeded,
+                        excused: owned.isEmpty ? nil : landAfterAugNote))
+        if fuelNeeded || (ids[.fuelFee]?.isEmpty == false) {
+            out.append(item("汽機車燃料費", "7月", .fuelFee, needed: fuelNeeded, excused: nil))
+        }
+        out.append(TaxCheckItem(id: "二代健保補充保費", title: "二代健保補充保費", month: "全年", kind: nil,
+                                state: hasIncome ? .reminder : .irrelevant, note: nil))
+        return out
+    }
+
+    /// 可能是稅費：固定「其他」＋每年、沒細項也推不出來、那一年有一期（車險記成其他那種）。不算進年度稅費
+    /// （使用者明確說過不是的不寫：saidNotTax）
+    static func maybeTax(year: Int, expenses: [Expense], kinds: ExpenseKindIndex, now: Date,
+                         calendar: Calendar) -> [Expense] {
+        expenses.filter { e in
+            e.isRecurringFixed && e.fixedCategory == .other && e.recurrence == .yearly && kinds.kind(of: e) == nil
+                && !saidNotTax(e, kinds: kinds)
+                && !fixedDueDates(e, year: year, now: now, calendar: calendar).isEmpty
+        }
+    }
+
+    /// 使用者明確說過這筆不是：在表單拿掉過細項（墓碑），或推的牌照稅／燃料費按過〔不是〕（跟一鍵整理同一個意思，不再提）
+    static func saidNotTax(_ e: Expense, kinds: ExpenseKindIndex) -> Bool {
+        if kinds.isTombstoned(e.id) { return true }
+        if let k = ExpenseKindIndex.inferredKind(e), kinds.isDismissed(e.id, k) { return true }
+        return false
+    }
+
+    /// 一般變動「稅費」裡名稱有「罰」的（L9：罰單、罰鍰不是稅費）
+    static func fineNamed(_ records: [TaxPaidRecord], byId: [UUID: Expense]) -> [Expense] {
+        var out: [Expense] = []
+        for r in records where r.source == .general && r.kind == nil {
+            if let e = byId[r.expenseId], e.title.contains("罰"), !out.contains(where: { $0.id == e.id }) { out.append(e) }
+        }
+        return out
+    }
+
+    /// 列名：「一日拾樂-地價稅」→ 名稱照存的；空的寫「固定支出」
+    static func shownTitle(_ e: Expense) -> String {
+        let t: String = e.title.trimmingCharacters(in: .whitespacesAndNewlines)
+        return t.isEmpty ? "固定支出" : t
+    }
+
+    /// 稅務頁要的全部（body 外面算一次）
+    static func summary(year: Int, expenses: [Expense], kinds: ExpenseKindIndex, rates: FinanceRates,
+                        estates: [RealEstate], vehicles: [Vehicle], hasIncome: Bool,
+                        now: Date, calendar: Calendar) -> TaxPaidSummary {
+        let recs = records(year: year, expenses: expenses, kinds: kinds, rates: rates, now: now, calendar: calendar)
+        let fs = fines(year: year, expenses: expenses, kinds: kinds, rates: rates, calendar: calendar)
+        let byId: [UUID: Expense] = Dictionary(expenses.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
+        var hints: [String] = []
+        let maybe: [String] = maybeTax(year: year, expenses: expenses, kinds: kinds, now: now, calendar: calendar)
+            .map { shownTitle($0) }
+        if let line = TaxPaidText.maybeTaxLine(maybe) { hints.append(line) }
+        let fined: [String] = fineNamed(recs, byId: byId).map { shownTitle($0) }
+        if let line = TaxPaidText.fineNamedLine(fined) { hints.append(line) }
+        return TaxPaidSummary(records: recs, fines: fs, total: total(recs), finesTotal: total(fs),
+                              byMonth: byMonth(recs, calendar: calendar),
+                              checks: checks(year: year, records: recs, expenses: expenses, estates: estates,
+                                             vehicles: vehicles, hasIncome: hasIncome, now: now, calendar: calendar),
+                              hints: hints)
+    }
+
+    // ── 列上的字 ──
+
+    /// 列名：有細項寫細項（「地價稅」），沒有寫那筆的名稱（空的寫「稅費」）
+    static func rowTitle(_ r: TaxPaidRecord, expense: Expense?) -> String {
+        if let k = r.kind { return k.raw }
+        let t: String = expense?.title.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        return t.isEmpty ? "稅費" : t
+    }
+
+    /// 來源膠囊（App 內才有）：「房子・一日拾樂」「車子・Swift Sport」「每年」；名字查不到寫「房子」「車子」
+    static func sourceChips(_ s: TaxPaidSource, estateNames: [UUID: String], vehicleNames: [UUID: String]) -> [String] {
+        func named(_ head: String, _ id: UUID?, _ names: [UUID: String]) -> String {
+            guard let id, let n = names[id]?.trimmingCharacters(in: .whitespaces), !n.isEmpty else { return head }
+            return head + "・" + n
+        }
+        switch s {
+        case .general:
+            return []
+        case .house(let id):
+            return [named("房子", id, estateNames)]
+        case .vehicle(let id):
+            return [named("車子", id, vehicleNames)]
+        case .recurring(let rec, let estateId, let vehicleId):
+            var out: [String] = []
+            if estateId != nil { out.append(named("房子", estateId, estateNames)) }
+            if vehicleId != nil { out.append(named("車子", vehicleId, vehicleNames)) }
+            out.append(rec.rawValue)
+            return out
+        }
+    }
+
+    /// 固定那幾列（一期一列）才有：金額以繳款書為準
+    static func isRecurring(_ s: TaxPaidSource) -> Bool {
+        if case .recurring = s { return true }
+        return false
+    }
+}
+
+/// 稅務頁的字（只在 App 內稅務頁）
+enum TaxPaidText {
+    /// 「另外繳了罰款 NT$600（1 筆）・不算稅費」（點開列出）
+    static func finesLine(_ amountText: String, count: Int) -> String {
+        "另外繳了罰款 " + amountText + "（\(count) 筆）・不算稅費"
+    }
+
+    /// 「可能是稅費：「全險」（打開確認；是的話類別選「稅費」）」；三筆以上寫「等 N 筆」
+    static func maybeTaxLine(_ names: [String]) -> String? {
+        guard !names.isEmpty else { return nil }
+        let shown: String = names.prefix(3).map { "「" + $0 + "」" }.joined(separator: "、")
+        let more: String = names.count > 3 ? " 等 \(names.count) 筆" : ""
+        return "可能是稅費：" + shown + more + "（打開確認；是的話類別選「稅費」，不算進上面的年度稅費）"
+    }
+
+    /// L9：「「停車罰單」名稱有「罰」：罰單、罰鍰不是稅費，汽車的記成車子「罰款」。」
+    static func fineNamedLine(_ names: [String]) -> String? {
+        guard !names.isEmpty else { return nil }
+        let shown: String = names.prefix(3).map { "「" + $0 + "」" }.joined(separator: "、")
+        return shown + "名稱有「罰」：罰單、罰鍰不是稅費，汽車的記成車子「罰款」。"
+    }
+
+    /// 固定那幾列下面的灰字
+    static let recurringFooter = "每年固定的稅費照記帳的金額算，金額以繳款書為準。"
+
+    /// 可收合的說明
+    static let notesTitle = "稅費能不能抵稅？"
+    static let notes: [String] = [
+        "地價稅、房屋稅、牌照稅、燃料費都不能列舉扣除。",
+        "出租的房子申報租賃所得、選核實減除時，那間房的地價稅、房屋稅可以當費用。",
+        "買房那次的契稅、印花稅、代書、登記規費記「買房費用」，收據留著，以後賣房可以算成本。",
+        "罰單、拖吊、滯納金是罰款，不算稅費，另外列一行。",
+    ]
 }
