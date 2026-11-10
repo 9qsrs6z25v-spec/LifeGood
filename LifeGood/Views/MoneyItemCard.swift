@@ -113,17 +113,42 @@ struct MoneyItemCard: View {
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        Group {
+        faded(Group {
             if compact {
                 compactBody
             } else {
                 fullBody
             }
-        }
-        .opacity(item.dimmed ? 0.58 : 1)
+        })
         .dynamicTypeSize(...DynamicTypeSize.accessibility2)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(a11y)
+    }
+
+    /// 已停止的固定支出、已結束的固定薪水：整張淡一點（0.58）。
+    /// [v25.613] 陰影改畫在卡片底下那塊圓角形狀（cardShadow）之後，卡片是「形狀＋內容」兩層；
+    /// 淡化要先合成一張再淡（compositingGroup），跟以前「整張卡（含陰影）一起淡」一樣，
+    /// 底下那塊形狀才不會從半透明的卡片透出來。只有淡的卡才多這一次合成。
+    @ViewBuilder
+    private func faded<V: View>(_ card: V) -> some View {
+        if item.dimmed {
+            card
+                .compositingGroup()
+                .opacity(0.58)
+        } else {
+            card
+        }
+    }
+
+    /// [v25.613] 卡片的陰影：畫在卡片底下一塊同樣大小、同樣圓角的實心形狀上，不再掛在整張卡上。
+    /// 卡底（secondarySystemGroupedBackground）本來就是不透明、整塊蓋滿圓角，陰影的形狀跟以前一模一樣；
+    /// 差別是卡片裡的東西（跑馬燈每一格、K 線、照片淡入）在動的時候，不用每一格都把整張卡重新合成一次算陰影。
+    private func cardShadow(cornerRadius: CGFloat, darkOpacity: Double, lightOpacity: Double,
+                            radius: CGFloat, y: CGFloat) -> some View {
+        RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+            .fill(Color(.secondarySystemGroupedBackground))
+            .shadow(color: scheme == .dark ? Color.black.opacity(darkOpacity) : Color(tb: 0x1E3A6E, lightOpacity),
+                    radius: radius, x: 0, y: y)
     }
 
     private var pal: TripBoardPalette { TripBoardPalette(scheme) }
@@ -192,8 +217,10 @@ struct MoneyItemCard: View {
             RoundedRectangle(cornerRadius: 18, style: .continuous)
                 .stroke(scheme == .dark ? Color.white.opacity(0.07) : Color.black.opacity(0.04), lineWidth: 0.75)
         }
-        .shadow(color: scheme == .dark ? Color.black.opacity(0.32) : Color(tb: 0x1E3A6E, 0.08),
-                radius: 6, x: 0, y: 2)
+        // 以前：.shadow(color: scheme == .dark ? Color.black.opacity(0.32) : Color(tb: 0x1E3A6E, 0.08), radius: 6, x: 0, y: 2)
+        .background {
+            cardShadow(cornerRadius: 18, darkOpacity: 0.32, lightOpacity: 0.08, radius: 6, y: 2)
+        }
     }
 
     /// 卡底：系統的卡片底色＋上面一層很淡的分類色（像行程卡的天空）
@@ -330,8 +357,18 @@ struct MoneyItemCard: View {
             RoundedRectangle(cornerRadius: 14, style: .continuous)
                 .stroke(scheme == .dark ? Color.white.opacity(0.07) : Color.black.opacity(0.04), lineWidth: 0.75)
         }
-        .shadow(color: scheme == .dark ? Color.black.opacity(0.28) : Color(tb: 0x1E3A6E, 0.06),
-                radius: 4, x: 0, y: 1)
+        // 以前：.shadow(color: scheme == .dark ? Color.black.opacity(0.28) : Color(tb: 0x1E3A6E, 0.06), radius: 4, x: 0, y: 1)
+        .background {
+            cardShadow(cornerRadius: 14, darkOpacity: 0.28, lightOpacity: 0.06, radius: 4, y: 1)
+        }
+    }
+}
+
+/// [v25.613] 欄位一樣（同一筆、同一種大小）就不重畫：股票頁背景抓報價、iCloud 同步、別的資料變了
+/// 整頁重算時，沒變的卡片直接沿用。深淺色、字級是環境值，照樣會更新。
+extension MoneyItemCard: Equatable {
+    static func == (lhs: MoneyItemCard, rhs: MoneyItemCard) -> Bool {
+        lhs.item == rhs.item && lhs.compact == rhs.compact
     }
 }
 

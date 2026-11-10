@@ -11,6 +11,11 @@ import SwiftUI
 //   SwipeDeleteRow(onDelete: { delete(item) }) { cardView(item) }
 // 注意 onTapGesture / contextMenu 掛在內容上（模板內部），開啟狀態的
 // 點擊會被攔下來收合、不會誤觸開卡片。
+//
+// [v25.613] 左滑改用 UIKit 的 pan（HorizontalSwipeGesture.swift 的 HorizontalSwipePan）：
+// 以前的 SwiftUI DragGesture（就算是 simultaneous）在 iOS 18 會跟捲動搶，快速上下甩常常整頁不動
+//（使用者：「上下滑太快反而不會動，緩緩地反而能上下滑」）。現在偏垂直的拖曳這一列根本不開始，
+// 整段交給捲動；明顯偏水平才由這一列接手。判斷與位移規則在 SwipeDeleteRule，數字跟以前一樣。
 
 struct SwipeDeleteRow<Content: View>: View {
     /// 刪除鈕寬度
@@ -20,9 +25,6 @@ struct SwipeDeleteRow<Content: View>: View {
 
     @State private var offsetX: CGFloat = 0
     @State private var isOpen = false
-    /// 這次拖曳的方向鎖：nil＝未判定、true＝水平（本列處理）、false＝垂直（整段交給捲動）。
-    /// 在第一次 onChanged（約 18pt）就判定並鎖住，避免捲動中途軌跡偏水平時列跟著抖動。
-    @State private var dragLockHorizontal: Bool?
 
     var body: some View {
         ZStack(alignment: .trailing) {
@@ -59,40 +61,28 @@ struct SwipeDeleteRow<Content: View>: View {
                             .onTapGesture { close() }
                     }
                 }
-                // simultaneousGesture 而非 .gesture：.gesture 會與外層 ScrollView 的捲動
-                // 手勢「競爭」——快速垂直滑動落在列上時，列的 DragGesture 先搶到觸控、
-                // onChanged 又因偏垂直而不處理，整個觸控被吃掉 → 頁面不捲動；
-                // 慢慢拖曳則是 ScrollView 先贏所以一定會動（使用者回報的症狀）。
-                // 改成 simultaneous 讓兩者同時辨識：垂直滑動由 ScrollView 捲動、
-                // 列的手勢靠下方「明顯偏水平才處理」的守衛不動作；水平左滑則照常開刪除鈕。
-                .simultaneousGesture(
-                    DragGesture(minimumDistance: 18)
-                        .onChanged { value in
-                            // 只吃「明顯偏水平」的拖曳，垂直捲動交還給 ScrollView。
-                            // 門檻取 2 倍（約偏離垂直 63° 以上才算水平）而非 1 倍：
-                            // 使用者回饋捲動優先級要更高——斜斜的快速滑動一律當捲動，
-                            // 想開刪除鈕就水平地滑，判定寧可保守也不要吃掉捲動。
-                            if dragLockHorizontal == nil {
-                                dragLockHorizontal =
-                                    abs(value.translation.width) > abs(value.translation.height) * 2
-                            }
-                            guard dragLockHorizontal == true else { return }
-                            let base: CGFloat = isOpen ? -(deleteWidth + 8) : 0
-                            let proposed = base + value.translation.width
-                            // 左界：刪除鈕寬 + 一點橡皮筋；右界 0
-                            offsetX = min(0, max(proposed, -(deleteWidth + 28)))
-                        }
-                        .onEnded { value in
-                            let wasHorizontal = dragLockHorizontal == true
-                            dragLockHorizontal = nil
-                            guard wasHorizontal else { return }
-                            let shouldOpen = offsetX < -(deleteWidth * 0.5)
-                            withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
-                                offsetX = shouldOpen ? -(deleteWidth + 8) : 0
-                                isOpen = shouldOpen
-                            }
-                        }
-                )
+                // [v25.613] UIKit 的 pan：偏垂直的不開始（交給捲動），明顯偏水平才接（規則見 SwipeDeleteRule）
+                .gesture(swipePan)
+        }
+    }
+
+    /// 這一列的左滑手勢。isOpen 每次重畫都帶進去（開著的列左右都接，收著只接往左）
+    private var swipePan: HorizontalSwipePan {
+        HorizontalSwipePan(
+            isOpen: isOpen,
+            onChanged: { dx in
+                offsetX = SwipeDeleteRule.dragOffset(translation: dx, isOpen: isOpen, deleteWidth: deleteWidth)
+            },
+            onEnded: { _ in settle() }
+        )
+    }
+
+    /// 放開（或被系統打斷）：拉過刪除鈕一半就吸到開，不然收回
+    private func settle() {
+        let shouldOpen = SwipeDeleteRule.shouldOpen(offset: offsetX, deleteWidth: deleteWidth)
+        withAnimation(.spring(response: 0.32, dampingFraction: 0.85)) {
+            offsetX = shouldOpen ? SwipeDeleteRule.openOffset(deleteWidth: deleteWidth) : 0
+            isOpen = shouldOpen
         }
     }
 

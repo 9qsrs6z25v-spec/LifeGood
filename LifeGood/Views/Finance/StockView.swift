@@ -599,6 +599,8 @@ struct StockView: View {
                                    dayRate: board.dayRates[item.id],
                                    quoteFailed: fetchStatus[item.id] == false,
                                    settle: settleLabel(item)))
+            // [v25.613] 卡片欄位沒變就不重畫（背景抓報價、iCloud 同步、別頁資料變了整頁重算時）
+            .equatable()
     }
 
     /// [v25.567] 交割膠囊的字：「元大・薪轉交割」；只有交割銀行「薪轉交割」；只有證券戶「元大」；都沒有 nil。

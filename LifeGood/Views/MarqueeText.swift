@@ -119,14 +119,45 @@ struct MarqueeText: View {
                 .truncationMode(.tail)
         } else {
             TimelineView(.animation(minimumInterval: 1.0 / 30, paused: !onScreen)) { context in
-                marquee(offset: Self.offset(at: context.date, since: cycleStart,
+                MarqueeStrip(text: text, font: font, gap: Self.gap, boxWidth: boxWidth,
+                             x: Self.offset(at: context.date, since: cycleStart,
                                             distance: textWidth + Self.gap))
+                    .equatable()
             }
         }
     }
 
-    private func marquee(offset x: CGFloat) -> some View {
-        HStack(spacing: Self.gap) {
+    /// 這一刻該往左移多少。一輪＝停 hold 秒＋捲 distance。
+    /// 捲到 −distance 時第二份字剛好在原位，下一輪從 0 開始看起來是同一格。
+    static func offset(at now: Date, since start: Date, distance: CGFloat) -> CGFloat {
+        guard distance > 0 else { return 0 }
+        let travel = Double(distance) / speed
+        let t = max(0, now.timeIntervalSince(start))
+        let phase = t.truncatingRemainder(dividingBy: hold + travel)
+        return phase < hold ? 0 : -CGFloat((phase - hold) * speed)
+    }
+}
+
+// MARK: - 跑馬燈那一條
+
+/// [v25.613] 捲動中的那一條：兩份字、裁切、點擊範圍、左右淡出（程式從原本的 marquee(offset:) 原樣搬過來，外觀一樣）。
+/// 時間軸每一格（每秒 30 格）都會產生一份；開頭停的那 2 秒位移都是 0，欄位一樣就不重畫（.equatable()）。
+/// 字型照 MarqueeText 的規則：font 是 nil 就吃外面掛的 .font(...)（環境字型）。
+private struct MarqueeStrip: View, Equatable {
+    let text: String
+    let font: Font?
+    let gap: CGFloat
+    let boxWidth: CGFloat
+    let x: CGFloat
+
+    private func label() -> Text {
+        let t = Text(text)
+        if let font { return t.font(font) }
+        return t
+    }
+
+    var body: some View {
+        HStack(spacing: gap) {
             label().fixedSize()
             label().fixedSize()
         }
@@ -149,16 +180,6 @@ struct MarqueeText: View {
                     .frame(width: 14)
             }
         }
-    }
-
-    /// 這一刻該往左移多少。一輪＝停 hold 秒＋捲 distance。
-    /// 捲到 −distance 時第二份字剛好在原位，下一輪從 0 開始看起來是同一格。
-    static func offset(at now: Date, since start: Date, distance: CGFloat) -> CGFloat {
-        guard distance > 0 else { return 0 }
-        let travel = Double(distance) / speed
-        let t = max(0, now.timeIntervalSince(start))
-        let phase = t.truncatingRemainder(dividingBy: hold + travel)
-        return phase < hold ? 0 : -CGFloat((phase - hold) * speed)
     }
 }
 
