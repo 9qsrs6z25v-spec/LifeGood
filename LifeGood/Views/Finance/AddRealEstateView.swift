@@ -474,8 +474,11 @@ struct AddRealEstateView: View {
             }
             .confirmationDialog("選擇變動支出類別", isPresented: $showVariableCategoryPicker, titleVisibility: .visible) {
                 ForEach(RealEstateExpenseCategory.allCases.filter { $0 != .housePayment }) { cat in
+                    // [v25.614] 選單收起來那一輪先過，下一輪才開（照 StockLedgerCard.addLater）
                     Button(cat.rawValue) {
-                        if cat == .utility { addingUtilityPayment = true } else { addingVariableCategory = cat }
+                        DispatchQueue.main.async {
+                            if cat == .utility { addingUtilityPayment = true } else { addingVariableCategory = cat }
+                        }
                     }
                 }
                 Button("取消", role: .cancel) {}

@@ -627,24 +627,25 @@ private struct CompTabSummaryCard: View {
     private var menu: some View {
         Menu {
             if canShowToPerson {
-                Button(action: onShow) {
+                // [v25.614] 選單收起來那一輪先過，下一輪才開（照 StockLedgerCard.addLater）
+                Button(action: { DispatchQueue.main.async { onShow() } }) {
                     Label("給對方看", systemImage: "person.crop.rectangle")
                 }
             }
-            Button(action: onShare) {
+            Button(action: { DispatchQueue.main.async { onShare() } }) {
                 Label("分享職能雷達…", systemImage: "square.and.arrow.up")
             }
             Divider()
             // [v25.606 v5a]〔帶訓者〕〔記帶訓者的評分…〕（都擋訂閱；已轉出、唯讀不出現）
             if showsMentorItem {
-                Button(action: onMentors) {
+                Button(action: { DispatchQueue.main.async { onMentors() } }) {
                     Label("帶訓者", systemImage: "person.2")
                 }
             }
             if !mentorChoices.isEmpty {
                 Menu {
                     ForEach(mentorChoices) { c in
-                        Button(Self.choiceTitle(c)) { onRateMentor(c) }
+                        Button(Self.choiceTitle(c)) { DispatchQueue.main.async { onRateMentor(c) } }
                     }
                 } label: {
                     Label("記帶訓者的評分…", systemImage: "square.and.pencil")
@@ -652,16 +653,16 @@ private struct CompTabSummaryCard: View {
             }
             // [v25.607 v5b]〔加到一對一議程…〕（擋訂閱；唯讀、已轉出、沒有一對一會議不出現）
             if showsOneOnOneItem {
-                Button(action: onOneOnOne) {
+                Button(action: { DispatchQueue.main.async { onOneOnOne() } }) {
                     Label("加到一對一議程…", systemImage: "text.badge.plus")
                 }
             }
             if showsSkipItem {
-                Button(action: onSkip) {
+                Button(action: { DispatchQueue.main.async { onSkip() } }) {
                     Label("不用學的系統", systemImage: "minus.circle")
                 }
             }
-            Button(action: onSetup) {
+            Button(action: { DispatchQueue.main.async { onSetup() } }) {
                 Label("職能項目設定", systemImage: "slider.horizontal.3")
             }
         } label: {

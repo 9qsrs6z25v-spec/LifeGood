@@ -640,7 +640,9 @@ struct LifeFinanceView: View {
             Menu {
                 ForEach(WealthAccountKind.allCases) { k in
                     Button {
-                        addAccount(k)
+                        DispatchQueue.main.async {
+                            addAccount(k)
+                        }
                     } label: {
                         Label(k.title, systemImage: k.icon)
                     }
@@ -666,7 +668,9 @@ struct LifeFinanceView: View {
     private var depositMenuItem: some View {
         if canAddDeposit {
             Button {
-                open(.timeDeposit(nil, nil))
+                DispatchQueue.main.async {
+                    open(.timeDeposit(nil, nil))
+                }
             } label: {
                 Label("定存", systemImage: "lock.fill")
             }
@@ -684,7 +688,9 @@ struct LifeFinanceView: View {
     private var transferMenuItem: some View {
         if canAddTransfer {
             Button {
-                open(.transferForm(nil))
+                DispatchQueue.main.async {
+                    open(.transferForm(nil))
+                }
             } label: {
                 Label("定期轉帳", systemImage: "arrow.triangle.2.circlepath")
             }
@@ -708,18 +714,25 @@ struct LifeFinanceView: View {
     /// ⋯：排序與收起來、這頁的數字怎麼算、iCloud 與家人共享說明（都不擋訂閱）
     private var moreMenu: some View {
         Menu {
+            // [v25.614] 選單收起來那一輪先過，下一輪才開（照 StockLedgerCard.addLater）
             Button {
-                open(.order)
+                DispatchQueue.main.async {
+                    open(.order)
+                }
             } label: {
                 Label("排序與收起來", systemImage: "arrow.up.arrow.down")
             }
             Button {
-                open(.info(.howItWorks))
+                DispatchQueue.main.async {
+                    open(.info(.howItWorks))
+                }
             } label: {
                 Label(WealthPageInfoTopic.howItWorks.title, systemImage: "questionmark.circle")
             }
             Button {
-                open(.info(.iCloud))
+                DispatchQueue.main.async {
+                    open(.info(.iCloud))
+                }
             } label: {
                 Label(WealthPageInfoTopic.iCloud.title, systemImage: "icloud")
             }

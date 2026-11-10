@@ -331,13 +331,13 @@ struct MyCalendarView: View {
     private var addMenu: some View {
         Menu {
             Section("我的行事曆") {
-                Button { addPersonalKind = .meeting } label: { Label("新增會議", systemImage: "person.3.fill") }
-                Button { addPersonalKind = .task } label: { Label("新增事務", systemImage: "checklist") }
+                Button { DispatchQueue.main.async { addPersonalKind = .meeting } } label: { Label("新增會議", systemImage: "person.3.fill") }
+                Button { DispatchQueue.main.async { addPersonalKind = .task } } label: { Label("新增事務", systemImage: "checklist") }
             }
             Section("部屬") {
-                Button { subAddKind = .task } label: { Label("新增部屬任務", systemImage: "checklist") }
-                Button { subAddKind = .meeting } label: { Label("新增部屬會議", systemImage: "person.3.fill") }
-                Button { subAddKind = .report } label: { Label("新增部屬報告", systemImage: "doc.text.fill") }
+                Button { DispatchQueue.main.async { subAddKind = .task } } label: { Label("新增部屬任務", systemImage: "checklist") }
+                Button { DispatchQueue.main.async { subAddKind = .meeting } } label: { Label("新增部屬會議", systemImage: "person.3.fill") }
+                Button { DispatchQueue.main.async { subAddKind = .report } } label: { Label("新增部屬報告", systemImage: "doc.text.fill") }
             }
         } label: {
             Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
@@ -1920,7 +1920,7 @@ struct PersonalEventEditor: View {
     let initialDate: Date
     let editing: PersonalEvent?
     /// 新增時的預設類型（會議 / 事務）；編輯既有事件時忽略
-    var initialKind: PersonalEventKind = .meeting
+    let initialKind: PersonalEventKind
 
     private static let mdhmFormatter: DateFormatter = {
         let f = DateFormatter(); f.dateFormat = "M/d HH:mm"; return f
@@ -1963,6 +1963,45 @@ struct PersonalEventEditor: View {
     @State private var locationExpandedSuggestions: Bool = false
     @State private var locationDebounceTask: Task<Void, Never>?
     @State private var locationDebouncedQuery: String = ""
+
+    /// [v25.614] 打開那一刻就填好：新增時第一格就是你按的那一種（〔新增事務〕不先閃「會議」），編輯舊的一筆第一眼就有字。
+    /// 以前在 onAppear 才填（第一拍是預設的會議、空白，下一拍才換）。Apple 行事曆那幾個要讀設定、行事曆清單，照舊在 onAppear
+    init(initialDate: Date, editing: PersonalEvent?, initialKind: PersonalEventKind = .meeting) {
+        self.initialDate = initialDate
+        self.editing = editing
+        self.initialKind = initialKind
+        if let e = editing {
+            _title = State(initialValue: e.title)
+            _kind = State(initialValue: e.kind)
+            _date = State(initialValue: e.date)
+            _durationMinutes = State(initialValue: e.durationMinutes)
+            _note = State(initialValue: e.note)
+            _recurrence = State(initialValue: e.recurrence)
+            if let endDate = e.recurrenceEndDate {
+                _hasRecurrenceEnd = State(initialValue: true)
+                _recurrenceEndDate = State(initialValue: endDate)
+            }
+            _reminder = State(initialValue: EventReminder(rawValue: e.reminderMinutes) ?? EventReminder.none)
+            _alertStyle = State(initialValue: e.alertStyle)
+            _location = State(initialValue: e.location)
+            _syncToAppleCalendar = State(initialValue: e.syncToAppleCalendar)
+            _selectedAppleCalendarId = State(initialValue: e.appleCalendarId)
+        } else {
+            _kind = State(initialValue: initialKind)
+            _date = State(initialValue: Self.newEventDate(on: initialDate))
+        }
+    }
+
+    /// 新事件的開始時間：那一天＋預設排程時間的時、分（以前 onAppear 那幾行照搬）
+    private static func newEventDate(on initialDate: Date) -> Date {
+        let cal = Calendar.current
+        let sched = FiveMinuteDateTimePicker.defaultSchedulingTime()
+        let timeComp = cal.dateComponents([.hour, .minute], from: sched)
+        var dayComp = cal.dateComponents([.year, .month, .day], from: initialDate)
+        dayComp.hour = timeComp.hour
+        dayComp.minute = timeComp.minute
+        return cal.date(from: dayComp) ?? initialDate
+    }
 
     /// 常用長度選項（分鐘），0 = 全日
     private let durationOptions: [(label: String, minutes: Int)] = [
@@ -2114,32 +2153,8 @@ struct PersonalEventEditor: View {
                 Text("請至 iOS 設定 → LifeGood → 通知 開啟，否則無法收到提醒。")
             }
             .onAppear {
-                if let e = editing {
-                    title = e.title
-                    kind = e.kind
-                    date = e.date
-                    durationMinutes = e.durationMinutes
-                    note = e.note
-                    recurrence = e.recurrence
-                    if let endDate = e.recurrenceEndDate {
-                        hasRecurrenceEnd = true
-                        recurrenceEndDate = endDate
-                    }
-                    reminder = EventReminder(rawValue: e.reminderMinutes) ?? .none
-                    alertStyle = e.alertStyle
-                    location = e.location
-                    syncToAppleCalendar = e.syncToAppleCalendar
-                    selectedAppleCalendarId = e.appleCalendarId
-                } else {
-                    // 新事件：套用預設類型（會議 / 事務），日期用使用者選的那天
-                    kind = initialKind
-                    let cal = Calendar.current
-                    let sched = FiveMinuteDateTimePicker.defaultSchedulingTime()
-                    let timeComp = cal.dateComponents([.hour, .minute], from: sched)
-                    var dayComp = cal.dateComponents([.year, .month, .day], from: initialDate)
-                    dayComp.hour = timeComp.hour
-                    dayComp.minute = timeComp.minute
-                    date = cal.date(from: dayComp) ?? initialDate
+                // [v25.614] 其他欄位 init 就填好了（編輯舊的一筆、新增的類型和日期）；這裡只剩要讀設定、行事曆清單的 Apple 行事曆
+                if editing == nil {
                     // Apple 行事曆：用上次新增時的設定預填
                     syncToAppleCalendar = lastSyncToAppleCalendar
                     if !lastAppleCalendarIdRaw.isEmpty {

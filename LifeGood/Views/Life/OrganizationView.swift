@@ -926,13 +926,14 @@ struct DepartmentDetailView: View {
     private var reorgMenu: some View {
         if !OrgReorgIndex.isMerged(deptId) {
             Menu {
-                Button { openReorg(.rename) } label: {
+                // [v25.614] 選單收起來那一輪先過，下一輪才開（照 StockLedgerCard.addLater）
+                Button { DispatchQueue.main.async { openReorg(.rename) } } label: {
                     Label("改名…", systemImage: "pencil")
                 }
-                Button { openReorg(.merge) } label: {
+                Button { DispatchQueue.main.async { openReorg(.merge) } } label: {
                     Label("合併到…", systemImage: "arrow.triangle.merge")
                 }
-                Button { openReorg(.split) } label: {
+                Button { DispatchQueue.main.async { openReorg(.split) } } label: {
                     Label("拆成兩個…", systemImage: "arrow.triangle.branch")
                 }
             } label: {

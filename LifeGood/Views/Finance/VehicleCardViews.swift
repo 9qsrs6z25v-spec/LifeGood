@@ -1432,8 +1432,11 @@ struct VehicleLedgerSection: View {
         let a = actions
         return FinanceAddMenuPill(title: "記一筆", canEdit: a.canEdit, askPremium: a.askPremium) {
             ForEach(kinds, id: \.id) { kind in
+                // [v25.614] 選單收起來那一輪先過，下一輪才開（照 StockLedgerCard.addLater）
                 Button {
-                    a.addLedger(kind)
+                    DispatchQueue.main.async {
+                        a.addLedger(kind)
+                    }
                 } label: {
                     Label(kind.title, systemImage: kind.icon)
                 }

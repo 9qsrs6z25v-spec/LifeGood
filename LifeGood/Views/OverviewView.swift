@@ -150,10 +150,11 @@ struct OverviewView: View {
 
     private var quickAddMenu: some View {
         Menu {
-            Button { showAddVariable = true } label: { Label("變動支出", systemImage: "arrow.up.arrow.down.circle.fill") }
-            Button { showAddFixed = true } label: { Label("固定支出", systemImage: "pin.circle.fill") }
-            Button { showAddStock = true } label: { Label("股票", systemImage: "chart.line.uptrend.xyaxis") }
-            Button { showAddRealEstate = true } label: { Label("房地產", systemImage: "building.2.fill") }
+            // [v25.614] 選單收起來那一輪先過，下一輪才開（照 StockLedgerCard.addLater）
+            Button { DispatchQueue.main.async { showAddVariable = true } } label: { Label("變動支出", systemImage: "arrow.up.arrow.down.circle.fill") }
+            Button { DispatchQueue.main.async { showAddFixed = true } } label: { Label("固定支出", systemImage: "pin.circle.fill") }
+            Button { DispatchQueue.main.async { showAddStock = true } } label: { Label("股票", systemImage: "chart.line.uptrend.xyaxis") }
+            Button { DispatchQueue.main.async { showAddRealEstate = true } } label: { Label("房地產", systemImage: "building.2.fill") }
         } label: {
             Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)
         }

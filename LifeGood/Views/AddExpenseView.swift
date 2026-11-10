@@ -115,6 +115,8 @@ struct AddExpenseView: View {
     @State private var amountAsk: AmountFromAsk?
     /// [v25.563] 打開編輯時的金額欄、幣別（沒動過金額就不問：舊資料帶回時 %.0f、外幣除匯率會跟原本差一點）
     @State private var loadedAmountKey = ""
+    /// [v25.614] 打開編輯時的金額欄、幣別、原本存的 amount（沒改金額也沒改幣別就存原本的：ExpenseAmountEdit.amountToSave）
+    @State private var loadedAmount: ExpenseAmountEdit.Loaded?
     // 即時金額預覽卡進場動畫旗標
     @State private var amountCardAppeared = false
 
@@ -3733,7 +3735,7 @@ struct AddExpenseView: View {
 
         // [v25.563] 改了週期性固定支出的金額：先問以前扣過的那幾期要不要跟著改（D9）；選了 pickAmountFrom 再叫一次這裡。
         // 金額算法跟下面存檔同一條（儲蓄險是原幣，其他換台幣）
-        let candidateAmount = isSavingsInsurance ? rawAmount : rawAmount * currencyMultiplier
+        let candidateAmount = amountForSave(rawAmount, finalAmountText: finalAmountText)
         if let ask = amountChangeAsk(candidate: candidateAmount, title: trimmedTitle) {
             amountAsk = ask
             return
@@ -3742,7 +3744,7 @@ struct AddExpenseView: View {
         isSaving = true
 
         // 自訂幣別換算為 NT$（儲蓄險不適用，使用其自身幣別欄位）
-        let amount = isSavingsInsurance ? rawAmount : rawAmount * currencyMultiplier
+        let amount = amountForSave(rawAmount, finalAmountText: finalAmountText)
 
         let expenseId = editingExpense?.id ?? generatedNewExpenseId
         // 正向連結遺失時，改用反向連結（儲蓄險記得連到本支出）找回既有保單，避免重存時建立重複保單
@@ -4467,14 +4469,15 @@ struct AddExpenseView: View {
         // 還原為原始幣別金額顯示：儲蓄險直接用 amount（未乘匯率），其他類型要除以匯率還原
         let editingIsSavingsIns = expense.fixedCategory == .insurance
             && expense.insuranceSubCategory == .savings
+        // [v25.614] 最多 2 位小數、去尾巴的 0（以前 %.0f：USD 19.99 顯示 20、401.25 顯示 401）
         if editingIsSavingsIns {
-            amountText = String(format: "%.0f", expense.amount)
+            amountText = ExpenseAmountEdit.fieldText(expense.amount)
         } else if expense.currencyCode != "NT$",
            let rate = store.currencyRates.first(where: { $0.code == expense.currencyCode }),
            rate.rate > 0 {
-            amountText = String(format: "%.0f", expense.amount / rate.rate)
+            amountText = ExpenseAmountEdit.fieldText(expense.amount / rate.rate)
         } else {
-            amountText = String(format: "%.0f", expense.amount)
+            amountText = ExpenseAmountEdit.fieldText(expense.amount)
         }
         date = expense.date
         if let vc = expense.variableCategory { selectedVariableCategory = vc }
@@ -4668,6 +4671,9 @@ struct AddExpenseView: View {
 
         // [v25.563] 記下帶回來的金額欄、幣別：存檔時沒動過就不問「從今天起／全部都改」（amountChangeAsk）
         loadedAmountKey = amountKey
+        // [v25.614] 記下打開時的金額欄、幣別、原本存的 amount：沒改就存原本的（不照新匯率重算、不捨小數）
+        loadedAmount = ExpenseAmountEdit.Loaded(text: amountText, code: selectedCurrencyCode, insCode: insCurrencyCode,
+                                                isSavings: isSavingsInsurance, amount: expense.amount)
     }
 
     /// 同步汽車變動支出到理財模式的汽車
@@ -4748,6 +4754,15 @@ struct AddExpenseView: View {
             return rate.rate
         }
         return 1
+    }
+
+    /// [v25.614] 要存的 amount：照以前的規則換算（儲蓄險＝原幣、其他＝× 匯率）；沒改金額也沒改幣別（而且金額是從金額欄來的）
+    /// ＝原本存的那個數（不照新匯率重算、不捨小數）。存檔、「從今天起／全部都改」的 candidateAmount 都叫這裡
+    private func amountForSave(_ rawAmount: Double, finalAmountText: String) -> Double {
+        let converted = isSavingsInsurance ? rawAmount : rawAmount * currencyMultiplier
+        return ExpenseAmountEdit.amountToSave(converted: converted, loaded: loadedAmount, text: amountText,
+                                              fromField: finalAmountText == amountText, code: selectedCurrencyCode,
+                                              insCode: insCurrencyCode, isSavings: isSavingsInsurance)
     }
 
     /// [v2 小工具] 從小工具進來的新增：等 sheet 升起的動畫（約 0.45 秒）播完再把焦點給金額欄，

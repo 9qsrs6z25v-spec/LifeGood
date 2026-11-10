@@ -1172,24 +1172,31 @@ struct SubordinateDetailView: View {
     /// 在職的「…」（v25.370 起的那幾顆，v25.593 只是從 body 搬來，一個字都沒改）
     @ViewBuilder
     private var activeMenuItems: some View {
+        // [v25.614] 選單收起來那一輪先過，下一輪才開（照 StockLedgerCard.addLater）
         Button {
-            if subscription.isPremium { showEdit = true }
-            else { showPremiumAlert = true }
+            DispatchQueue.main.async {
+                if subscription.isPremium { showEdit = true }
+                else { showPremiumAlert = true }
+            }
         } label: {
             Label("編輯", systemImage: "square.and.pencil")
         }
         // 升職（使用者指定）：付費鎖比照編輯
         Button {
-            if subscription.isPremium { showPromotion = true }
-            else { showPremiumAlert = true }
+            DispatchQueue.main.async {
+                if subscription.isPremium { showPromotion = true }
+                else { showPremiumAlert = true }
+            }
         } label: {
             Label("升職", systemImage: "arrow.up.circle.fill")
         }
         // [v25.590 轉組織 v1a-1] 轉組織（judge §4.1）：在〔升職〕下面；開始精靈要訂閱（judge §6）。
         // 要退回這一件：刪這一顆。
         Button {
-            if subscription.isPremium { orgMoveWizard = OrgMoveWizardRequest(personId: subordinateId) }
-            else { showPremiumAlert = true }
+            DispatchQueue.main.async {
+                if subscription.isPremium { orgMoveWizard = OrgMoveWizardRequest(personId: subordinateId) }
+                else { showPremiumAlert = true }
+            }
         } label: {
             // [v25.592 轉組織 v1b] 排好、部門還沒改的那位寫「轉組織（11/1 排好了）」（字在 orgMoveMenuTitle 組好）。
             // 要退回這一件：改回 Label("轉組織", …)，刪 orgMoveMenuTitle
@@ -1197,8 +1204,10 @@ struct SubordinateDetailView: View {
         }
         // [v25.348] 績效互評：填這位同仁對大家的年度排名
         Button {
-            if subscription.isPremium { showPerformance = true }
-            else { showPremiumAlert = true }
+            DispatchQueue.main.async {
+                if subscription.isPremium { showPerformance = true }
+                else { showPremiumAlert = true }
+            }
         } label: {
             Label("績效互評排名", systemImage: "trophy.fill")
         }
@@ -2054,13 +2063,18 @@ struct SubordinateDetailView: View {
         return VStack(alignment: .leading, spacing: 0) {
             sectionHeader("優缺點", icon: "hand.thumbsup.fill", color: .green, count: items.count) {
                 Menu {
+                    // [v25.614] 選單收起來那一輪先過，下一輪才開（照 StockLedgerCard.addLater）
                     Button {
-                        if subscription.isPremium { addingType = .pro }
-                        else { showPremiumAlert = true }
+                        DispatchQueue.main.async {
+                            if subscription.isPremium { addingType = .pro }
+                            else { showPremiumAlert = true }
+                        }
                     } label: { Label("優點", systemImage: "hand.thumbsup.fill") }
                     Button {
-                        if subscription.isPremium { addingType = .con }
-                        else { showPremiumAlert = true }
+                        DispatchQueue.main.async {
+                            if subscription.isPremium { addingType = .con }
+                            else { showPremiumAlert = true }
+                        }
                     } label: { Label("缺點", systemImage: "hand.thumbsdown.fill") }
                 } label: {
                     Image(systemName: "plus.circle.fill")

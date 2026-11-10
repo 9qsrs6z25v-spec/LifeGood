@@ -386,10 +386,11 @@ struct SubordinateOverviewView: View {
     /// 舊的〔完整文字〕＋「圖片匯出」7 顆單區按鈕拿掉：選項頁勾一格就是以前那一顆，記住上次之後一樣兩下（design §8.2）。
     private var exportMenu: some View {
         Menu {
-            Button { teamExportRequest = TeamExportRequest(format: .image) } label: {
+            // [v25.614] 選單收起來那一輪先過，下一輪才開（照 StockLedgerCard.addLater）
+            Button { DispatchQueue.main.async { teamExportRequest = TeamExportRequest(format: .image) } } label: {
                 Label("匯出圖片…", systemImage: "photo")
             }
-            Button { teamExportRequest = TeamExportRequest(format: .text) } label: {
+            Button { DispatchQueue.main.async { teamExportRequest = TeamExportRequest(format: .text) } } label: {
                 Label("匯出文字…", systemImage: "text.alignleft")
             }
         } label: {
@@ -401,13 +402,14 @@ struct SubordinateOverviewView: View {
     private var addMenu: some View {
         Menu {
             Section("我的行事曆") {
-                Button { addPersonalKind = .meeting } label: { Label("新增會議", systemImage: "person.3.fill") }
-                Button { addPersonalKind = .task } label: { Label("新增事務", systemImage: "checklist") }
+                // [v25.614] 選單收起來那一輪先過，下一輪才開（照 StockLedgerCard.addLater）
+                Button { DispatchQueue.main.async { addPersonalKind = .meeting } } label: { Label("新增會議", systemImage: "person.3.fill") }
+                Button { DispatchQueue.main.async { addPersonalKind = .task } } label: { Label("新增事務", systemImage: "checklist") }
             }
             Section("部屬") {
-                Button { subAddKind = .task } label: { Label("新增部屬任務", systemImage: "checklist") }
-                Button { subAddKind = .meeting } label: { Label("新增部屬會議", systemImage: "person.3.fill") }
-                Button { subAddKind = .report } label: { Label("新增部屬報告", systemImage: "doc.text.fill") }
+                Button { DispatchQueue.main.async { subAddKind = .task } } label: { Label("新增部屬任務", systemImage: "checklist") }
+                Button { DispatchQueue.main.async { subAddKind = .meeting } } label: { Label("新增部屬會議", systemImage: "person.3.fill") }
+                Button { DispatchQueue.main.async { subAddKind = .report } } label: { Label("新增部屬報告", systemImage: "doc.text.fill") }
             }
         } label: {
             Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)

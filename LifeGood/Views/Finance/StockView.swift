@@ -134,7 +134,8 @@ struct StockView: View {
                                     stockCard(item)
                                         .onTapGesture { viewingItem = item }
                                         .contextMenu {
-                                            Button { editingItem = item } label: {
+                                            // [v25.614] 選單收起來那一輪先過，下一輪才開（照 StockLedgerCard.addLater）
+                                            Button { DispatchQueue.main.async { editingItem = item } } label: {
                                                 Label("編輯", systemImage: "pencil")
                                             }
                                             Button(role: .destructive) { deleteStock(item) } label: {
@@ -173,10 +174,11 @@ struct StockView: View {
                     HStack(spacing: 16) {
                         // 功能選單（使用者指定）：法人連續買超＋AI 持股健診
                         Menu {
-                            Button { showInstitutional = true } label: {
+                            // [v25.614] 選單收起來那一輪先過，下一輪才開（照 StockLedgerCard.addLater）
+                            Button { DispatchQueue.main.async { showInstitutional = true } } label: {
                                 Label("法人連續買超", systemImage: "building.columns.fill")
                             }
-                            Button { showAIAnalysis = true } label: {
+                            Button { DispatchQueue.main.async { showAIAnalysis = true } } label: {
                                 Label("AI 持股健診", systemImage: "sparkles")
                             }
                         } label: {
@@ -395,7 +397,8 @@ struct StockView: View {
                             stockCard(item)
                                 .onTapGesture { viewingItem = item }
                                 .contextMenu {
-                                    Button { editingItem = item } label: {
+                                    // [v25.614] 選單收起來那一輪先過，下一輪才開（照 StockLedgerCard.addLater）
+                                    Button { DispatchQueue.main.async { editingItem = item } } label: {
                                         Label("編輯", systemImage: "pencil")
                                     }
                                     Button(role: .destructive) { deleteStock(item) } label: {

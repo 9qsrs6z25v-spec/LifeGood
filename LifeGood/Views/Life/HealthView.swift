@@ -874,15 +874,20 @@ struct HealthView: View {
     @ViewBuilder
     private var addMenuItems: some View {
         ForEach(Self.logSports) { s in
+            // [v25.614] 選單收起來那一輪先過，下一輪才開（照 StockLedgerCard.addLater）
             Button {
-                openEditor(sport: s)
+                DispatchQueue.main.async {
+                    openEditor(sport: s)
+                }
             } label: {
                 Label("補記一趟" + s.displayName, systemImage: s.icon)
             }
         }
         Divider()
         Button {
-            openEditor(sport: .strength)
+            DispatchQueue.main.async {
+                openEditor(sport: .strength)
+            }
         } label: {
             Label("記一次重訓", systemImage: "dumbbell.fill")
         }
@@ -891,8 +896,11 @@ struct HealthView: View {
     /// 「⋯」：每週目標、看板主角、Apple 健康（都不擋訂閱）
     private var moreMenu: some View {
         Menu {
+            // [v25.614] 選單收起來那一輪先過，下一輪才開（照 StockLedgerCard.addLater）
             Button {
-                openGoal()
+                DispatchQueue.main.async {
+                    openGoal()
+                }
             } label: {
                 Label("每週目標", systemImage: "target")
             }
@@ -905,7 +913,9 @@ struct HealthView: View {
             }
             .pickerStyle(.menu)
             Button {
-                openAppleHealth()
+                DispatchQueue.main.async {
+                    openAppleHealth()
+                }
             } label: {
                 Label("Apple 健康", systemImage: "heart.text.square")
             }

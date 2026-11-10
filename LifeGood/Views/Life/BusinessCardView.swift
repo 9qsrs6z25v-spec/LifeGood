@@ -1066,24 +1066,31 @@ struct BusinessCardView: View {
                     }
                     ToolbarItem(placement: .topBarTrailing) {
                         Menu {
+                            // [v25.614] 選單收起來那一輪先過，下一輪才開（照 StockLedgerCard.addLater）
                             Button {
-                                if subscription.isPremium { showAdd = true }
-                                else { showPremiumAlert = true }
+                                DispatchQueue.main.async {
+                                    if subscription.isPremium { showAdd = true }
+                                    else { showPremiumAlert = true }
+                                }
                             } label: {
                                 Label("新增空白名片", systemImage: "square.and.pencil")
                             }
                             Button {
-                                if subscription.isPremium {
-                                    if VNDocumentCameraViewController.isSupported {
-                                        showCardScanner = true
-                                    }
-                                } else { showPremiumAlert = true }
+                                DispatchQueue.main.async {
+                                    if subscription.isPremium {
+                                        if VNDocumentCameraViewController.isSupported {
+                                            showCardScanner = true
+                                        }
+                                    } else { showPremiumAlert = true }
+                                }
                             } label: {
                                 Label("拍名片自動辨識", systemImage: "camera.viewfinder")
                             }
                             Button {
-                                if subscription.isPremium { showContactPicker = true }
-                                else { showPremiumAlert = true }
+                                DispatchQueue.main.async {
+                                    if subscription.isPremium { showContactPicker = true }
+                                    else { showPremiumAlert = true }
+                                }
                             } label: {
                                 Label("從聯絡人匯入", systemImage: "person.crop.circle.badge.plus")
                             }
@@ -1593,25 +1600,32 @@ struct BusinessCardDetailView: View {
                         ProgressView().tint(.green)
                     } else {
                         Menu {
+                            // [v25.614] 選單收起來那一輪先過，下一輪才開（照 StockLedgerCard.addLater）
                             Button {
-                                if subscription.isPremium { showEdit = true }
-                                else { showPremiumAlert = true }
+                                DispatchQueue.main.async {
+                                    if subscription.isPremium { showEdit = true }
+                                    else { showPremiumAlert = true }
+                                }
                             } label: {
                                 Label("編輯", systemImage: "pencil")
                             }
                             Button {
-                                if subscription.isPremium {
-                                    if VNDocumentCameraViewController.isSupported {
-                                        showRescanScanner = true
-                                    }
-                                } else { showPremiumAlert = true }
+                                DispatchQueue.main.async {
+                                    if subscription.isPremium {
+                                        if VNDocumentCameraViewController.isSupported {
+                                            showRescanScanner = true
+                                        }
+                                    } else { showPremiumAlert = true }
+                                }
                             } label: {
                                 Label("重新拍照辨識", systemImage: "camera.viewfinder")
                             }
                             Divider()
                             Button(role: .destructive) {
-                                if subscription.isPremium { showDeleteConfirm = true }
-                                else { showPremiumAlert = true }
+                                DispatchQueue.main.async {
+                                    if subscription.isPremium { showDeleteConfirm = true }
+                                    else { showPremiumAlert = true }
+                                }
                             } label: {
                                 Label("刪除", systemImage: "trash")
                             }

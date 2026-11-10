@@ -394,13 +394,18 @@ struct TripPlanDetailView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     if let p = plan, !p.stops.isEmpty {
                         Menu {
+                            // [v25.614] 選單收起來那一輪先過，下一輪才開（照 StockLedgerCard.addLater）
                             Button {
-                                sharing = ShareText(text: TripShare.planText(p))
+                                DispatchQueue.main.async {
+                                    sharing = ShareText(text: TripShare.planText(p))
+                                }
                             } label: {
                                 Label("分享文字行程", systemImage: "text.alignleft")
                             }
                             Button {
-                                showImageExport = true
+                                DispatchQueue.main.async {
+                                    showImageExport = true
+                                }
                             } label: {
                                 Label("分享成圖片…", systemImage: "photo")
                             }
@@ -2305,17 +2310,20 @@ struct TripPlanDetailView: View {
     /// [v25.519] scheme：這張卡的配色（夜晚的卡片是深色），… 的墨色照它算
     private func stopMenu(_ slot: TripPlan.Slot, color c: Color, scheme: ColorScheme) -> some View {
         Menu {
-            Button("打開景點卡") { openingStopId = slot.stop.id }
-            Button("編輯") { editingStop = slot.stop }
+            // [v25.614] 選單收起來那一輪先過，下一輪才開（照 StockLedgerCard.addLater）
+            Button("打開景點卡") { DispatchQueue.main.async { openingStopId = slot.stop.id } }
+            Button("編輯") { DispatchQueue.main.async { editingStop = slot.stop } }
             // [v25.519] 長按照片也可以；衛星那一支對 VoiceOver 是隱藏的，選單裡一定要有
-            Button("更換封面…") { coverStopId = slot.stop.id }
+            Button("更換封面…") { DispatchQueue.main.async { coverStopId = slot.stop.id } }
             // [v25.475] 使用者要求：在行程頁就能直接記這一站的花費，
             // 不用跳去記帳頁再回頭挑行程與站別。日期帶這一站的抵達
             // 時間（打過卡的話時間軸給的就是實際時間），行程與站別
             // 直接預填，開進去只要填金額。
             Button("記一筆這一站的花費") {
-                addingExpense = StopExpenseTarget(stopId: slot.stop.id,
-                                                  date: slot.arrival)
+                DispatchQueue.main.async {
+                    addingExpense = StopExpenseTarget(stopId: slot.stop.id,
+                                                      date: slot.arrival)
+                }
             }
             if slot.stop.checkInState != .notArrived {
                 if slot.stop.actualDwellSeconds != nil {
@@ -2343,7 +2351,9 @@ struct TripPlanDetailView: View {
                 }
             }
             Button("在這之後插入景點") {
-                insertion = StopInsertion(at: slot.index + 1)
+                DispatchQueue.main.async {
+                    insertion = StopInsertion(at: slot.index + 1)
+                }
             }
             Divider()
             if slot.index > 0 {
@@ -2357,7 +2367,7 @@ struct TripPlanDetailView: View {
             Button("分享這一站（圖片）") {
                 Task { await shareStopImage(slot.stop) }
             }
-            Button("分享這一站（文字）") { shareStop(slot.stop) }
+            Button("分享這一站（文字）") { DispatchQueue.main.async { shareStop(slot.stop) } }
             if !slot.stop.address.trimmingCharacters(in: .whitespaces).isEmpty {
                 Button("拷貝地址") {
                     UIPasteboard.general.string =

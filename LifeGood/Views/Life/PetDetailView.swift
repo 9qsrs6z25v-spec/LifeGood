@@ -392,7 +392,8 @@ struct PetDetailView: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
-            Button("編輯") { gated { editingRecord = rec } }
+            // [v25.614] 選單收起來那一輪先過，下一輪才開（照 StockLedgerCard.addLater）
+            Button("編輯") { DispatchQueue.main.async { gated { editingRecord = rec } } }
             Button("刪除", role: .destructive) { gated { removing = .record(rec) } }
         }
     }
@@ -487,7 +488,8 @@ struct PetDetailView: View {
                 }
                 .buttonStyle(.plain)
                 .contextMenu {
-                    Button("編輯") { gated { editingDaily = rec } }
+                    // [v25.614] 選單收起來那一輪先過，下一輪才開（照 StockLedgerCard.addLater）
+                    Button("編輯") { DispatchQueue.main.async { gated { editingDaily = rec } } }
                     Button("刪除", role: .destructive) { gated { removing = .daily(rec) } }
                 }
             }
@@ -567,7 +569,8 @@ struct PetDetailView: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
-            Button("編輯") { gated { editingPhoto = photo } }
+            // [v25.614] 選單收起來那一輪先過，下一輪才開（照 StockLedgerCard.addLater）
+            Button("編輯") { DispatchQueue.main.async { gated { editingPhoto = photo } } }
             Button("刪除", role: .destructive) { gated { removing = .photo(photo) } }
         }
     }

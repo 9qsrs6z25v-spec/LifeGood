@@ -470,13 +470,18 @@ struct WealthCardPage: View {
 
     private var cardAddMenu: some View {
         Menu {
+            // [v25.614] 選單收起來那一輪先過，下一輪才開（照 StockLedgerCard.addLater）
             Button {
-                present(.addExpense(currentId, nil, nil, nil, nil), premium: true)
+                DispatchQueue.main.async {
+                    present(.addExpense(currentId, nil, nil, nil, nil), premium: true)
+                }
             } label: {
                 Label("刷這張卡記一筆", systemImage: "creditcard")
             }
             Button {
-                present(.paid(currentId, nil), premium: false)
+                DispatchQueue.main.async {
+                    present(.paid(currentId, nil), premium: false)
+                }
             } label: {
                 Label("標成已繳", systemImage: "checkmark.circle")
             }
@@ -965,42 +970,57 @@ struct WealthBankAddItems: View {
     }
 
     var body: some View {
+        // [v25.614] 選單收起來那一輪先過，下一輪才開（照 StockLedgerCard.addLater）
         ForEach(WealthRecordKind.allCases) { k in
             Button(k.title) {
-                actions.present(.record(accountId, k, nil, nil), true)
+                DispatchQueue.main.async {
+                    actions.present(.record(accountId, k, nil, nil), true)
+                }
             }
         }
         Button("轉帳") {
-            actions.present(.transfer(accountId), true)
+            DispatchQueue.main.async {
+                actions.present(.transfer(accountId), true)
+            }
         }
         // [v25.575] 定期轉帳（「從」帶這個帳戶；要訂閱；收起來的帳戶沒有）
         if !accountHidden {
             Button("定期轉帳") {
-                actions.present(.transferForm(accountId), true)
+                DispatchQueue.main.async {
+                    actions.present(.transferForm(accountId), true)
+                }
             }
         }
         // [v25.566] 定存（記在這個帳戶）、換匯（有外幣才有）
         if !accountHidden {
             Button("定存") {
-                actions.present(.timeDeposit(accountId, nil), true)
+                DispatchQueue.main.async {
+                    actions.present(.timeDeposit(accountId, nil), true)
+                }
             }
         }
         if hasForeign {
             Button("換匯") {
-                actions.present(.exchange(accountId), true)
+                DispatchQueue.main.async {
+                    actions.present(.exchange(accountId), true)
+                }
             }
         }
         if codes.count > 1 {
             Menu("對存摺") {
                 ForEach(codes, id: \.self) { c in
                     Button(WealthCardText.codeName(c)) {
-                        actions.present(.anchor(accountId, c, nil), true)
+                        DispatchQueue.main.async {
+                            actions.present(.anchor(accountId, c, nil), true)
+                        }
                     }
                 }
             }
         } else {
             Button("對存摺") {
-                actions.present(.anchor(accountId, codes.first ?? "NT$", nil), true)
+                DispatchQueue.main.async {
+                    actions.present(.anchor(accountId, codes.first ?? "NT$", nil), true)
+                }
             }
         }
     }
@@ -2339,21 +2359,28 @@ struct WealthCardLinkedSection: View {
         }
         .buttonStyle(.plain)
         .contextMenu {
+            // [v25.614] 選單收起來那一輪先過，下一輪才開（照 StockLedgerCard.addLater）
             if let rid = ruleId {
                 Button {
-                    actions.present(.transferEdit(rid), true)
+                    DispatchQueue.main.async {
+                        actions.present(.transferEdit(rid), true)
+                    }
                 } label: {
                     Label("改到別的帳戶…", systemImage: "arrow.left.arrow.right")
                 }
             } else if canMove {
                 Button {
-                    actions.present(.moveLinks(from, expenseIds, incomeIds, false), true)
+                    DispatchQueue.main.async {
+                        actions.present(.moveLinks(from, expenseIds, incomeIds, false), true)
+                    }
                 } label: {
                     Label("改到別的帳戶…", systemImage: "arrow.left.arrow.right")
                 }
             }
             Button {
-                actions.open(r.open)
+                DispatchQueue.main.async {
+                    actions.open(r.open)
+                }
             } label: {
                 Label("打開", systemImage: "square.and.pencil")
             }

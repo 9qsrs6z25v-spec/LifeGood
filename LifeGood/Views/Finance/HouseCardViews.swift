@@ -963,8 +963,11 @@ struct HouseLedgerSection: View {
     private var addMenu: some View {
         FinanceAddMenuPill(title: "記一筆", canEdit: actions.canEdit, askPremium: actions.askPremium) {
             ForEach(HouseLedgerAddKind.allCases, id: \.id) { kind in
+                // [v25.614] 選單收起來那一輪先過，下一輪才開（照 StockLedgerCard.addLater）
                 Button {
-                    actions.addLedger(kind)
+                    DispatchQueue.main.async {
+                        actions.addLedger(kind)
+                    }
                 } label: {
                     Label(kind.title, systemImage: kind.icon)
                 }

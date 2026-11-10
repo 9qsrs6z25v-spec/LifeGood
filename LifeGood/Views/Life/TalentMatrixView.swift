@@ -1358,12 +1358,13 @@ struct TalentStatsView: View {
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {
                 Menu {
-                    Button { pendingExport = PendingStatExport(chartId: nil) } label: {
+                    // [v25.614] 選單收起來那一輪先過，下一輪才開（照 StockLedgerCard.addLater）
+                    Button { DispatchQueue.main.async { pendingExport = PendingStatExport(chartId: nil) } } label: {
                         Label("全部圖表（一張圖）", systemImage: "square.grid.2x2")
                     }
                     Divider()
                     ForEach(charts) { c in
-                        Button { pendingExport = PendingStatExport(chartId: c.id) } label: {
+                        Button { DispatchQueue.main.async { pendingExport = PendingStatExport(chartId: c.id) } } label: {
                             Label(c.title, systemImage: c.icon)
                         }
                     }

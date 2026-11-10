@@ -977,22 +977,23 @@ extension RealEstateDetailView {
     fileprivate func floorsAddItems(_ card: HouseCardData) -> some View {
         let floors = card.floors.floors
         if floors.count == 1, let only = floors.first {
-            Button { newFloorItem(floorId: only.id, parent: nil) } label: {
+            // [v25.614] 選單收起來那一輪先過，下一輪才開（照 StockLedgerCard.addLater）
+            Button { DispatchQueue.main.async { newFloorItem(floorId: only.id, parent: nil) } } label: {
                 Label("新增物品", systemImage: "shippingbox")
             }
         } else if floors.count > 1 {
             Menu {
                 ForEach(floors) { f in
-                    Button(f.label) { newFloorItem(floorId: f.id, parent: nil) }
+                    Button(f.label) { DispatchQueue.main.async { newFloorItem(floorId: f.id, parent: nil) } }
                 }
             } label: {
                 Label("新增物品", systemImage: "shippingbox")
             }
         }
-        Button { sheet = .edit(.floors) } label: {
+        Button { DispatchQueue.main.async { sheet = .edit(.floors) } } label: {
             Label("新增家電家具", systemImage: "sofa")
         }
-        Button { sheet = .edit(.floors) } label: {
+        Button { DispatchQueue.main.async { sheet = .edit(.floors) } } label: {
             Label("新增樓層", systemImage: "square.stack.3d.up")
         }
     }
@@ -1473,13 +1474,18 @@ extension RealEstateDetailView {
 
     @ViewBuilder
     fileprivate var photoAddItems: some View {
+        // [v25.614] 選單收起來那一輪先過，下一輪才開（照 StockLedgerCard.addLater）
         Button {
-            sheet = .newRenovation(UUID())
+            DispatchQueue.main.async {
+                sheet = .newRenovation(UUID())
+            }
         } label: {
             Label("新增照片及描述", systemImage: "photo")
         }
         Button {
-            showDocumentPicker = true
+            DispatchQueue.main.async {
+                showDocumentPicker = true
+            }
         } label: {
             Label("上傳文件（PDF、PPT、Excel…）", systemImage: "doc.badge.plus")
         }

@@ -105,15 +105,20 @@ struct SubordinateEquipmentSection: View {
                 Spacer()
                 if canAddEquipment {
                     Menu {
+                        // [v25.614] 選單收起來那一輪先過，下一輪才開（照 StockLedgerCard.addLater）
                         Button {
-                            if subscription.isPremium { addingEquipment = true }
-                            else { showPremiumAlert = true }
+                            DispatchQueue.main.async {
+                                if subscription.isPremium { addingEquipment = true }
+                                else { showPremiumAlert = true }
+                            }
                         } label: {
                             Label("新增機台", systemImage: "plus")
                         }
                         Button {
-                            if subscription.isPremium { pickingExisting = true }
-                            else { showPremiumAlert = true }
+                            DispatchQueue.main.async {
+                                if subscription.isPremium { pickingExisting = true }
+                                else { showPremiumAlert = true }
+                            }
                         } label: {
                             Label("選取現有機台", systemImage: "checklist")
                         }
@@ -1699,13 +1704,14 @@ struct EquipmentDetailCard: View {
                 }
                 // [v25.303] 免進編輯畫面的快速新增：PM 停機／PM 完成復機／警報
                 Menu {
-                    Button { quickAddKind = .pmShutdown } label: {
+                    // [v25.614] 選單收起來那一輪先過，下一輪才開（照 StockLedgerCard.addLater）
+                    Button { DispatchQueue.main.async { quickAddKind = .pmShutdown } } label: {
                         Label("PM 停機", systemImage: "pause.circle.fill")
                     }
-                    Button { quickAddKind = .pmRestored } label: {
+                    Button { DispatchQueue.main.async { quickAddKind = .pmRestored } } label: {
                         Label("PM 完成復機", systemImage: "checkmark.circle.fill")
                     }
-                    Button { quickAddKind = .alarm } label: {
+                    Button { DispatchQueue.main.async { quickAddKind = .alarm } } label: {
                         Label("警報", systemImage: "bell.badge.fill")
                     }
                 } label: {

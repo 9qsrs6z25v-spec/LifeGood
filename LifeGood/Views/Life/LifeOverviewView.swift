@@ -114,13 +114,16 @@ struct LifeOverviewView: View {
     private var quickAddMenu: some View {
         Menu {
             // 記帳與股票為免費功能
-            Button { showAddVariable = true } label: { Label("變動支出", systemImage: "arrow.up.arrow.down.circle.fill") }
-            Button { showAddFixed = true } label: { Label("固定支出", systemImage: "pin.circle.fill") }
-            Button { showAddStock = true } label: { Label("股票", systemImage: "chart.line.uptrend.xyaxis") }
+            // [v25.614] 選單收起來那一輪先過，下一輪才開（照 StockLedgerCard.addLater）
+            Button { DispatchQueue.main.async { showAddVariable = true } } label: { Label("變動支出", systemImage: "arrow.up.arrow.down.circle.fill") }
+            Button { DispatchQueue.main.async { showAddFixed = true } } label: { Label("固定支出", systemImage: "pin.circle.fill") }
+            Button { DispatchQueue.main.async { showAddStock = true } } label: { Label("股票", systemImage: "chart.line.uptrend.xyaxis") }
             // 房地產需訂閱
             Button {
-                if subscription.isPremium { showAddRealEstate = true }
-                else { showPremiumAlert = true }
+                DispatchQueue.main.async {
+                    if subscription.isPremium { showAddRealEstate = true }
+                    else { showPremiumAlert = true }
+                }
             } label: { Label("房地產", systemImage: "building.2.fill") }
         } label: {
             Image(systemName: "plus.circle.fill").font(.title3).foregroundStyle(.green)

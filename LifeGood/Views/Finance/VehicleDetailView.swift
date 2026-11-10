@@ -809,8 +809,11 @@ extension VehicleDetailView {
     /// 四項（J475）：打開照片紀錄編輯器，類別先帶好
     fileprivate var photoAddItems: some View {
         ForEach(VehiclePhotoAddOption.all) { option in
+            // [v25.614] 選單收起來那一輪先過，下一輪才開（照 StockLedgerCard.addLater）
             Button {
-                requirePremium { sheet = .photoEditor(UUID(), nil, option.category) }
+                DispatchQueue.main.async {
+                    requirePremium { sheet = .photoEditor(UUID(), nil, option.category) }
+                }
             } label: {
                 Label(option.title, systemImage: option.category.icon)
             }

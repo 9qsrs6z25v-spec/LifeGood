@@ -764,25 +764,34 @@ struct WealthPageCardsSection: View {
 
     @ViewBuilder
     private func menu(_ r: WealthPageCardRow) -> some View {
+        // [v25.614] 選單收起來那一輪先過，下一輪才開（照 StockLedgerCard.addLater）
         if r.canMarkPaid {
             Button {
-                actions.open(.paid(r.id))
+                DispatchQueue.main.async {
+                    actions.open(.paid(r.id))
+                }
             } label: {
                 Label("標成已繳", systemImage: "checkmark.circle")
             }
         }
         Button {
-            actions.open(.addExpense(r.id))
+            DispatchQueue.main.async {
+                actions.open(.addExpense(r.id))
+            }
         } label: {
             Label("記一筆", systemImage: "square.and.pencil")
         }
         Button {
-            actions.edit(r.id, .card)
+            DispatchQueue.main.async {
+                actions.edit(r.id, .card)
+            }
         } label: {
             Label("編輯", systemImage: "pencil")
         }
         Button {
-            actions.confirm(.disableCard(r.id, r.name, r.recurringCount))
+            DispatchQueue.main.async {
+                actions.confirm(.disableCard(r.id, r.name, r.recurringCount))
+            }
         } label: {
             Label("停用", systemImage: "nosign")
         }
@@ -876,10 +885,13 @@ struct WealthPageBanksSection: View {
 
     @ViewBuilder
     private func menu(_ r: WealthPageBankRow) -> some View {
+        // [v25.614] 選單收起來那一輪先過，下一輪才開（照 StockLedgerCard.addLater）
         Menu {
             ForEach(WealthRecordKind.allCases) { k in
                 Button(k.title) {
-                    actions.open(.record(r.id, k))
+                    DispatchQueue.main.async {
+                        actions.open(.record(r.id, k))
+                    }
                 }
             }
         } label: {
@@ -887,17 +899,23 @@ struct WealthPageBanksSection: View {
         }
         anchorMenu(r)
         Button {
-            actions.open(.transfer(r.id))
+            DispatchQueue.main.async {
+                actions.open(.transfer(r.id))
+            }
         } label: {
             Label("轉帳", systemImage: "arrow.left.arrow.right")
         }
         Button {
-            actions.edit(r.id, .bank)
+            DispatchQueue.main.async {
+                actions.edit(r.id, .bank)
+            }
         } label: {
             Label("編輯", systemImage: "pencil")
         }
         Button {
-            actions.confirm(.hideAccount(r.id, r.name, r.hideNote))
+            DispatchQueue.main.async {
+                actions.confirm(.hideAccount(r.id, r.name, r.hideNote))
+            }
         } label: {
             Label("收起來", systemImage: "archivebox")
         }
@@ -910,7 +928,9 @@ struct WealthPageBanksSection: View {
             Menu {
                 ForEach(r.codes, id: \.self) { code in
                     Button(code) {
-                        actions.open(.anchor(r.id, code))
+                        DispatchQueue.main.async {
+                            actions.open(.anchor(r.id, code))
+                        }
                     }
                 }
             } label: {
@@ -918,7 +938,9 @@ struct WealthPageBanksSection: View {
             }
         } else {
             Button {
-                actions.open(.anchor(r.id, r.codes.first ?? "NT$"))
+                DispatchQueue.main.async {
+                    actions.open(.anchor(r.id, r.codes.first ?? "NT$"))
+                }
             } label: {
                 Label("對存摺", systemImage: "checkmark.seal")
             }
@@ -1345,7 +1367,9 @@ struct WealthPageBrokersSection: View {
         .accessibilityHint("點兩下打開這個證券戶")
         .contextMenu {
             Button {
-                actions.edit(r.id, .broker)
+                DispatchQueue.main.async {
+                    actions.edit(r.id, .broker)
+                }
             } label: {
                 Label("編輯", systemImage: "pencil")
             }
@@ -1438,7 +1462,9 @@ struct WealthPagePoliciesSection: View {
             rowButton(r, pal: pal)
                 .contextMenu {
                     Button {
-                        actions.edit(id, .policy)
+                        DispatchQueue.main.async {
+                            actions.edit(id, .policy)
+                        }
                     } label: {
                         Label("編輯", systemImage: "pencil")
                     }

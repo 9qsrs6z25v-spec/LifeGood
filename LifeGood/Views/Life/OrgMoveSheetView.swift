@@ -945,7 +945,8 @@ struct OrgMoveSheetView: View {
             }
         }
         if s.pending.canCancel {
-            Button(role: .destructive) { runHint(.cancel) } label: {
+            // [v25.614] 選單收起來那一輪先過，下一輪才開（照 StockLedgerCard.addLater）
+            Button(role: .destructive) { DispatchQueue.main.async { runHint(.cancel) } } label: {
                 Label("取消這張單", systemImage: "xmark.circle")
             }
         }

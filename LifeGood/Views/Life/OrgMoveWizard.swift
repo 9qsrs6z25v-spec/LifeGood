@@ -1065,9 +1065,12 @@ private struct OrgMoveStepList: View {
             if let s = suggestion {
                 Button(s.label) { giveAll(to: s.id, name: s.name, onlyIds: onlyIds, proxy: proxy) }
             }
+            // [v25.614] 選單收起來那一輪先過，下一輪才開（照 StockLedgerCard.addLater）
             Button("選別人…") {
-                pick = OrgMovePickRequest(title: proxy ? "誰代理" : "交給誰", personId: draft.personId, selected: nil,
-                                          purpose: purpose)
+                DispatchQueue.main.async {
+                    pick = OrgMovePickRequest(title: proxy ? "誰代理" : "交給誰", personId: draft.personId, selected: nil,
+                                              purpose: purpose)
+                }
             }
         } label: {
             OrgMoveWizMenuPill(text: title, tint: proxy ? Color.indigo : Color.teal)
@@ -1744,21 +1747,21 @@ private struct OrgMoveWizLineRow: View {
             }
             if row.canMemo {
                 Divider()
-                Button { onMemo() } label: { Label("交接備註…", systemImage: "text.bubble") }
+                Button { DispatchQueue.main.async { onMemo() } } label: { Label("交接備註…", systemImage: "text.bubble") }
                 if !row.overdue.isEmpty {
-                    Button { onDue() } label: { Label("改新的截止日…", systemImage: "calendar") }
+                    Button { DispatchQueue.main.async { onDue() } } label: { Label("改新的截止日…", systemImage: "calendar") }
                 }
             }
             // [v25.592 轉組織 v1b] 自己加的一項：〔改這一項…〕〔拿掉這一項〕。要退回這一件：刪這一段
             if row.isCustom {
                 Divider()
-                Button { onEditCustom() } label: { Label("改這一項…", systemImage: "pencil") }
+                Button { DispatchQueue.main.async { onEditCustom() } } label: { Label("改這一項…", systemImage: "pencil") }
                 Button(role: .destructive) { onRemoveCustom() } label: { Label("拿掉這一項", systemImage: "trash") }
             }
             // [v25.593 轉組織 v2] 一般待辦〔拆成兩件…〕（judge §5-3；最下面、Divider 後）。要退回這一件：刪這一段
             if row.canSplit {
                 Divider()
-                Button { onSplit() } label: { Label("拆成兩件…", systemImage: "scissors") }
+                Button { DispatchQueue.main.async { onSplit() } } label: { Label("拆成兩件…", systemImage: "scissors") }
             }
         } label: {
             OrgMoveWizCapsule(text: row.capsule, tone: row.tone, showLock: row.showLock)
