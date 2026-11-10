@@ -799,26 +799,26 @@ struct AddExpenseView: View {
 
     var body: some View {
         NavigationStack {
-            Form {
+            AnyView(Form {
                 // 美化 v2：即時金額預覽卡（金額 > 0 時 spring 滑入）
                 if (Double(amountText) ?? 0) > 0 {
-                    Section {
+                    AnyView(Section {
                         amountPreviewCard
                             .listRowBackground(Color.clear)
                             .listRowInsets(EdgeInsets())
-                    }
+                    })
                 }
-                oneTimeSwitchSection
-                basicInfoSection
+                AnyView(oneTimeSwitchSection)
+                AnyView(basicInfoSection)
 
                 // 變動支出：先選關聯資產，再選分類（基本模式隱藏關聯資產選擇）
                 if expenseType == .variable {
                     if advancedMode {
-                        assetLinkSection
-                        if selectedAssetLink == .vehicle { vehicleLinkSection }
-                        if selectedAssetLink == .stock { stockLinkSection }
-                        if selectedAssetLink == .insurance { insuranceLinkSection }
-                        if selectedAssetLink == .realEstate { realEstateLinkSection }
+                        AnyView(assetLinkSection)
+                        if selectedAssetLink == .vehicle { AnyView(vehicleLinkSection) }
+                        if selectedAssetLink == .stock { AnyView(stockLinkSection) }
+                        if selectedAssetLink == .insurance { AnyView(insuranceLinkSection) }
+                        if selectedAssetLink == .realEstate { AnyView(realEstateLinkSection) }
                     }
                     // 基本模式一律顯示分類；進階模式時若連結汽車/股票/房地產則隱藏分類
                     let suppressCategory = advancedMode && (
@@ -827,54 +827,54 @@ struct AddExpenseView: View {
                         || selectedAssetLink == .realEstate
                     )
                     if !suppressCategory {
-                        categorySection
+                        AnyView(categorySection)
                     }
                     // [v25.538] 基本模式看不到關聯資產，選了「汽車」以前沒地方選車，存成哪張車卡都看不到的支出
                     if !advancedMode && selectedVariableCategory == .vehicle {
-                        basicVehicleArea
+                        AnyView(basicVehicleArea)
                     }
                     // [v25.424] 旅遊期間的花費可以直接掛到那一趟行程上
-                    if showTripLinkSection { tripLinkSection }
+                    if showTripLinkSection { AnyView(tripLinkSection) }
                     // 進階模式：分類區塊下方加照片廊
                     if advancedMode || isVehicleFine {
-                        photoGallerySection
+                        AnyView(photoGallerySection)
                     }
                 } else {
                     // 固定支出：先選關聯資產（若適用），再選分類
                     if showFixedAssetLink {
-                        fixedAssetLinkSection
-                        if effectiveFixedAssetLink == .vehicle { fixedVehicleLinkSection }
-                        if effectiveFixedAssetLink == .realEstate { fixedRealEstateLinkSection }
-                        if effectiveFixedAssetLink == .insurance { fixedInsuranceLinkSection }
+                        AnyView(fixedAssetLinkSection)
+                        if effectiveFixedAssetLink == .vehicle { AnyView(fixedVehicleLinkSection) }
+                        if effectiveFixedAssetLink == .realEstate { AnyView(fixedRealEstateLinkSection) }
+                        if effectiveFixedAssetLink == .insurance { AnyView(fixedInsuranceLinkSection) }
                     }
-                    categorySection
+                    AnyView(categorySection)
                 }
 
                 // 固定支出：保險/貸款子分類
-                if isInsurance { insuranceSubCategorySection }
-                if isLoan { loanSubCategorySection }
+                if isInsurance { AnyView(insuranceSubCategorySection) }
+                if isLoan { AnyView(loanSubCategorySection) }
 
                 // 固定支出：節稅追蹤 toggle（保險 / 房貸 / 房租 才出現）
                 if showTaxDeductibleToggle {
-                    taxDeductibleToggleSection
+                    AnyView(taxDeductibleToggleSection)
                 }
 
                 // [v25.347] 固定支出：停止（取消訂閱、繳清貸款、退租⋯）
                 if expenseType == .fixed && !isSavingsInsurance {
-                    fixedEndSection
+                    AnyView(fixedEndSection)
                 }
 
                 if isSavingsInsurance {
-                    savingsInsuranceSection
-                    savingsCalcSection
+                    AnyView(savingsInsuranceSection)
+                    AnyView(savingsCalcSection)
                 } else if isMortgage {
-                    mortgageRealEstateSection
+                    AnyView(mortgageRealEstateSection)
                 } else if isCarLoan {
-                    carLoanVehicleSection
+                    AnyView(carLoanVehicleSection)
                 }
 
                 if showValidationError {
-                    Section {
+                    AnyView(Section {
                         // 美化：帶圖示的錯誤卡片，比裸紅字更明確且不突兀
                         HStack(spacing: 12) {
                             ZStack {
@@ -898,7 +898,7 @@ struct AddExpenseView: View {
                         .padding(.vertical, 4)
                         .transition(.opacity.combined(with: .move(edge: .top)))
                     }
-                    .listRowBackground(Color.red.opacity(0.05))
+                    .listRowBackground(Color.red.opacity(0.05)))
                 }
             }
             .navigationTitle(isEditing ? "編輯\(expenseType.rawValue)" : "新增\(expenseType.rawValue)")
@@ -933,7 +933,7 @@ struct AddExpenseView: View {
                             .disabled(isSaving)
                     }
                 }
-            }
+            })
             .onAppear {
                 loadEditing()
                 applyPreset()
@@ -1177,7 +1177,7 @@ struct AddExpenseView: View {
                             .lineLimit(2)
                     }
                 } else if showsInlinePlacePicker {
-                    placeNameAutocomplete
+                    AnyView(placeNameAutocomplete)
                 } else {
                     TextField(namePlaceholder, text: $title)
                 }
@@ -1191,7 +1191,7 @@ struct AddExpenseView: View {
             // [v25.365] 汽車：地點自成一列（名稱欄已被「項目 N：型號-類別」佔用），
             // 停車場／充電站／加油站選完會一併存下座標，之後才畫得出里程路線圖。
             if usesSeparatePlaceField {
-                placeNameAutocomplete
+                AnyView(placeNameAutocomplete)
             }
 
             // 扣款目標（進階模式或固定支出才顯示）
@@ -1449,7 +1449,7 @@ struct AddExpenseView: View {
             }
             .padding(.leading, 32)
             if titleFieldFocused {
-                placeSuggestionsList
+                AnyView(placeSuggestionsList)
             }
         }
         .padding(.vertical, 2)
@@ -1622,42 +1622,9 @@ struct AddExpenseView: View {
         }
     }
 
-    private func placeSuggestionRow(_ item: PlaceSuggestion) -> some View {
-        HStack(spacing: 12) {
-            ZStack {
-                Circle()
-                    .fill(item.iconColor.opacity(0.15))
-                    .frame(width: 32, height: 32)
-                Image(systemName: item.iconName)
-                    .foregroundStyle(item.iconColor)
-                    .font(.callout)
-            }
-            VStack(alignment: .leading, spacing: 2) {
-                // [v25.520] 地點名稱過長改跑馬燈（原本切成「…」）
-                MarqueeText(item.title)
-                    .font(.subheadline.weight(.medium))
-                    .foregroundStyle(.primary)
-                if !item.subtitle.isEmpty {
-                    Text(item.subtitle)
-                        .font(.caption2)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-            }
-            Spacer()
-                    // [v25.499] 距離。使用者回報：搜尋只跳地址、沒有距離，
-                    // 常常不知道該選哪一個。past 來源沒有座標可算，所以只有
-                    // Apple Maps 那幾筆有。
-            if let completion = item.completion {
-                PlaceDistanceBadge(meters: restaurantCompleter.distance(for: completion))
-            }
-            Image(systemName: "arrow.up.left")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-        }
-        .padding(.vertical, 6)
-        .padding(.horizontal, 8)
-        .contentShape(Rectangle())
+    private func placeSuggestionRow(_ item: PlaceSuggestion) -> PlaceSuggestionRow {
+        PlaceSuggestionRow(item: item,
+                           distance: item.completion.map { restaurantCompleter.distance(for: $0) })
     }
 
     /// 「之前去過」候選：同類別、含座標、名稱含查詢字串（空字串時也顯示所有歷史）。
@@ -2464,25 +2431,10 @@ struct AddExpenseView: View {
         }
     }
 
-    private func socialRecipientRow(name: String, detail: String) -> some View {
-        let picked = selectedSocialRecipients.contains(name)
-        return Button {
-            toggleSocialRecipient(name)
-        } label: {
-            HStack(spacing: 10) {
-                Image(systemName: picked ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(picked ? Color.green : Color.secondary)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(name)
-                    if !detail.isEmpty {
-                        Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                }
-                Spacer()
-            }
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
+    private func socialRecipientRow(name: String, detail: String) -> SocialRecipientRow {
+        SocialRecipientRow(name: name, detail: detail,
+                           picked: selectedSocialRecipients.contains(name),
+                           onToggle: { toggleSocialRecipient(name) })
     }
 
     /// 最上面：不指定，以及已經選的人（名單很長時不用捲下去找；舊紀錄裡、名單已經沒有的名字也能取消）
@@ -2568,7 +2520,7 @@ struct AddExpenseView: View {
         Section {
             if expenseType == .variable {
                 // [v3] FilterChip 橫向膠囊列（對齊 AddIncomeView.categoryChipPicker + VariableExpenseView.categoryFilter 規格）
-                variableCategoryChipPicker
+                AnyView(variableCategoryChipPicker)
                     .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
@@ -2646,7 +2598,7 @@ struct AddExpenseView: View {
                             }
                             .buttonStyle(.plain)
                             .sheet(isPresented: $showSocialRecipientPopover) {
-                                socialRecipientSelectorList
+                                AnyView(socialRecipientSelectorList)
                                     .presentationDetents([.medium, .large])
                                     .presentationDragIndicator(.visible)
                                     .appStores()
@@ -3789,7 +3741,7 @@ struct AddExpenseView: View {
         let icon = expenseType == .variable ? selectedVariableCategory.icon : selectedFixedCategory.icon
         let label = expenseType == .variable ? selectedVariableCategory.rawValue : selectedFixedCategory.rawValue
 
-        return HStack(spacing: 14) {
+        return AnyView(HStack(spacing: 14) {
             // 48pt 漸層圖示圓 + 細邊框 + 陰影（對齊 incomeRow / ExpenseRow 44pt 規格，預覽卡稍大）
             ZStack {
                 Circle()
@@ -3839,7 +3791,7 @@ struct AddExpenseView: View {
                 .frame(width: 70, height: 70)
                 .blur(radius: 12)
                 .offset(x: 10)
-        }
+        })
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
         .background(
@@ -5455,6 +5407,79 @@ fileprivate struct PlaceSuggestion: Identifiable {
         case .past: return .green
         case .apple: return .orange
         }
+    }
+}
+
+/// [v25.618] 建議清單的一列。獨立 struct：型別不再一路串進記帳表單（iOS 27.2 開表單堆疊用完閃退）
+fileprivate struct PlaceSuggestionRow: View {
+    let item: PlaceSuggestion
+    /// 外層 nil＝這筆沒有 completion（不顯示距離）；裡面 nil＝有 completion 但量不到距離
+    let distance: CLLocationDistance??
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle()
+                    .fill(item.iconColor.opacity(0.15))
+                    .frame(width: 32, height: 32)
+                Image(systemName: item.iconName)
+                    .foregroundStyle(item.iconColor)
+                    .font(.callout)
+            }
+            VStack(alignment: .leading, spacing: 2) {
+                // [v25.520] 地點名稱過長改跑馬燈（原本切成「…」）
+                MarqueeText(item.title)
+                    .font(.subheadline.weight(.medium))
+                    .foregroundStyle(.primary)
+                if !item.subtitle.isEmpty {
+                    Text(item.subtitle)
+                        .font(.caption2)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer()
+                    // [v25.499] 距離。使用者回報：搜尋只跳地址、沒有距離，
+                    // 常常不知道該選哪一個。past 來源沒有座標可算，所以只有
+                    // Apple Maps 那幾筆有。
+            if let meters = distance {
+                PlaceDistanceBadge(meters: meters)
+            }
+            Image(systemName: "arrow.up.left")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 6)
+        .padding(.horizontal, 8)
+        .contentShape(Rectangle())
+    }
+}
+
+/// [v25.618] 收受人清單的一列（獨立 struct，理由同 PlaceSuggestionRow）
+fileprivate struct SocialRecipientRow: View {
+    let name: String
+    let detail: String
+    let picked: Bool
+    let onToggle: () -> Void
+
+    var body: some View {
+        Button {
+            onToggle()
+        } label: {
+            HStack(spacing: 10) {
+                Image(systemName: picked ? "checkmark.circle.fill" : "circle")
+                    .foregroundStyle(picked ? Color.green : Color.secondary)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(name)
+                    if !detail.isEmpty {
+                        Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+                Spacer()
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
     }
 }
 
