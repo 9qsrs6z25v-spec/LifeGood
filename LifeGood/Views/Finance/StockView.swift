@@ -111,7 +111,7 @@ struct StockView: View {
     var body: some View {
         NavigationStack {
             // [對齊 SavingsInsuranceView 看板規格] 系統標準大標題（.large，捲動自動收合），看板隨內容捲動。
-            Group {
+            AnyView(Group {
                 if store.stocks.isEmpty {
                     emptyState
                 } else {
@@ -153,7 +153,7 @@ struct StockView: View {
                             }
 
                             if !sold.isEmpty {
-                                soldStackSection(sold: sold)
+                                AnyView(soldStackSection(sold: sold))
                                     .padding(.top, 4)
                             }
                         }
@@ -193,7 +193,7 @@ struct StockView: View {
                 }
             }
             .navigationTitle("股票")
-            .navigationBarTitleDisplayMode(.large)
+            .navigationBarTitleDisplayMode(.large))
             .sheet(isPresented: $showAdd) { AddStockView().appStores() }
             .sheet(isPresented: $showInstitutional) { InstitutionalBuyView().appStores() }
             .sheet(isPresented: $showAIAnalysis) { StockAIAnalysisView().appStores() }

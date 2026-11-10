@@ -134,7 +134,7 @@ struct SubordinateEquipmentSection: View {
                 emptyState
             } else {
                 ForEach(Array(equipments.enumerated()), id: \.element.id) { idx, eq in
-                    equipmentRow(eq)
+                    AnyView(equipmentRow(eq))
                         .opacity(rowsAppeared ? 1 : 0)
                         .offset(y: rowsAppeared ? 0 : 12)
                         .animation(.spring(response: 0.50, dampingFraction: 0.78).delay(0.04 * Double(idx)), value: rowsAppeared)
@@ -1326,10 +1326,10 @@ struct EquipmentDetailCard: View {
                 if let eq = equipment {
                     ScrollView {
                         VStack(spacing: 14) {
-                            heroCard(eq)
+                            AnyView(heroCard(eq))
                             kpiRow(eq)
                             noteCard(eq)
-                            timelineCard(eq)
+                            AnyView(timelineCard(eq))
                             // [v25.384] 關聯機台（上下游）
                             EquipmentRelationCard(equipmentId: eq.id) { targetId in
                                 jumpTarget = EquipmentJump(id: targetId)
@@ -1731,7 +1731,7 @@ struct EquipmentDetailCard: View {
                 .padding(.horizontal, 14).padding(.bottom, 14)
             } else {
                 ForEach(Array(all.enumerated()), id: \.element.id) { idx, e in
-                    cardTimelineRow(e, isLast: idx == all.count - 1)
+                    AnyView(cardTimelineRow(e, isLast: idx == all.count - 1))
                 }
                 .padding(.bottom, 6)
             }

@@ -122,7 +122,7 @@ struct AddSavingsInsuranceView: View {
                 // 試算預覽卡（有保費金額時顯示）
                 if premium > 0 {
                     Section {
-                        calcPreviewCard
+                        AnyView(calcPreviewCard)
                             .listRowInsets(EdgeInsets())
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)

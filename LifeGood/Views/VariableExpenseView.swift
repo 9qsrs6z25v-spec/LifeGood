@@ -123,7 +123,7 @@ struct VariableExpenseView: View {
 
     var body: some View {
         NavigationStack {
-            List {
+            AnyView(List {
                 Section {
                     // [v25.526] 英雄卡（三格 KPI＋雙軌進度條＋超支小字）換成看板：天空＋市集
                     // （一家店一個分類，店面寬＝這個月那一類花多少），見 MoneyBoards.swift
@@ -168,7 +168,7 @@ struct VariableExpenseView: View {
             }
             .onDisappear {
                 listRowsAppeared = false
-            }
+            })
             .scrollContentBackground(.hidden)
             .background(Color(.systemGroupedBackground))
             .navigationTitle("變動支出")

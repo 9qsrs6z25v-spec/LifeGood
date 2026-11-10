@@ -160,9 +160,9 @@ struct CareerView: View {
         return NavigationStack {
             ScrollView {
                 VStack(spacing: 20) {
-                    dashboardSection(stats)
-                    subCategoryBreakdown(stats)
-                    milestoneListSection(stats, filtered: filteredMilestones)
+                    AnyView(dashboardSection(stats))
+                    AnyView(subCategoryBreakdown(stats))
+                    AnyView(milestoneListSection(stats, filtered: filteredMilestones))
                 }
                 .padding(.vertical)
             }
@@ -519,7 +519,7 @@ struct CareerView: View {
             } else {
                 VStack(spacing: 0) {
                     ForEach(Array(filtered.enumerated()), id: \.element.id) { idx, item in
-                        careerRow(item)
+                        AnyView(careerRow(item))
                             .contentShape(Rectangle())
                             .onTapGesture {
                                 if subscription.isPremium { editingItem = item }

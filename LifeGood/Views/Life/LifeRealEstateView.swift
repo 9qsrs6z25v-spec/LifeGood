@@ -135,12 +135,12 @@ struct LifeRealEstateView: View {
         let cities = propertiesByCity
         return NavigationStack {
             VStack(spacing: 0) {
-                summaryHeader(cities)
+                AnyView(summaryHeader(cities))
 
                 if financeStore.realEstates.isEmpty {
-                    emptyState
+                    AnyView(emptyState)
                 } else {
-                    mapView(cities)
+                    AnyView(mapView(cities))
                 }
             }
             .background(Color(.systemGroupedBackground))
@@ -458,7 +458,7 @@ struct LifeRealEstateView: View {
 
             // 底部浮動列表
             if let city = selectedCity {
-                cityPanel(city: city, items: selectedCityItems)
+                AnyView(cityPanel(city: city, items: selectedCityItems))
                     .padding(.horizontal, 12)
                     .padding(.bottom, unclassifiedItems.isEmpty ? 12 : 64)
                     .transition(.asymmetric(
@@ -592,7 +592,7 @@ struct LifeRealEstateView: View {
                         Button {
                             viewingItem = item
                         } label: {
-                            itemRow(item)
+                            AnyView(itemRow(item))
                         }
                         .buttonStyle(.plain)
                         .opacity(cityPanelRowsAppeared ? 1 : 0)

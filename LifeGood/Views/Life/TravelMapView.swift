@@ -468,13 +468,13 @@ struct TravelMapView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 14) {
-                    statsCard(spots)
+                    AnyView(statsCard(spots))
                     sortPicker
                     if spots.isEmpty {
                         spotsListEmptyState
                     } else {
                         ForEach(spotsByCity(spots), id: \.city) { group in
-                            citySection(group.city, items: group.items)
+                            AnyView(citySection(group.city, items: group.items))
                         }
                     }
                 }
@@ -552,7 +552,7 @@ struct TravelMapView: View {
                         selectedSpot = spot
                     }
                 } label: {
-                    spotRow(spot)
+                    AnyView(spotRow(spot))
                 }
                 .buttonStyle(.plain)
                 if idx < items.count - 1 { Divider().padding(.leading, 60) }
@@ -836,10 +836,10 @@ struct TravelSpotDetailSheet: View {
                     .clipShape(RoundedRectangle(cornerRadius: 16))
                     .padding(.horizontal)
 
-                    headerCard
+                    AnyView(headerCard)
                     if !spot.photoNames.isEmpty { photoGallerySection }
                     if let companion = spot.topCompanion { companionCard(companion) }
-                    visitsSection
+                    AnyView(visitsSection)
                 }
                 .padding(.vertical, 12)
             }
@@ -963,7 +963,7 @@ struct TravelSpotDetailSheet: View {
             sectionHeader("造訪紀錄", icon: "clock.arrow.circlepath", trailing: "\(sorted.count) 筆")
             VStack(spacing: 0) {
                 ForEach(Array(sorted.enumerated()), id: \.element.id) { idx, exp in
-                    HStack(spacing: 10) {
+                    AnyView(HStack(spacing: 10) {
                         ZStack {
                             Circle()
                                 .fill(LinearGradient(colors: [accent.opacity(0.18), accent.opacity(0.07)],
@@ -993,7 +993,7 @@ struct TravelSpotDetailSheet: View {
                         Text(exp.amount.ntdWanString)
                             .font(.system(size: 14, weight: .semibold, design: .rounded))
                             .contentTransition(.numericText())
-                    }
+                    })
                     .padding(.horizontal, 14).padding(.vertical, 10)
                     .opacity(visitsAppeared ? 1 : 0)
                     .offset(y: visitsAppeared ? 0 : 10)

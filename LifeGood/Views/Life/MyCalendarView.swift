@@ -182,13 +182,13 @@ struct MyCalendarView: View {
         let heroTodayCount = heroEventsMap[startOfToday]?.count ?? 0
         let heroWeekTotal = heroWeekDates.reduce(0) { $0 + (heroEventsMap[$1]?.count ?? 0) }
         NavigationStack {
-            ScrollView {
+            AnyView(ScrollView {
               if !trimmedQuery.isEmpty {
-                searchResultsView(query: trimmedQuery)
+                AnyView(searchResultsView(query: trimmedQuery))
                     .padding(.vertical)
               } else {
-                VStack(spacing: 16) {
-                    calendarHeroCard(todayEvCount: heroTodayCount, weekTotal: heroWeekTotal, upcomingCount: upcomingMS.count)
+                AnyView(VStack(spacing: 16) {
+                    AnyView(calendarHeroCard(todayEvCount: heroTodayCount, weekTotal: heroWeekTotal, upcomingCount: upcomingMS.count))
                         .opacity(heroCardAppeared ? 1 : 0)
                         .offset(y: heroCardAppeared ? 0 : 20)
                         .onAppear {
@@ -199,7 +199,7 @@ struct MyCalendarView: View {
                         .onDisappear { heroCardAppeared = false }
                     MacaronDatePicker(selectedDate: $selectedDate)
                     appleCalendarBanner
-                    todayEventsSection(events: weekEventsMap[startOfSelectedDay] ?? [])
+                    AnyView(todayEventsSection(events: weekEventsMap[startOfSelectedDay] ?? []))
                         .opacity(todayCardAppeared ? 1 : 0)
                         .offset(y: todayCardAppeared ? 0 : 18)
                         .onAppear {
@@ -208,7 +208,7 @@ struct MyCalendarView: View {
                             }
                         }
                         .onDisappear { todayCardAppeared = false }
-                    weekPreviewSection(weekDates: resolvedWeekDates, weekEventsMap: weekEventsMap)
+                    AnyView(weekPreviewSection(weekDates: resolvedWeekDates, weekEventsMap: weekEventsMap))
                         .opacity(weekCardAppeared ? 1 : 0)
                         .offset(y: weekCardAppeared ? 0 : 18)
                         .onAppear {
@@ -220,14 +220,14 @@ struct MyCalendarView: View {
                     // 未來 30 天里程碑：區塊本體早已實作完成（含空狀態與「還有 N 個」溢出列），
                     // 但先前重整版面時漏了呼叫點，導致英雄卡「未來 30 天」計數旁始終看不到內容。
                     if !upcomingMS.isEmpty {
-                        upcomingMilestonesSection(milestones: upcomingMS)
+                        AnyView(upcomingMilestonesSection(milestones: upcomingMS))
                     }
                     // 部屬事項（請假 / 會議 / 任務 / 未完成會議 / 未完成任務）
                     // [v25.593 轉組織 v2] 只看在職的（全部都已轉出＝不出這一區）
                     if !lifeStore.activeSubordinates.isEmpty {
-                        subordinateAgendaSection(date: startOfSelectedDay)
+                        AnyView(subordinateAgendaSection(date: startOfSelectedDay))
                     }
-                }
+                })
                 .padding(.vertical)
               }
             }
@@ -237,7 +237,7 @@ struct MyCalendarView: View {
             .navigationTitle("我的行事曆")
             .toolbar {
                 ToolbarItem(placement: .topBarTrailing) { addMenu }
-            }
+            })
             // [v25.535] 每個 sheet 都掛 .appStores()：Mac 上從右上角「＋」選「新增部屬任務」，
             // 「選擇部屬」拿不到 LifeStore 直接閃退（見 AppStores.swift）
             .sheet(item: $addPersonalKind) { kind in
@@ -896,7 +896,7 @@ struct MyCalendarView: View {
             ScrollView(.horizontal, showsIndicators: false) {
                 HStack(spacing: 8) {
                     ForEach(weekDates, id: \.self) { date in
-                        weekDayCard(date: date, events: weekEventsMap[date] ?? [])
+                        AnyView(weekDayCard(date: date, events: weekEventsMap[date] ?? []))
                     }
                 }
                 .padding(.horizontal)
@@ -2108,7 +2108,7 @@ struct PersonalEventEditor: View {
                     editorSectionHeader("提醒", icon: "bell.badge")
                 }
 
-                appleCalendarSection
+                AnyView(appleCalendarSection)
 
                 Section {
                     TextField("選填備註", text: $note, axis: .vertical).lineLimit(3)
@@ -2204,7 +2204,7 @@ struct PersonalEventEditor: View {
                             }
                         }
                     }
-                    locationAutocompleteField
+                    AnyView(locationAutocompleteField)
                 } else if appleCal.authorizationStatus == .notDetermined {
                     Text("儲存時將跳出 Apple 行事曆授權")
                         .font(.caption2).foregroundStyle(.secondary)
@@ -2249,7 +2249,7 @@ struct PersonalEventEditor: View {
                 }
             }
             if locationFieldFocused {
-                locationSuggestionsList
+                AnyView(locationSuggestionsList)
             }
         }
         .onAppear {
@@ -2345,32 +2345,9 @@ struct PersonalEventEditor: View {
         }
     }
 
-    private func locationSuggestionRow(_ item: CalendarLocationSuggestion) -> some View {
-        HStack(spacing: 12) {
-            ZStack {
-                Circle().fill(item.iconColor.opacity(0.15)).frame(width: 28, height: 28)
-                Image(systemName: item.iconName)
-                    .foregroundStyle(item.iconColor)
-                    .font(.caption)
-            }
-            VStack(alignment: .leading, spacing: 1) {
-                // [v25.520] 地點名稱過長改跑馬燈（原本被切成「…」）
-                MarqueeText(item.title).font(.subheadline.weight(.medium))
-                if !item.subtitle.isEmpty {
-                    Text(item.subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                }
-            }
-            Spacer()
-                    // [v25.499] 距離。使用者回報：搜尋只跳地址、沒有距離，
-                    // 常常不知道該選哪一個。past 來源沒有座標可算，所以只有
-                    // Apple Maps 那幾筆有。
-            if let completion = item.completion {
-                PlaceDistanceBadge(meters: locationCompleter.distance(for: completion))
-            }
-            Image(systemName: "arrow.up.left").font(.caption2).foregroundStyle(.tertiary)
-        }
-        .padding(.vertical, 6).padding(.horizontal, 8)
-        .contentShape(Rectangle())
+    private func locationSuggestionRow(_ item: CalendarLocationSuggestion) -> CalendarLocationSuggestionRow {
+        CalendarLocationSuggestionRow(item: item,
+                                      distance: item.completion.map { locationCompleter.distance(for: $0) })
     }
 
     /// 合併過去 PersonalEvent 用過的地點 + Apple Maps 結果
@@ -2546,6 +2523,41 @@ fileprivate struct CalendarLocationSuggestion: Identifiable {
     }
     var iconColor: Color {
         source == .past ? .green : .blue
+    }
+}
+
+/// [v25.619] 地點建議清單的一列。獨立 struct：型別不再一路串進行程表單（理由同 25.618 記帳表單的 PlaceSuggestionRow）
+fileprivate struct CalendarLocationSuggestionRow: View {
+    let item: CalendarLocationSuggestion
+    /// 外層 nil＝這筆沒有 completion（不顯示距離）；裡面 nil＝有 completion 但量不到距離
+    let distance: CLLocationDistance??
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle().fill(item.iconColor.opacity(0.15)).frame(width: 28, height: 28)
+                Image(systemName: item.iconName)
+                    .foregroundStyle(item.iconColor)
+                    .font(.caption)
+            }
+            VStack(alignment: .leading, spacing: 1) {
+                // [v25.520] 地點名稱過長改跑馬燈（原本被切成「…」）
+                MarqueeText(item.title).font(.subheadline.weight(.medium))
+                if !item.subtitle.isEmpty {
+                    Text(item.subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            Spacer()
+                    // [v25.499] 距離。使用者回報：搜尋只跳地址、沒有距離，
+                    // 常常不知道該選哪一個。past 來源沒有座標可算，所以只有
+                    // Apple Maps 那幾筆有。
+            if let meters = distance {
+                PlaceDistanceBadge(meters: meters)
+            }
+            Image(systemName: "arrow.up.left").font(.caption2).foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 6).padding(.horizontal, 8)
+        .contentShape(Rectangle())
     }
 }
 

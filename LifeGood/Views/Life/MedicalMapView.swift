@@ -151,14 +151,14 @@ struct MedicalMapView: View {
         return NavigationStack {
             ScrollView {
                 VStack(spacing: 14) {
-                    summaryCard(medExpenses)
-                    if !places.isEmpty { clinicMapSection(places) }
-                    measurementSection
-                    if !health.allergies.isEmpty { allergySection }
-                    if !health.activeMedications.isEmpty { medicationSection }
-                    checkupSection
-                    if !healthMs.isEmpty { milestoneSection(healthMs) }
-                    if !insuranceMs.isEmpty { insuranceSection(insuranceMs) }
+                    AnyView(summaryCard(medExpenses))
+                    if !places.isEmpty { AnyView(clinicMapSection(places)) }
+                    AnyView(measurementSection)
+                    if !health.allergies.isEmpty { AnyView(allergySection) }
+                    if !health.activeMedications.isEmpty { AnyView(medicationSection) }
+                    AnyView(checkupSection)
+                    if !healthMs.isEmpty { AnyView(milestoneSection(healthMs)) }
+                    if !insuranceMs.isEmpty { AnyView(insuranceSection(insuranceMs)) }
                 }
                 .padding(.vertical, 16)
             }
@@ -577,7 +577,7 @@ struct MedicalMapView: View {
                 VStack(spacing: 0) {
                     ForEach(Array(items.enumerated()), id: \.element.id) { idx, ms in
                         staggeredRow(
-                            insuranceRow(ms),
+                            AnyView(insuranceRow(ms)),
                             appeared: insuranceRowsAppeared, index: idx
                         )
                         if idx < items.count - 1 { Divider().padding(.leading, 62) }

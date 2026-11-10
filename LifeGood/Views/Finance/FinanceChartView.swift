@@ -135,22 +135,22 @@ struct FinanceChartView: View {
                         .offset(y: sectionsAppeared ? 0 : 16)
                         .animation(.spring(response: 0.50, dampingFraction: 0.80).delay(0.04), value: sectionsAppeared)
 
-                    allocationChart
+                    AnyView(allocationChart)
                         .opacity(sectionsAppeared ? 1 : 0)
                         .offset(y: sectionsAppeared ? 0 : 16)
                         .animation(.spring(response: 0.50, dampingFraction: 0.80).delay(0.08), value: sectionsAppeared)
 
-                    stockPerformanceSection
+                    AnyView(stockPerformanceSection)
                         .opacity(sectionsAppeared ? 1 : 0)
                         .offset(y: sectionsAppeared ? 0 : 16)
                         .animation(.spring(response: 0.50, dampingFraction: 0.80).delay(0.16), value: sectionsAppeared)
 
-                    realEstatePerformanceSection
+                    AnyView(realEstatePerformanceSection)
                         .opacity(sectionsAppeared ? 1 : 0)
                         .offset(y: sectionsAppeared ? 0 : 16)
                         .animation(.spring(response: 0.50, dampingFraction: 0.80).delay(0.24), value: sectionsAppeared)
 
-                    insuranceSummarySection
+                    AnyView(insuranceSummarySection)
                         .opacity(sectionsAppeared ? 1 : 0)
                         .offset(y: sectionsAppeared ? 0 : 16)
                         .animation(.spring(response: 0.50, dampingFraction: 0.80).delay(0.32), value: sectionsAppeared)
@@ -542,7 +542,7 @@ struct FinanceChartView: View {
                     ForEach(Array(store.realEstates.enumerated()), id: \.element.id) { i, item in
                         let appColor = upDownColor(item.appreciationRate)
 
-                        HStack(spacing: 12) {
+                        AnyView(HStack(spacing: 12) {
                             ZStack {
                                 // 圓形圖示（統一全 section 44pt Circle 語言，對齊 stockPerformanceSection / insuranceSummarySection）
                                 Circle()
@@ -603,7 +603,7 @@ struct FinanceChartView: View {
                                 .lineLimit(1)
                                 .minimumScaleFactor(0.7)
                                 .contentTransition(.numericText())
-                        }
+                        })
                         .padding(.horizontal)
                         .padding(.vertical, 12)
                         .opacity(rowsAppeared ? 1 : 0)

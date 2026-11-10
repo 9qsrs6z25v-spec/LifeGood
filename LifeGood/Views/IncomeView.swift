@@ -105,7 +105,7 @@ struct IncomeView: View {
 
     var body: some View {
         NavigationStack {
-            List {
+            AnyView(List {
                 Section {
                     // [v25.526] 英雄卡（四格 KPI＋雙軌進度條＋分類彩條＋超支小字）換成看板：
                     // 天空＋山（近 6 個月一個月一座山，這個月用虛線畫出預期的高度），見 MoneyBoards.swift
@@ -155,7 +155,7 @@ struct IncomeView: View {
             .onDisappear {
                 headerAppeared = false
                 listRowsAppeared = false
-            }
+            })
             .task(id: store.modifyID) {
                 // .task 每次出現都會重跑（切回這頁、跨過午夜再打開），日期相關的數字跟著更新
                 board = IncomeBoardData.build(store: store)

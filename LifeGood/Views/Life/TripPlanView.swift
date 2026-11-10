@@ -370,12 +370,12 @@ struct TripPlanDetailView: View {
 
     var body: some View {
         NavigationStack {
-            Group {
+            AnyView(Group {
                 if let p = plan {
-                    planScroll(p)
+                    AnyView(planScroll(p))
                 } else {
                     // 行程在別處被刪掉了
-                    Color.clear.onAppear { dismiss() }
+                    AnyView(Color.clear.onAppear { dismiss() })
                 }
             }
             .background(Color(.systemGroupedBackground))
@@ -441,7 +441,7 @@ struct TripPlanDetailView: View {
                 try? await Task.sleep(nanoseconds: 1_800_000_000)
                 guard !Task.isCancelled else { return }
                 withAnimation(.easeOut(duration: 0.25)) { banner = nil }
-            }
+            })
             .sheet(isPresented: $showSettings) {
                 Group {
                     if let p = plan {
@@ -574,11 +574,11 @@ struct TripPlanDetailView: View {
         return ScrollViewReader { proxy in
             ScrollView {
                 VStack(spacing: 14) {
-                    summaryCard(p, slots: slots, places: places)
+                    AnyView(summaryCard(p, slots: slots, places: places))
                     if p.stops.isEmpty {
-                        emptyStops
+                        AnyView(emptyStops)
                     } else {
-                        timelineCard(p, slots: slots, places: places)
+                        AnyView(timelineCard(p, slots: slots, places: places))
                     }
                     // [v25.480] 相本與花費改掛在摘要卡的 KPI 上（使用者指定）：
                     // 那兩塊本來是獨立的卡片夾在時間軸與「加一站」之間，

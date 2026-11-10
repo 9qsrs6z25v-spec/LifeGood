@@ -227,11 +227,11 @@ struct SubordinateOverviewView: View {
         let meetingItems = incompleteMeetingItems
         let completedEntries = overviewCompletedEntries
         return NavigationStack {
-            ScrollView {
+            AnyView(ScrollView {
                 VStack(spacing: 16) {
-                    summaryHeroCard(leaveCnt: leaves.count,
+                    AnyView(summaryHeroCard(leaveCnt: leaves.count,
                                     meetCnt:  meetings.count,
-                                    taskCnt:  tasks.count)
+                                    taskCnt:  tasks.count))
                         .opacity(heroAppeared ? 1 : 0)
                         .offset(y: heroAppeared ? 0 : 16)
                         .animation(.spring(response: 0.52, dampingFraction: 0.80), value: heroAppeared)
@@ -244,23 +244,23 @@ struct SubordinateOverviewView: View {
 
                     filterBanner
 
-                    leaveSection(leaves)
+                    AnyView(leaveSection(leaves))
                         .opacity(sectionAppeared ? 1 : 0)
                         .offset(y: sectionAppeared ? 0 : 14)
                         .animation(.spring(response: 0.48, dampingFraction: 0.80).delay(0.05), value: sectionAppeared)
 
-                    reportSection(reports)
+                    AnyView(reportSection(reports))
                         .opacity(sectionAppeared ? 1 : 0)
                         .offset(y: sectionAppeared ? 0 : 14)
                         .animation(.spring(response: 0.48, dampingFraction: 0.80).delay(0.11), value: sectionAppeared)
 
-                    meetingSection(meetings)
+                    AnyView(meetingSection(meetings))
                         .opacity(sectionAppeared ? 1 : 0)
                         .offset(y: sectionAppeared ? 0 : 14)
                         .animation(.spring(response: 0.48, dampingFraction: 0.80).delay(0.15), value: sectionAppeared)
 
-                    taskSection(incompleteTasks: tasks, todayTasks: dayTasks,
-                                meetingItems: meetingItems, completedEntries: completedEntries)
+                    AnyView(taskSection(incompleteTasks: tasks, todayTasks: dayTasks,
+                                meetingItems: meetingItems, completedEntries: completedEntries))
                         .opacity(sectionAppeared ? 1 : 0)
                         .offset(y: sectionAppeared ? 0 : 14)
                         .animation(.spring(response: 0.48, dampingFraction: 0.80).delay(0.19), value: sectionAppeared)
@@ -282,7 +282,7 @@ struct SubordinateOverviewView: View {
             // [v5] 部屬今天小工具：點任務列開那件任務的卡片、點生日開生日名單
             .onDeepLinkTeam(openTask: { openPendingTask() }, openBirthdays: { openPendingBirthdays() })
             // [v25.596 轉組織 v3] 點交接提醒（只有一張）：打開那張交接單（找不到就停在總覽）
-            .onOrgMoveNotice { id in openNoticeMove(id) }
+            .onOrgMoveNotice { id in openNoticeMove(id) })
             .sheet(item: $editTarget) { target in
                 // 點項目先顯示預覽卡片（右上角「編輯」才進入編輯）
                 SubordinateItemCard(ref: target.itemRef)
@@ -781,7 +781,7 @@ struct SubordinateOverviewView: View {
                 emptyHint("當日無會議", icon: "person.3.fill", color: .indigo)
             } else {
                 ForEach(Array(meetings.enumerated()), id: \.element.meeting.id) { idx, item in
-                    meetingRow(item.sub, item.meeting)
+                    AnyView(meetingRow(item.sub, item.meeting))
 
                     if idx < meetings.count - 1 {
                         Divider().padding(.leading, 62)

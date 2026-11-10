@@ -80,10 +80,10 @@ struct TripStopCardView: View {
         NavigationStack {
             Group {
                 if let slot {
-                    content(slot)
+                    AnyView(content(slot))
                 } else {
                     // 這一站被刪掉了（可能在別的畫面刪的）
-                    Color.clear.onAppear { dismiss() }
+                    AnyView(Color.clear.onAppear { dismiss() })
                 }
             }
             .background(Color(.systemGroupedBackground))
@@ -188,11 +188,11 @@ struct TripStopCardView: View {
         ScrollView {
             VStack(spacing: 14) {
                 hero(slot)
-                checkInSection(slot)
+                AnyView(checkInSection(slot))
                 timingSection(slot)
                 weatherSection(slot)
                 if slot.index > 0 { legSection(slot) }
-                placeSection(slot)
+                AnyView(placeSection(slot))
                 // [v25.465] 兩個「有才顯示」的區塊收進 Group：加上花費那一節之後
                 // 這裡剛好是 ViewBuilder 的 10 個子項上限，再加一個就會編譯失敗，
                 // 而那個錯誤訊息完全看不出是數量問題。先留出空間。

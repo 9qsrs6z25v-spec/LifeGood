@@ -655,13 +655,13 @@ struct TripSummaryBoard: View {
                     }
                 }
                 if let current = data.current {
-                    currentPill(current, pal: pal)
+                    AnyView(currentPill(current, pal: pal))
                 }
                 if data.days.count > 1 {
-                    dayStrip(pal: pal)
+                    AnyView(dayStrip(pal: pal))
                 }
                 if !data.notices.isEmpty {
-                    noticeStack(pal: pal)
+                    AnyView(noticeStack(pal: pal))
                 }
             }
             .padding(.horizontal, 10)
@@ -922,7 +922,7 @@ struct TripSummaryBoard: View {
         let n = data.notices
         return VStack(alignment: .leading, spacing: 6) {
             if !n.late.isEmpty {
-                lateNotice(n.late, pal: pal)
+                AnyView(lateNotice(n.late, pal: pal))
             }
             if n.retryableLegs > 0 {
                 retryNotice(n.retryableLegs, pal: pal)
@@ -1048,7 +1048,7 @@ struct TripSummaryBoard: View {
             if lateOpen {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(late) { item in
-                        lateRow(item, c: c)
+                        AnyView(lateRow(item, c: c))
                     }
                 }
                 .padding(.leading, 26)

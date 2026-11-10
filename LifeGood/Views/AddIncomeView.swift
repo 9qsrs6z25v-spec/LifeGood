@@ -222,7 +222,7 @@ struct AddIncomeView: View {
             Form {
                 // ① 金額預覽卡（頂部，清透背景嵌入 Form）
                 Section {
-                    amountPreviewCard
+                    AnyView(amountPreviewCard)
                         .listRowInsets(EdgeInsets(top: 8, leading: 0, bottom: 8, trailing: 0))
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
@@ -282,7 +282,7 @@ struct AddIncomeView: View {
 
                 // ③ 分類：橫向 FilterChip 膠囊列
                 Section {
-                    categoryChipPicker
+                    AnyView(categoryChipPicker)
                         .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)

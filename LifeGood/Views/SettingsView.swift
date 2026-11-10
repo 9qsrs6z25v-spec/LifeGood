@@ -318,7 +318,7 @@ struct SettingsView: View {
 
     var body: some View {
         NavigationStack {
-            List {
+            AnyView(List {
                 // 英雄卡：訂閱狀態 + 三模式資料統計
                 Section {
                     settingsHeroCard
@@ -404,7 +404,7 @@ struct SettingsView: View {
                     }
                 }
             }
-            .navigationTitle("設定")
+            .navigationTitle("設定"))
             .sheet(isPresented: $showPaywall) {
                 PaywallView()
                     .environmentObject(subscription)
@@ -1864,7 +1864,7 @@ struct SettingsView: View {
     private var dataStatsSection: some View {
         Section {
             // 三模式統計徽章：橫向卡片排列（v2: 各自錯開進場動畫）
-            HStack(spacing: 10) {
+            AnyView(HStack(spacing: 10) {
                 dataStatBadge(
                     icon: "yensign.circle.fill",
                     color: .green,
@@ -1890,7 +1890,7 @@ struct SettingsView: View {
                 )
                 .opacity(dataStatBadgesAppeared[2] ? 1 : 0)
                 .offset(y: dataStatBadgesAppeared[2] ? 0 : 18)
-            }
+            })
             .listRowInsets(EdgeInsets(top: 10, leading: 14, bottom: 10, trailing: 14))
             .listRowBackground(Color(.systemGroupedBackground))
             .listRowSeparator(.hidden)

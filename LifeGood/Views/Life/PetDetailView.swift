@@ -60,12 +60,12 @@ struct PetDetailView: View {
                 if let p = pet {
                     ScrollView {
                         VStack(spacing: 14) {
-                            heroCard(p)
-                            profileCard(p)
-                            weightCard(p)
-                            recordsCard(p)
-                            dailyCard(p)
-                            albumCard(p)
+                            AnyView(heroCard(p))
+                            AnyView(profileCard(p))
+                            AnyView(weightCard(p))
+                            AnyView(recordsCard(p))
+                            AnyView(dailyCard(p))
+                            AnyView(albumCard(p))
                         }
                         .padding(.vertical)
                     }

@@ -864,7 +864,7 @@ struct BusinessCardView: View {
         // List／groupedByCompany／toolbar 多選按鈕，避免原本 4 處各自獨立重新計算。
         let cards = filteredCards
         return NavigationStack {
-            VStack(spacing: 0) {
+            AnyView(VStack(spacing: 0) {
                 // 有名片時顯示搜尋列（帶圖示 + 圓角背景，對齊其他 searchable 頁面規格）
                 if !lifeStore.businessCards.isEmpty {
                     HStack(spacing: 8) {
@@ -913,13 +913,13 @@ struct BusinessCardView: View {
 
                 if cards.isEmpty {
                     // 改版空狀態（雙層脈衝光環 + CTA 按鈕）
-                    emptyStateView
+                    AnyView(emptyStateView)
                 } else {
-                    List {
+                    AnyView(List {
                         // 英雄摘要卡（僅在非搜尋狀態 + 有名片時顯示）
                         if searchText.isEmpty {
                             Section {
-                                summaryHeader
+                                AnyView(summaryHeader)
                                     .listRowInsets(EdgeInsets())
                                     .listRowBackground(Color.clear)
                                     .listRowSeparator(.hidden)
@@ -940,7 +940,7 @@ struct BusinessCardView: View {
                                                 .font(.title3)
                                                 .transition(.scale.combined(with: .opacity))
                                         }
-                                        cardRow(card)
+                                        AnyView(cardRow(card))
                                     }
                                     .contentShape(Rectangle())
                                     .onTapGesture {
@@ -992,7 +992,7 @@ struct BusinessCardView: View {
                     }
                     .onDisappear {
                         cardsAppeared = false
-                    }
+                    })
                 }
             }
             .background(Color(.systemGroupedBackground))
@@ -1104,7 +1104,7 @@ struct BusinessCardView: View {
                         }
                     }
                 }
-            }
+            })
             .sheet(isPresented: $showCompanyFilter) {
                 BusinessCardCompanyFilterSheet(
                     companies: companyCounts,
@@ -1572,14 +1572,14 @@ struct BusinessCardDetailView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
+            AnyView(ScrollView {
                 VStack(spacing: 16) {
-                    heroCard
+                    AnyView(heroCard)
                     if card.linkedOrgPersonId != nil {
                         linkedOrgPersonButton
                     }
                     if hasContact {
-                        contactCard
+                        AnyView(contactCard)
                     }
                     metaCard
                     if !card.note.isEmpty {
@@ -1635,7 +1635,7 @@ struct BusinessCardDetailView: View {
                         }
                     }
                 }
-            }
+            })
             .sheet(isPresented: $showEdit) {
                 BusinessCardEditor(editing: card)
                     .appStores()
@@ -1750,7 +1750,7 @@ struct BusinessCardDetailView: View {
 
             // 右側：頭像 + QR Code
             VStack(spacing: 10) {
-                avatarMenu
+                AnyView(avatarMenu)
                 qrCodeView
             }
         }

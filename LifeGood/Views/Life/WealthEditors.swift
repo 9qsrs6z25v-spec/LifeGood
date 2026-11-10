@@ -889,7 +889,7 @@ struct WealthAccountEditor: View {
     var body: some View {
         NavigationStack {
             ScrollViewReader { proxy in
-                editorForm(proxy)
+                AnyView(editorForm(proxy))
             }
             .navigationTitle(navTitle)
             .navigationBarTitleDisplayMode(.inline)

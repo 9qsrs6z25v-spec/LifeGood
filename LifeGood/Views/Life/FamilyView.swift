@@ -70,16 +70,16 @@ struct FamilyView: View {
         NavigationStack {
             // 用同一個 List 把街道圖跟成員清單放在一起；
             // 列表上滑時，街道圖會自然跟著被推上去，給下方項目更多空間。
-            List {
+            AnyView(List {
                 // 街道示意圖已移除（使用者：沒有太大意義）——騰出的位置給家庭待辦。
                 // FamilyOverviewMap 元件保留：家人履歷等其他頁還在用。
 
-                familyTaskSection
+                AnyView(familyTaskSection)
 
                 // [v2] 統計徽章橫列（成員清單前，有成員時才顯示）
                 if !store.familyMembers.isEmpty {
                     Section {
-                        statsStrip
+                        AnyView(statsStrip)
                             .listRowInsets(EdgeInsets(top: 4, leading: 0, bottom: 4, trailing: 0))
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
@@ -152,7 +152,7 @@ struct FamilyView: View {
                         }
                     }
                 }
-            }
+            })
             .sheet(isPresented: $showAdd) { AddMilestoneView(initialCategory: .family).appStores() }
             .sheet(item: $editingMember) { member in AddMilestoneView(editingFamily: member).appStores() }
             .sheet(item: $editingTask) { task in
@@ -749,7 +749,7 @@ struct FamilyView: View {
                         .foregroundStyle(accent)
                 }
 
-                VStack(alignment: .leading, spacing: 4) {
+                AnyView(VStack(alignment: .leading, spacing: 4) {
                     // [v4] 中文名為使用者自填、長度不可控
                     memberNameText(displayName.isEmpty ? "（未命名）" : displayName,
                                    forExport: forExport)
@@ -811,12 +811,12 @@ struct FamilyView: View {
                             .overlay(Capsule().stroke(Color(red: 1.00, green: 0.35, blue: 0.55).opacity(0.22), lineWidth: 0.6))
                         }
                     }
-                }
+                })
 
                 Spacer(minLength: 4)
 
                 // [v2] 右側日期：升級為 Capsule 徽章，對齊 OverviewView.recentRow / CareerView v2 日期膠囊規格
-                VStack(alignment: .trailing, spacing: 4) {
+                AnyView(VStack(alignment: .trailing, spacing: 4) {
                     if let bd = member.birthday {
                         HStack(spacing: 3) {
                             Image(systemName: "calendar")
@@ -858,7 +858,7 @@ struct FamilyView: View {
                             .clipShape(Capsule())
                         }
                     }
-                }
+                })
             }
             .padding(.vertical, 7)
         }

@@ -281,7 +281,7 @@ struct HealthView: View {
     /// 捲動頁＋彈出頁（一個 .sheet(item:)＋一個 .fullScreenCover(item:)）＋整頁重算、打開頁面
     private var presentedPage: some View {
         ScrollViewReader { proxy in
-            scrollPage(proxy)
+            AnyView(scrollPage(proxy))
         }
         // [v25.554] 彈出頁關掉、回到這頁：Apple 健康 15 分鐘沒同步就同步（開著彈出頁時回到前景不同步，見 sceneChanged）
         .sheet(item: $sheet, onDismiss: { sheetDismissed() }) { s in
@@ -491,7 +491,7 @@ struct HealthView: View {
             if !checks.isEmpty {
                 checkSection(checks)
             }
-            recentSection(p)
+            AnyView(recentSection(p))
             weeklySection(p)
             // [v25.557] 月曆（每週公里下面）、個人紀錄（插在每週公里和重訓中間）
             if !p.isEmpty {
@@ -508,7 +508,7 @@ struct HealthView: View {
                 })
             }
             appleHealthRow
-            milestoneSection(p)
+            AnyView(milestoneSection(p))
         }
     }
 

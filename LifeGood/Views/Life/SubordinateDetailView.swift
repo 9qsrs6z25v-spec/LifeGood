@@ -616,11 +616,11 @@ struct SubordinateDetailView: View {
         // 這裡只算一次快取供全部呼叫點共用，避免同一次 render 重複掃描 5 次。
         let mentionedItemsCache = mentionedItems
         return NavigationStack {
-            ScrollView {
+            AnyView(ScrollView {
                 VStack(spacing: 16) {
                     // [v25.593 轉組織 v2] 已轉出：看板上方灰條＋〔回到我的部屬〕（在職的不佔位；OrgMoveCardParts.swift）。要退回這一件：刪這一行
                     SubArchivedBanner(personId: subordinateId, onReturn: askReturnToMine)
-                    headerCard(mentionedCount: mentionedItemsCache.count)
+                    AnyView(headerCard(mentionedCount: mentionedItemsCache.count))
 
                     // [v25.590 轉組織 v1a-1] 看板下提示列（原人、接手的人；沒事不佔位，judge §4.7）。要退回這一件：刪這一行
                     OrgMoveHintBars(personId: subordinateId, onOpen: openOrgMoveSheet)
@@ -628,7 +628,7 @@ struct SubordinateDetailView: View {
                     // 自訂 Capsule Pill Tab 切換器（matchedGeometryEffect 讓指示器平滑滑動）
                     // [v25.599 職能雷達 v1a-1] 四顆放不下：整段搬到 tabBar（ViewThatFits 三種寬度，judge §4.2）。
                     // 要退回這一件：把 tabBar／tabRow／tabButton／selectTab 的內容搬回這裡、刪這一行
-                    tabBar(mentionedCount: mentionedItemsCache.count)
+                    AnyView(tabBar(mentionedCount: mentionedItemsCache.count))
 
                     if detailTab == .daily {
                         // [v25.590 轉組織 v1a-1] 「從王小明接手（4）・11/2」（還在交接中才有，judge §4.6）。要退回這一件：刪這一行
@@ -636,31 +636,31 @@ struct SubordinateDetailView: View {
                         OrgMoveReceivedCard(personId: subordinateId, onOpenMove: openOrgMoveSheet,
                                             onOpenTask: openTaskPreview, onOpenReport: openReportPreview,
                                             onOpenMeeting: openMeetingPreview)
-                        weeklyReportSection
+                        AnyView(weeklyReportSection)
                             .opacity(tabSectionsAppeared ? 1 : 0)
                             .offset(y: tabSectionsAppeared ? 0 : 14)
                             .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.00), value: tabSectionsAppeared)
-                        meetingSection
+                        AnyView(meetingSection)
                             .opacity(tabSectionsAppeared ? 1 : 0)
                             .offset(y: tabSectionsAppeared ? 0 : 14)
                             .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.03), value: tabSectionsAppeared)
-                        taskSection
+                        AnyView(taskSection)
                             .opacity(tabSectionsAppeared ? 1 : 0)
                             .offset(y: tabSectionsAppeared ? 0 : 14)
                             .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.05), value: tabSectionsAppeared)
-                        mentionedSection(mentionedItemsCache)
+                        AnyView(mentionedSection(mentionedItemsCache))
                             .opacity(tabSectionsAppeared ? 1 : 0)
                             .offset(y: tabSectionsAppeared ? 0 : 14)
                             .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.07), value: tabSectionsAppeared)
-                        sideRoleSection
+                        AnyView(sideRoleSection)
                             .opacity(tabSectionsAppeared ? 1 : 0)
                             .offset(y: tabSectionsAppeared ? 0 : 14)
                             .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.09), value: tabSectionsAppeared)
-                        recordSection(.leave)
+                        AnyView(recordSection(.leave))
                             .opacity(tabSectionsAppeared ? 1 : 0)
                             .offset(y: tabSectionsAppeared ? 0 : 14)
                             .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.10), value: tabSectionsAppeared)
-                        completedSection
+                        AnyView(completedSection)
                             .opacity(tabSectionsAppeared ? 1 : 0)
                             .offset(y: tabSectionsAppeared ? 0 : 14)
                             .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.13), value: tabSectionsAppeared)
@@ -675,27 +675,27 @@ struct SubordinateDetailView: View {
                             .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.05), value: tabSectionsAppeared)
                     } else if detailTab == .rating {
                         // [v25.599 職能雷達 v1a-1] 原本是最後的 else（編譯器抓不到），改成明寫 .rating；內容一字不改
-                        promotionSection
+                        AnyView(promotionSection)
                             .opacity(tabSectionsAppeared ? 1 : 0)
                             .offset(y: tabSectionsAppeared ? 0 : 14)
                             .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.00), value: tabSectionsAppeared)
-                        proConSection
+                        AnyView(proConSection)
                             .opacity(tabSectionsAppeared ? 1 : 0)
                             .offset(y: tabSectionsAppeared ? 0 : 14)
                             .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.00), value: tabSectionsAppeared)
-                        recordSection(.achievement)
+                        AnyView(recordSection(.achievement))
                             .opacity(tabSectionsAppeared ? 1 : 0)
                             .offset(y: tabSectionsAppeared ? 0 : 14)
                             .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.05), value: tabSectionsAppeared)
-                        recordSection(.improvement)
+                        AnyView(recordSection(.improvement))
                             .opacity(tabSectionsAppeared ? 1 : 0)
                             .offset(y: tabSectionsAppeared ? 0 : 14)
                             .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.10), value: tabSectionsAppeared)
-                        recordSection(.fault)
+                        AnyView(recordSection(.fault))
                             .opacity(tabSectionsAppeared ? 1 : 0)
                             .offset(y: tabSectionsAppeared ? 0 : 14)
                             .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.15), value: tabSectionsAppeared)
-                        recordSection(.missOperation)
+                        AnyView(recordSection(.missOperation))
                             .opacity(tabSectionsAppeared ? 1 : 0)
                             .offset(y: tabSectionsAppeared ? 0 : 14)
                             .animation(.spring(response: 0.45, dampingFraction: 0.82).delay(0.20), value: tabSectionsAppeared)
@@ -751,7 +751,7 @@ struct SubordinateDetailView: View {
             // [v25.590 轉組織 v1a-1] 精靈、交接單頁兩個 .sheet(item:)＋.appStores()（包在 OrgMoveCardParts.swift）
             .orgMoveCardSheets(wizard: $orgMoveWizard, sheet: $orgMoveSheet)
             // [v25.593 轉組織 v2] 已轉出〔回到我的部屬〕〔真的刪除…〕那一框（OrgMoveCardParts.swift）。要退回這一件：刪這一行
-            .subArchivedAsk($archivedAsk, onReturn: confirmReturnToMine, onDelete: confirmHardDelete)
+            .subArchivedAsk($archivedAsk, onReturn: confirmReturnToMine, onDelete: confirmHardDelete))
             .sheet(item: $viewingSideRole) { role in
                 // 不給跳回部屬明細：我們就是從那裡進來的，會無限疊 sheet
                 SideRoleWorkspaceView(roleId: role.id, allowSubordinateJump: false)
@@ -1048,7 +1048,7 @@ struct SubordinateDetailView: View {
                 emptyHint
             } else {
                 ForEach(Array(items.enumerated()), id: \.element.id) { idx, r in
-                    HStack(alignment: .center, spacing: 10) {
+                    AnyView(HStack(alignment: .center, spacing: 10) {
                         Button {
                             lateRequest = LateCompletionGate.report(
                                 lifeStore, subordinateId: subordinateId, report: r)
@@ -1093,7 +1093,7 @@ struct SubordinateDetailView: View {
                             .contentShape(Rectangle())
                         }
                         .buttonStyle(.plain)
-                    }
+                    })
                     .padding(.horizontal, 16).padding(.vertical, 10)
                     .opacity(r.isCompleted ? 0.7 : 1)
                     if idx < items.count - 1 { Divider().padding(.leading, 64) }
@@ -1564,7 +1564,7 @@ struct SubordinateDetailView: View {
                 emptyHint
             } else {
                 ForEach(Array(items.enumerated()), id: \.element.id) { idx, m in
-                    Button {
+                    AnyView(Button {
                         if subscription.isPremium { previewItem = .meeting(subId: subordinateId, meeting: m) }
                         else { showPremiumAlert = true }
                     } label: {
@@ -1637,7 +1637,7 @@ struct SubordinateDetailView: View {
                         .padding(.horizontal, 16)
                         .padding(.vertical, 10)
                         .contentShape(Rectangle())
-                    }
+                    })
                     .buttonStyle(.plain)
 
                     // 議程項目（僅未完成；已完成移至底部「已完成」收合區）
@@ -1959,7 +1959,7 @@ struct SubordinateDetailView: View {
                 sectionHeader("歷程", icon: "arrow.up.right.circle.fill", color: .orange,
                               count: items.count) { }
                 ForEach(Array(items.enumerated()), id: \.element.id) { idx, item in
-                    historyRow(item)
+                    AnyView(historyRow(item))
                     if idx < items.count - 1 {
                         Divider().padding(.leading, 62)
                     }
@@ -2086,7 +2086,7 @@ struct SubordinateDetailView: View {
                 emptyHint
             } else {
                 ForEach(Array(items.enumerated()), id: \.element.id) { idx, rec in
-                    recordRow(rec)
+                    AnyView(recordRow(rec))
                     if idx < items.count - 1 {
                         Divider().padding(.leading, 64)
                     }
@@ -2122,7 +2122,7 @@ struct SubordinateDetailView: View {
                 emptyHint
             } else {
                 ForEach(Array(items.enumerated()), id: \.element.id) { idx, rec in
-                    recordRow(rec)
+                    AnyView(recordRow(rec))
                     if idx < items.count - 1 {
                         Divider().padding(.leading, 64)
                     }
@@ -3391,7 +3391,7 @@ struct MeetingEditorSheet: View {
                 // 收進同一個「場次」清單，主場次列第一個子項目，版面一致；
                 // 其餘情況維持原本的攤平版面（時間與議程直接顯示，不多一層）。
                 if !hasRecurrence && hasAdHoc {
-                    unifiedSessionSection
+                    AnyView(unifiedSessionSection)
                     Section {
                         Toggle("設定週期", isOn: $hasRecurrence)
                         recurrenceControls
@@ -3423,11 +3423,11 @@ struct MeetingEditorSheet: View {
                     }
 
                     if hasRecurrence {
-                        occurrenceSection
+                        AnyView(occurrenceSection)
                     } else {
                         MeetingItemsEditor(items: $items, peopleIndex: peopleIndex,
                                            pickingAssigneeFor: $pickingAssigneeFor)
-                        adHocSection
+                        AnyView(adHocSection)
                     }
                 }
 
@@ -3608,7 +3608,7 @@ struct MeetingEditorSheet: View {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("星期幾（不選＝沿用開始日的星期）")
                         .font(.caption).foregroundStyle(.secondary)
-                    weekdayChips
+                    AnyView(weekdayChips)
                 }
             }
             Toggle("設定結束日期", isOn: $hasRuleEnd)
@@ -6498,7 +6498,7 @@ struct SubordinateItemCard: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
+            AnyView(ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     cardBody(forExport: false)
                 }
@@ -6524,7 +6524,7 @@ struct SubordinateItemCard: View {
                         Button("編輯") { showEdit = true }.bold().foregroundStyle(.green)
                     }
                 }
-            }
+            })
             .lateCompletionConfirm($lateRequest)
             .sheet(isPresented: $showEdit) { editor.appStores() }
             .sheet(item: $openSub) { s in SubordinateDetailView(subordinate: s).appStores() }
@@ -6592,7 +6592,7 @@ struct SubordinateItemCard: View {
             if t.isDereliction {
                 field("性質", "應做未作為（缺失）")
             }
-            ownerBlock(subId: subId, accent: .cyan)
+            AnyView(ownerBlock(subId: subId, accent: .cyan))
             taskStatusRow(t)
             // [v25.590 轉組織 v1a-1] 「11/2 交接自 王小明（原訂 10/20）・備註：…」（有才出現；出圖不放、分享文字不加，
             // judge §4.6）。要退回這一件：刪這一行
@@ -6629,7 +6629,7 @@ struct SubordinateItemCard: View {
             let (subId, m) = liveMeeting(refSubId, snap)
             titleBlock(icon: "person.3.fill", color: .indigo, title: m.topic.isEmpty ? "未命名會議" : m.topic,
                        forExport: forExport)
-            ownerBlock(subId: subId, accent: .indigo)
+            AnyView(ownerBlock(subId: subId, accent: .indigo))
             // [v25.591 轉組織 v1a-2] 新會議、整場交過來的會議：同任務那一行「11/2 交接自 王小明・備註：…」（會議列膠囊有 💬 時看得到備註；
             // 出圖不放）。要退回這一件：刪這一行
             OrgMoveReceivedPreviewLine(text: OrgMoveCardData.previewLine(itemId: m.id, holderId: subId, hidden: forExport))
@@ -6643,15 +6643,15 @@ struct SubordinateItemCard: View {
                 // 有週期、或不開週期但有加開場次：議程項目屬於各場次，
                 // 攤平顯示會看不出哪一項是哪一場的
                 ForEach(displayOccurrences(of: m)) { occ in
-                    occurrenceBlock(occ, meeting: m, subId: subId, forExport: forExport)
+                    AnyView(occurrenceBlock(occ, meeting: m, subId: subId, forExport: forExport))
                 }
             } else if !m.allItems.isEmpty {
-                agendaBlock(title: "議程項目", items: m.allItems, meeting: m, subId: subId,
-                            scheduledDate: nil, forExport: forExport)
+                AnyView(agendaBlock(title: "議程項目", items: m.allItems, meeting: m, subId: subId,
+                            scheduledDate: nil, forExport: forExport))
             } else if !forExport {
                 // 不分場次且還沒有任何議程：給一個可加項目的空區塊
-                agendaBlock(title: "議程項目（尚無）", items: [], meeting: m, subId: subId,
-                            scheduledDate: nil, forExport: false)
+                AnyView(agendaBlock(title: "議程項目（尚無）", items: [], meeting: m, subId: subId,
+                            scheduledDate: nil, forExport: false))
             }
             // [v25.324] 就地加開一場（免進編輯頁）：接在場次/議程正下方
             if !forExport {
@@ -6684,7 +6684,7 @@ struct SubordinateItemCard: View {
             let (subId, r) = liveReport(refSubId, snap)
             titleBlock(icon: "doc.text.fill", color: .purple, title: r.topic.isEmpty ? "未命名報告" : r.topic,
                        forExport: forExport)
-            ownerBlock(subId: subId, accent: .purple)
+            AnyView(ownerBlock(subId: subId, accent: .purple))
             // [v25.590 轉組織 v1a-1] 同任務：交接自哪一位那一行（出圖不放）。要退回這一件：刪這一行
             OrgMoveReceivedPreviewLine(text: OrgMoveCardData.previewLine(itemId: r.id, holderId: subId, hidden: forExport))
             if !r.reportType.isEmpty { field("分類", r.reportType) }
@@ -6700,7 +6700,7 @@ struct SubordinateItemCard: View {
             let rec = lifeStore.subordinates.first { $0.id == subId }?.records.first { $0.id == snap.id } ?? snap
             titleBlock(icon: "calendar.badge.minus", color: .teal, title: rec.leaveType?.rawValue ?? "請假",
                        forExport: forExport)
-            ownerBlock(subId: subId, accent: .teal)
+            AnyView(ownerBlock(subId: subId, accent: .teal))
             field("開始", fmt(rec.date))
             if let end = rec.endDate { field("結束", fmt(end)) }
             if let h = rec.leaveHours { field("請假時數", String(format: "%.1f 小時", h)) }
@@ -6714,7 +6714,7 @@ struct SubordinateItemCard: View {
             let rec = lifeStore.subordinates.first { $0.id == subId }?.records.first { $0.id == snap.id } ?? snap
             titleBlock(icon: rec.type.icon, color: recordColor(rec.type), title: rec.type.rawValue,
                        forExport: forExport)
-            ownerBlock(subId: subId, accent: recordColor(rec.type))
+            AnyView(ownerBlock(subId: subId, accent: recordColor(rec.type)))
             field("日期", fmt(rec.date))
             if let end = rec.endDate { field("結束", fmt(end)) }
             if let sev = rec.severity { field("嚴重度", sev.rawValue) }

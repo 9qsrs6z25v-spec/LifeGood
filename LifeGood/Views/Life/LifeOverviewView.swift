@@ -73,10 +73,10 @@ struct LifeOverviewView: View {
                             else { showPremiumAlert = true }
                         }
                     )
-                    statsCard(allMS)
-                    milestoneTimelineSection(allMS)
-                    categoryBreakdownSection(allMS)
-                    lockedFeaturesSection
+                    AnyView(statsCard(allMS))
+                    AnyView(milestoneTimelineSection(allMS))
+                    AnyView(categoryBreakdownSection(allMS))
+                    AnyView(lockedFeaturesSection)
                 }
                 .padding(.vertical)
             }
@@ -271,7 +271,7 @@ struct LifeOverviewView: View {
                     ForEach(Array(recent.enumerated()), id: \.element.id) { idx, m in
                         let accent = milestoneColor(m.category)
 
-                        HStack(alignment: .center, spacing: 0) {
+                        AnyView(HStack(alignment: .center, spacing: 0) {
                             // 左側彩色強調條（每個分類獨立顏色）
                             RoundedRectangle(cornerRadius: 2)
                                 .fill(
@@ -332,7 +332,7 @@ struct LifeOverviewView: View {
                             }
 
                             Spacer(minLength: 8)
-                        }
+                        })
                         .padding(.horizontal, 16)
                         .padding(.vertical, 12)
                         // 錯落進場動畫：從左滑入 + 淡入

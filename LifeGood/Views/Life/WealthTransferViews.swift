@@ -1382,7 +1382,7 @@ struct WealthTransferRuleForm: View {
 
     var body: some View {
         NavigationStack {
-            formBody
+            AnyView(formBody)
                 .navigationTitle(titleText)
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {

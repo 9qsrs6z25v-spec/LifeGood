@@ -154,9 +154,9 @@ struct ChildDetailView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
+            AnyView(ScrollView {
                 VStack(spacing: 16) {
-                    headerCard
+                    AnyView(headerCard)
                         .opacity(headerAppeared ? 1 : 0)
                         .offset(y: headerAppeared ? 0 : 20)
                         .onAppear {
@@ -222,7 +222,7 @@ struct ChildDetailView: View {
                         Image(systemName: "photo.stack")
                     }
                 }
-            }
+            })
             .sheet(isPresented: $showAlbum) {
                 MapAlbumSheet(
                     title: "\(displayName) 相簿",
@@ -383,7 +383,7 @@ struct ChildDetailView: View {
             .offset(y: contentAppeared ? 0 : 14)
             .animation(.spring(response: 0.45, dampingFraction: 0.82), value: contentAppeared)
         ForEach(Array(DailyRecordType.allCases.enumerated()), id: \.element) { idx, type in
-            dailySection(type)
+            AnyView(dailySection(type))
                 .opacity(contentAppeared ? 1 : 0)
                 .offset(y: contentAppeared ? 0 : 14)
                 .animation(
@@ -393,7 +393,7 @@ struct ChildDetailView: View {
                 )
         }
         // 消費（依本人名字連動到變動支出）
-        consumptionSection
+        AnyView(consumptionSection)
             .opacity(contentAppeared ? 1 : 0)
             .offset(y: contentAppeared ? 0 : 14)
             .animation(
@@ -403,7 +403,7 @@ struct ChildDetailView: View {
             )
         // 收到的禮金（依本人名字連動到 .social 變動支出收受人）
         if !gifts.isEmpty {
-            childGiftsSection(gifts)
+            AnyView(childGiftsSection(gifts))
                 .opacity(contentAppeared ? 1 : 0)
                 .offset(y: contentAppeared ? 0 : 14)
                 .animation(
@@ -573,7 +573,7 @@ struct ChildDetailView: View {
                     Button {
                         viewingDaily = rec
                     } label: {
-                        dailyRow(rec)
+                        AnyView(dailyRow(rec))
                     }
                     .buttonStyle(.plain)
                     if idx < min(items.count, 20) - 1 {
@@ -854,7 +854,7 @@ struct ChildDetailView: View {
     private var lifeContent: some View {
         // 疫苗已獨立成第三個分頁（vaccineContent），生涯頁不再內嵌接種時程
         ForEach(Array(ChildRecordType.allCases.filter { $0 != .vaccination }.enumerated()), id: \.element) { idx, type in
-            recordSection(type)
+            AnyView(recordSection(type))
                 .opacity(contentAppeared ? 1 : 0)
                 .offset(y: contentAppeared ? 0 : 14)
                 .animation(
@@ -1649,7 +1649,7 @@ struct ChildRecordEditorSheet: View {
                 }
             }
             if detailFieldFocused {
-                clinicSuggestionsList
+                AnyView(clinicSuggestionsList)
             }
         }
         .onAppear {
@@ -1743,32 +1743,9 @@ struct ChildRecordEditorSheet: View {
         }
     }
 
-    private func clinicSuggestionRow(_ item: ClinicSuggestion) -> some View {
-        HStack(spacing: 12) {
-            ZStack {
-                Circle().fill(item.iconColor.opacity(0.15)).frame(width: 28, height: 28)
-                Image(systemName: item.iconName)
-                    .foregroundStyle(item.iconColor)
-                    .font(.caption)
-            }
-            VStack(alignment: .leading, spacing: 1) {
-                // [v25.520] 院所名稱過長改跑馬燈（原本切成「…」）
-                MarqueeText(item.title).font(.subheadline.weight(.medium))
-                if !item.subtitle.isEmpty {
-                    Text(item.subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
-                }
-            }
-            Spacer()
-                    // [v25.499] 距離。使用者回報：搜尋只跳地址、沒有距離，
-                    // 常常不知道該選哪一個。past 來源沒有座標可算，所以只有
-                    // Apple Maps 那幾筆有。
-            if let completion = item.completion {
-                PlaceDistanceBadge(meters: clinicCompleter.distance(for: completion))
-            }
-            Image(systemName: "arrow.up.left").font(.caption2).foregroundStyle(.tertiary)
-        }
-        .padding(.vertical, 6).padding(.horizontal, 8)
-        .contentShape(Rectangle())
+    private func clinicSuggestionRow(_ item: ClinicSuggestion) -> ClinicSuggestionRow {
+        ClinicSuggestionRow(item: item,
+                            distance: item.completion.map { clinicCompleter.distance(for: $0) })
     }
 
     /// 合併所有小孩過往就醫 / 接種院所 + Apple Maps POI（醫療類）
@@ -1918,6 +1895,41 @@ fileprivate struct ClinicSuggestion: Identifiable {
     }
     var iconColor: Color {
         source == .past ? .green : .red
+    }
+}
+
+/// [v25.619] 院所建議清單的一列。獨立 struct：型別不再一路串進病歷表單（理由同 25.618 記帳表單的 PlaceSuggestionRow）
+fileprivate struct ClinicSuggestionRow: View {
+    let item: ClinicSuggestion
+    /// 外層 nil＝這筆沒有 completion（不顯示距離）；裡面 nil＝有 completion 但量不到距離
+    let distance: CLLocationDistance??
+
+    var body: some View {
+        HStack(spacing: 12) {
+            ZStack {
+                Circle().fill(item.iconColor.opacity(0.15)).frame(width: 28, height: 28)
+                Image(systemName: item.iconName)
+                    .foregroundStyle(item.iconColor)
+                    .font(.caption)
+            }
+            VStack(alignment: .leading, spacing: 1) {
+                // [v25.520] 院所名稱過長改跑馬燈（原本切成「…」）
+                MarqueeText(item.title).font(.subheadline.weight(.medium))
+                if !item.subtitle.isEmpty {
+                    Text(item.subtitle).font(.caption2).foregroundStyle(.secondary).lineLimit(1)
+                }
+            }
+            Spacer()
+                    // [v25.499] 距離。使用者回報：搜尋只跳地址、沒有距離，
+                    // 常常不知道該選哪一個。past 來源沒有座標可算，所以只有
+                    // Apple Maps 那幾筆有。
+            if let meters = distance {
+                PlaceDistanceBadge(meters: meters)
+            }
+            Image(systemName: "arrow.up.left").font(.caption2).foregroundStyle(.tertiary)
+        }
+        .padding(.vertical, 6).padding(.horizontal, 8)
+        .contentShape(Rectangle())
     }
 }
 

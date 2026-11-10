@@ -599,11 +599,11 @@ struct SideRoleWorkspaceView: View {
         // content(_:)，避免每個子區塊各自解包或誤用強制解包。
         Group {
             if let role {
-                content(role)
+                AnyView(content(role))
             } else {
                 // 這一頁在別處被刪除時會落到這裡。它同樣是 sheet，
                 // 一樣要自己帶 NavigationStack 才會有「關閉」可按。
-                NavigationStack {
+                AnyView(NavigationStack {
                     VStack(spacing: 10) {
                         Image(systemName: "questionmark.folder")
                             .font(.system(size: 34))
@@ -620,7 +620,7 @@ struct SideRoleWorkspaceView: View {
                             Button("關閉") { dismiss() }
                         }
                     }
-                }
+                })
             }
         }
     }
@@ -631,23 +631,23 @@ struct SideRoleWorkspaceView: View {
         NavigationStack {
             ScrollView {
                 LazyVStack(spacing: 14) {
-                    header(role)
+                    AnyView(header(role))
                     // 搜尋/篩選中補常駐匯出列（搜尋時導覽列被系統收合、右上角分享鈕會隱藏）
                     if hasActiveFilter {
-                        filterBanner
-                        searchExportBar(role)
+                        AnyView(filterBanner)
+                        AnyView(searchExportBar(role))
                     }
-                    taskSection(role)
+                    AnyView(taskSection(role))
                     // 分類/人名篩選中，沒有該概念的區塊整區收起（不是顯示空狀態——
                     // 「還沒有會議紀錄」在篩選情境下是誤導，明明有、只是被濾掉）
                     if filterCategory == nil && filterPerson == nil {
-                        keyDateSection(role)
+                        AnyView(keyDateSection(role))
                     }
                     if filterCategory == nil {
-                        memberSection(role)
-                        meetingSection(role)
+                        AnyView(memberSection(role))
+                        AnyView(meetingSection(role))
                     }
-                    resolutionSection(role)
+                    AnyView(resolutionSection(role))
                 }
                 .padding(.vertical, 8)
             }
@@ -1132,7 +1132,7 @@ struct SideRoleWorkspaceView: View {
             .buttonStyle(.plain)
             .disabled(!subscription.isPremium)
 
-            VStack(alignment: .leading, spacing: 2) {
+            AnyView(VStack(alignment: .leading, spacing: 2) {
                 Text(task.content.isEmpty ? "（未填內容）" : task.content)
                     .font(.subheadline)
                     .strikethrough(task.isCompleted, color: .secondary)
@@ -1164,7 +1164,7 @@ struct SideRoleWorkspaceView: View {
                         .foregroundStyle(.indigo)
                     }
                 }
-            }
+            })
             Spacer()
         }
         .padding(.horizontal, 14).padding(.vertical, 10)
@@ -2425,7 +2425,7 @@ struct SideRoleResolutionCard: View {
 
     var body: some View {
         NavigationStack {
-            Group {
+            AnyView(Group {
                 if let role, let r = resolution {
                     ScrollView {
                         VStack(alignment: .leading, spacing: 14) {
@@ -2454,7 +2454,7 @@ struct SideRoleResolutionCard: View {
                         Button("編輯") { showEdit = true }.bold().foregroundStyle(.green)
                     }
                 }
-            }
+            })
             .sheet(isPresented: $showEdit) {
                 Group {
                     if let r = resolution {
@@ -2486,7 +2486,7 @@ struct SideRoleResolutionCard: View {
         if !r.categories.isEmpty { categoryBlock(r) }
         // [v25.319] 參照前案章節（標題＋日期＋內文＋跳轉超連結）插在決議內容**上方**
         if !r.references.isEmpty {
-            referenceBlock(r, forExport: forExport)
+            AnyView(referenceBlock(r, forExport: forExport))
         }
         // [v25.463] 內容分章節顯示。使用者回報：設定裡把內容切成幾個部分之後，
         // 卡片上還是一團文字、只靠【標題】這幾個字分隔，看不出章節。

@@ -252,7 +252,7 @@ struct SubordinateView: View {
         // 部門篩選列（有定義部門才顯示）
         if !lifeStore.departments.isEmpty {
             Section {
-                departmentFilterBar
+                AnyView(departmentFilterBar)
                     .listRowInsets(EdgeInsets(top: 2, leading: 12, bottom: 2, trailing: 12))
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)
@@ -397,11 +397,11 @@ struct SubordinateView: View {
         // 供頂部統計卡與每一列共用，避免各自重複觸發全量重算。
         let ctx = lifeStore.makeScoreContext()
         return NavigationStack {
-            List {
+            AnyView(List {
                 // 頂部統計摘要卡（有部屬才顯示）
                 if !lifeStore.subordinates.isEmpty {
                     Section {
-                        summaryStatsCard(ctx: ctx)
+                        AnyView(summaryStatsCard(ctx: ctx))
                             .listRowInsets(EdgeInsets())
                             .listRowBackground(Color.clear)
                             .listRowSeparator(.hidden)
@@ -426,7 +426,7 @@ struct SubordinateView: View {
                     subordinateSections(ctx: ctx)
                 }
             }
-            .environment(\.editMode, sortOption == .manual ? .constant(.active) : .constant(.inactive))
+            .environment(\.editMode, sortOption == .manual ? .constant(.active) : .constant(.inactive)))
             .listStyle(.insetGrouped)
             .scrollContentBackground(.hidden)
             .background(Color(.systemGroupedBackground))
@@ -1106,7 +1106,7 @@ struct SubordinateView: View {
             .padding(.trailing, 12)
 
             // 姓名 + 職等 + 到職年數
-            VStack(alignment: .leading, spacing: 4) {
+            AnyView(VStack(alignment: .leading, spacing: 4) {
                 // [v25.549] 名字後面接年資（同部屬卡片看板）：「黃義超，3.2年資歷」
                 MarqueeText(SubordinateDetailView.nameWithSeniority(sub.name, joinDate: sub.joinDate))
                     .font(.subheadline.weight(.semibold))
@@ -1166,7 +1166,7 @@ struct SubordinateView: View {
                     .clipShape(Capsule())
                     .overlay(Capsule().stroke(Color(.separator).opacity(0.15), lineWidth: 0.5))
                 }
-            }
+            })
 
             Spacer(minLength: 8)
 

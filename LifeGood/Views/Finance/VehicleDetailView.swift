@@ -91,14 +91,14 @@ struct VehicleDetailView: View {
 
     var body: some View {
         NavigationStack {
-            withPresentations(scroller)
+            withPresentations(AnyView(scroller))
         }
     }
 
     private var scroller: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                cardContent(proxy)
+                AnyView(cardContent(proxy))
             }
             .background(Color(.systemGroupedBackground))
             .task(id: cardTaskKey) { rebuildCard(proxy) }

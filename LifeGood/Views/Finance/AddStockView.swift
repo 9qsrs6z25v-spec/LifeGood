@@ -136,7 +136,7 @@ struct AddStockView: View {
             Form {
                 // 頂部即時預覽卡（橘色漸層英雄卡）
                 Section {
-                    amountPreviewCard
+                    AnyView(amountPreviewCard)
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
@@ -788,7 +788,7 @@ struct AddStockView: View {
 
     private func quoteDetailSection(_ q: StockQuote) -> some View {
         Section {
-            quoteHeroCard(q)
+            AnyView(quoteHeroCard(q))
                 .listRowInsets(EdgeInsets())
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
@@ -959,7 +959,7 @@ struct AddStockView: View {
             let returnRate = totalCost > 0 ? pl / totalCost * 100 : 0
 
             Section {
-                calcCard(totalCost: totalCost, marketValue: marketValue, pl: pl, returnRate: returnRate)
+                AnyView(calcCard(totalCost: totalCost, marketValue: marketValue, pl: pl, returnRate: returnRate))
                     .listRowInsets(EdgeInsets())
                     .listRowBackground(Color.clear)
                     .listRowSeparator(.hidden)

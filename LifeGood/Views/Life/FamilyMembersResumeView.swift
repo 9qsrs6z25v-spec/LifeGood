@@ -574,12 +574,12 @@ struct FamilyMemberDetailView: View {
         return NavigationStack {
             ScrollView {
                 VStack(spacing: 16) {
-                    headerCard
-                    eventsSection
+                    AnyView(headerCard)
+                    AnyView(eventsSection)
                     if !gifts.isEmpty {
-                        memberGiftsSection(gifts)
+                        AnyView(memberGiftsSection(gifts))
                     }
-                    photosSection
+                    AnyView(photosSection)
                 }
                 .padding(.vertical)
             }
@@ -734,7 +734,7 @@ struct FamilyMemberDetailView: View {
                 let lastEventId = sortedEvents.last?.id
                 ForEach(Array(sortedEvents.enumerated()), id: \.element.id) { idx, ev in
                     Button { editingEvent = ev } label: {
-                        HStack(spacing: 12) {
+                        AnyView(HStack(spacing: 12) {
                             // 36pt 橘色漸層圖示圓 + stroke 邊框
                             ZStack {
                                 Circle()
@@ -778,7 +778,7 @@ struct FamilyMemberDetailView: View {
                             .clipShape(Capsule())
                             // [v3] 日期膠囊細邊框，對齊 ChildDetailView v2 / SpouseResumeView v2 規格
                             .overlay(Capsule().stroke(Color(.separator).opacity(0.20), lineWidth: 0.5))
-                        }
+                        })
                         .padding(.horizontal).padding(.vertical, 10)
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .contentShape(Rectangle())

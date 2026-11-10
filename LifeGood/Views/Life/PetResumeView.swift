@@ -46,7 +46,7 @@ struct PetResumeView: View {
                     emptyState.padding(.top, 60)
                 } else {
                     VStack(spacing: 0) {
-                        heroStatsCard(pets)
+                        AnyView(heroStatsCard(pets))
                             .padding(.horizontal)
                             .padding(.top, 8)
                         sectionHeader(pets.count)
@@ -54,7 +54,7 @@ struct PetResumeView: View {
                             .padding(.top, 18)
                         VStack(spacing: 12) {
                             ForEach(Array(pets.enumerated()), id: \.element.id) { idx, pet in
-                                petCard(pet)
+                                AnyView(petCard(pet))
                                     .onTapGesture { viewingPet = pet }
                                     .opacity(cardsAppeared ? 1 : 0)
                                     .offset(y: cardsAppeared ? 0 : 14)

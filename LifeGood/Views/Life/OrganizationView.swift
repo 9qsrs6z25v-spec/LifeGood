@@ -175,7 +175,7 @@ struct OrganizationView: View {
 
     var body: some View {
         NavigationStack {
-            Group {
+            AnyView(Group {
                 if lifeStore.departments.isEmpty {
                     emptyState
                 } else {
@@ -188,11 +188,11 @@ struct OrganizationView: View {
                             resolutionSearchBar
                         }
                         if !orgSearchText.trimmingCharacters(in: .whitespaces).isEmpty {
-                            orgSearchResults
+                            AnyView(orgSearchResults)
                         } else if directoryMode {
-                            directoryList
+                            AnyView(directoryList)
                         } else {
-                            ScrollView([.horizontal, .vertical]) {
+                            AnyView(ScrollView([.horizontal, .vertical]) {
                                 let ctx = makeOrgContext()
                                 VStack(spacing: 24) {
                                     statsHeader
@@ -202,7 +202,7 @@ struct OrganizationView: View {
                                     treeMergedSection
                                 }
                                 .padding(24)
-                            }
+                            })
                         }
                     }
                 }
@@ -221,7 +221,7 @@ struct OrganizationView: View {
                 ToolbarItem(placement: .topBarTrailing) {
                     if !lifeStore.departments.isEmpty { orgToolbarMenu }
                 }
-            }
+            })
             .sheet(item: $pdfURL) { wrapper in
                 ShareSheet(items: [wrapper.url])
                     .appStores()
@@ -844,17 +844,17 @@ struct DepartmentDetailView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
+            AnyView(ScrollView {
                 VStack(spacing: 16) {
-                    headerCard
+                    AnyView(headerCard)
                     // [v25.598 轉組織 v5] 已併入的部門：「2027/1/1 併入製造課」〔前往製造課〕（沒併入＝不出現）。要退回這一件：刪這一行
                     DeptMergedBanner(deptId: deptId) { id in reorgJump = IdentifiableUUID(id: id) }
-                    managerSection
+                    AnyView(managerSection)
                     if !upstreamDepts.isEmpty || !downstreamDepts.isEmpty {
-                        relationsCard
+                        AnyView(relationsCard)
                     }
-                    equipmentSection
-                    peopleSection
+                    AnyView(equipmentSection)
+                    AnyView(peopleSection)
                     // [v25.598 轉組織 v5] 「組織重整」＋7 天內〔復原〕（沒有就不出現）。要退回這一件：刪這一行
                     DeptReorgSection(deptId: deptId)
                     // [v25.592 轉組織 v1b] 最下面「異動」（沒有就不出現）。要退回這一件：刪這一行
@@ -873,7 +873,7 @@ struct DepartmentDetailView: View {
                     reorgMenu
                     Button("編輯部門") { showEditDept = true }
                 }
-            }
+            })
             .sheet(isPresented: $showEditDept) {
                 DepartmentEditor(editingId: deptId)
                     .appStores()
@@ -1454,9 +1454,9 @@ struct DepartmentDetailView: View {
     @ViewBuilder
     private func equipmentTreeRow(_ row: EquipmentTreeRow) -> some View {
         if row.depth == 0 {
-            equipmentRow(row.equipment)
+            AnyView(equipmentRow(row.equipment))
         } else {
-            downstreamRow(row.equipment)
+            AnyView(downstreamRow(row.equipment))
                 .padding(.leading, Self.equipmentIndent(depth: row.depth))
                 .padding(.trailing, 16)
         }
@@ -1697,7 +1697,7 @@ struct DepartmentDetailView: View {
                 let lastId = people.last?.id
                 ForEach(Array(people.enumerated()), id: \.element.id) { idx, person in
                     Button { viewingPersonId = person.id } label: {
-                        personRow(person)
+                        AnyView(personRow(person))
                     }
                     .buttonStyle(.plain)
                     // [v25.592 轉組織 v1b] 連到部屬的那位長按〔轉組織…〕（要退回這一件：刪這一行）
@@ -2777,14 +2777,14 @@ struct OrgPersonDetailView: View {
 
     var body: some View {
         NavigationStack {
-            ScrollView {
+            AnyView(ScrollView {
                 VStack(spacing: 16) {
-                    headerCard
+                    AnyView(headerCard)
                     if person.linkedBusinessCardId != nil {
                         linkedCardButton
                     }
                     // [v25.323] 相關作品／報告／改善：部屬自動帶入＋手動記錄的簡易項目
-                    worksCard
+                    AnyView(worksCard)
                     if !person.relationship.isEmpty {
                         sectionCard("我與這位同仁的利害關係", systemImage: "link.circle.fill", color: .indigo) {
                             Text(person.relationship).font(.subheadline)
@@ -2796,14 +2796,14 @@ struct OrgPersonDetailView: View {
                         }
                     }
                     if !person.relations.isEmpty {
-                        relationsCard
+                        AnyView(relationsCard)
                     }
                     if !person.children.isEmpty {
-                        childrenCard
+                        AnyView(childrenCard)
                     }
                     let gifts = giftHistory
                     if !gifts.isEmpty {
-                        giftCard(gifts)
+                        AnyView(giftCard(gifts))
                     }
                 }
                 .padding(.vertical)
@@ -2824,7 +2824,7 @@ struct OrgPersonDetailView: View {
                         Button { showDeleteConfirm = true } label: { Text("刪除").foregroundStyle(.red) }
                     }
                 }
-            }
+            })
             // [v25.592 轉組織 v1b] 編輯頁帶 onUseOrgMove（沒訂閱＝nil，不給〔用轉組織〕）；關掉之後才開精靈。
             // 要退回這一件：改回 .sheet(isPresented: $showEdit) { OrgPersonEditor(editingId: personId, defaultDepartmentId: nil).appStores() }
             .sheet(isPresented: $showEdit, onDismiss: { openPendingOrgMove() }) {

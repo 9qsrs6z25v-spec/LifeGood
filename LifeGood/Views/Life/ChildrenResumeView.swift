@@ -89,7 +89,7 @@ struct ChildrenResumeView: View {
                 } else {
                     VStack(spacing: 0) {
                         // [v2] 英雄統計卡：粉藍漸層 + KPI + 進場動畫
-                        heroStatsCard(children)
+                        AnyView(heroStatsCard(children))
                             .opacity(heroAppeared ? 1 : 0)
                             .offset(y: heroAppeared ? 0 : 22)
                             .onAppear {
@@ -107,7 +107,7 @@ struct ChildrenResumeView: View {
                             .padding(.top, 20)
                             .padding(.bottom, 8)
 
-                        LazyVStack(spacing: 12) {
+                        AnyView(LazyVStack(spacing: 12) {
                             ForEach(Array(children.enumerated()), id: \.element.id) { idx, child in
                                 childCard(child)
                                     .opacity(cardsAppeared ? 1 : 0)
@@ -130,7 +130,7 @@ struct ChildrenResumeView: View {
                         .onDisappear {
                             // 重置旗標：切到其他分頁再切回時能重新播放卡片列表進場動畫
                             cardsAppeared = false
-                        }
+                        })
                     }
                 }
             }
@@ -302,7 +302,7 @@ struct ChildrenResumeView: View {
                         .foregroundStyle(accent)
                 }
 
-                childCardInfo(child, accent: accent)
+                AnyView(childCardInfo(child, accent: accent))
 
                 Spacer(minLength: 4)
 

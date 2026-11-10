@@ -462,11 +462,11 @@ struct ResumeView: View {
             // Section（headerSections），隨內容一起捲動，不再固定釘在列表上方。
             Group {
                 if sorted.isEmpty {
-                    emptyStateList(sorted)
+                    AnyView(emptyStateList(sorted))
                 } else if let cat = selectedCategory {
-                    filteredList(category: cat, sorted: sorted)
+                    AnyView(filteredList(category: cat, sorted: sorted))
                 } else {
-                    groupedList(sorted)
+                    AnyView(groupedList(sorted))
                 }
             }
             .background(Color(.systemGroupedBackground))
@@ -580,7 +580,7 @@ struct ResumeView: View {
     @ViewBuilder
     private func headerSections(_ sorted: [LifeMilestone]) -> some View {
         Section {
-            resumeHeroCard(sorted)
+            AnyView(resumeHeroCard(sorted))
                 .listRowInsets(EdgeInsets(top: 12, leading: 16, bottom: 4, trailing: 16))
                 .listRowBackground(Color.clear)
                 .listRowSeparator(.hidden)
@@ -1155,7 +1155,7 @@ struct ResumeView: View {
             .padding(.trailing, 12)
 
             // 標題 + 副資訊
-            VStack(alignment: .leading, spacing: 4) {
+            AnyView(VStack(alignment: .leading, spacing: 4) {
                 // [v25.520] 里程碑標題過長改跑馬燈（原本縮字後切成「…」）
                 MarqueeText(item.title)
                     .font(.subheadline.weight(.semibold))
@@ -1179,7 +1179,7 @@ struct ResumeView: View {
                             .lineLimit(1)
                     }
                 }
-            }
+            })
 
             Spacer(minLength: 6)
 

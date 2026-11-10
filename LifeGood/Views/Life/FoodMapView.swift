@@ -483,7 +483,7 @@ struct FoodMapView: View {
         return NavigationStack {
             ScrollView {
                 VStack(spacing: 14) {
-                    statsCard(items)
+                    AnyView(statsCard(items))
                     ScrollView(.horizontal, showsIndicators: false) {
                         HStack(spacing: 8) {
                             ForEach(FoodMapSort.allCases) { s in
@@ -493,9 +493,9 @@ struct FoodMapView: View {
                         .padding(.horizontal, 12)
                     }
                     if items.isEmpty {
-                        restaurantListEmptyState
+                        AnyView(restaurantListEmptyState)
                     } else {
-                        restaurantListCard(items)
+                        AnyView(restaurantListCard(items))
                     }
                 }
                 .padding(.vertical, 16)
@@ -523,7 +523,7 @@ struct FoodMapView: View {
                         selectedAggregate = agg
                     }
                 } label: {
-                    restaurantRow(agg)
+                    AnyView(restaurantRow(agg))
                 }
                 .buttonStyle(.plain)
                 if idx < items.count - 1 { Divider().padding(.leading, 60) }
@@ -864,7 +864,7 @@ struct RestaurantDetailSheet: View {
                     .clipShape(RoundedRectangle(cornerRadius: 16))
                     .padding(.horizontal)
 
-                    headerCard
+                    AnyView(headerCard)
                         .opacity(cardAppeared ? 1 : 0)
                         .offset(y: cardAppeared ? 0 : 20)
                         .onAppear {
@@ -877,7 +877,7 @@ struct RestaurantDetailSheet: View {
                         photoGallerySection
                     }
 
-                    visitsSection
+                    AnyView(visitsSection)
 
                     if let companion = aggregate.topCompanion {
                         companionCard(companion)
@@ -1064,7 +1064,7 @@ struct RestaurantDetailSheet: View {
 
             VStack(spacing: 0) {
                 ForEach(Array(sorted.enumerated()), id: \.element.id) { idx, exp in
-                    HStack(spacing: 10) {
+                    AnyView(HStack(spacing: 10) {
                         // [v3] 34pt 漸層圖示圓 + stroke 邊框
                         ZStack {
                             Circle()
@@ -1112,7 +1112,7 @@ struct RestaurantDetailSheet: View {
                             .lineLimit(1)
                             .minimumScaleFactor(0.7)
                             .contentTransition(.numericText())
-                    }
+                    })
                     .padding(.horizontal, 14)
                     .padding(.vertical, 10)
                     // 交錯淡入 + 向上進場動畫，對齊 StockDetailView.transactionsSection 規格

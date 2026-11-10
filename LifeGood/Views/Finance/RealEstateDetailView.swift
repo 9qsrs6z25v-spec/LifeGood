@@ -84,14 +84,14 @@ struct RealEstateDetailView: View {
 
     var body: some View {
         NavigationStack {
-            withPresentations(scroller)
+            withPresentations(AnyView(scroller))
         }
     }
 
     private var scroller: some View {
         ScrollViewReader { proxy in
             ScrollView {
-                cardContent(proxy)
+                AnyView(cardContent(proxy))
             }
             .background(Color(.systemGroupedBackground))
             .task(id: cardTaskKey) { rebuildCard(proxy) }
@@ -257,9 +257,9 @@ struct RealEstateDetailView: View {
     private func lowerSections(_ card: HouseCardData, actions: HouseCardActions) -> some View {
         HouseInfoSection(estate: card.estate, data: card, actions: actions)
             .id(HouseAnchor.info)
-        floorsSection(card)
+        AnyView(floorsSection(card))
             .id(HouseAnchor.floors)
-        photosSection(card)
+        AnyView(photosSection(card))
             .id(HouseAnchor.photos)
         HouseUtilitiesSection(estate: card.estate, data: card, actions: actions)
             .id(HouseAnchor.utilities)
@@ -1083,7 +1083,7 @@ extension RealEstateDetailView {
         return VStack(alignment: .leading, spacing: 6) {
             floorRow(floor, open: open)
             if open {
-                floorDetail(floor)
+                AnyView(floorDetail(floor))
             }
         }
     }
@@ -1557,7 +1557,7 @@ extension RealEstateDetailView {
                     Button {
                         handleHousePhotoTap(item)
                     } label: {
-                        housePhotoCard(item)
+                        AnyView(housePhotoCard(item))
                     }
                     .buttonStyle(.plain)
                     .contextMenu { photoMenu(item) }

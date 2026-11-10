@@ -280,7 +280,7 @@ struct AddRealEstateView: View {
     var body: some View {
         NavigationStack {
             ScrollViewReader { proxy in
-                withDeletePresentations(withEditorPresentations(editorForm))
+                withDeletePresentations(withEditorPresentations(AnyView(editorForm)))
                     .onAppear { applyFocus(proxy) }
             }
         }
@@ -799,7 +799,7 @@ struct AddRealEstateView: View {
                         .font(.subheadline.weight(.medium))
                         .foregroundStyle(.primary)
                     if let seg = seg {
-                        mortgageProgress(seg)
+                        AnyView(mortgageProgress(seg))
                     }
                 }
                 Spacer()

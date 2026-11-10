@@ -522,12 +522,12 @@ struct MainTabView: View {
         ZStack {
             VStack(spacing: 0) {
                 if !isSettingsActive {
-                    topSubFeatureBar
+                    AnyView(topSubFeatureBar)
                 }
                 if isCurrentViewPremiumLocked {
                     PremiumBanner(showPaywall: $showPaywall)
                 }
-                contentView
+                AnyView(contentView)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                     // 全域滑動手勢：邊緣滑動切大功能、快速甩動切子功能（詳見 handleSwipe）
                     .simultaneousGesture(
@@ -537,7 +537,7 @@ struct MainTabView: View {
                 // 佔位用：與底部 tab bar 同高，保證內容區不會被 tab bar 蓋住。
                 // 用獨立的 hiddenTabBarNamespace，避免跟下方真正顯示的副本共用同一個
                 // matchedGeometryEffect namespace（見上方 hiddenTabBarNamespace 宣告註解）。
-                bottomTabBar(namespace: hiddenTabBarNamespace)
+                AnyView(bottomTabBar(namespace: hiddenTabBarNamespace))
                     .hidden()
             }
             .tint(.green)
@@ -572,7 +572,7 @@ struct MainTabView: View {
             floatingActionButton
 
             if isOnVariableExpense && aiSettings.isReady && subscription.isPremium {
-                aiMicOverlay
+                AnyView(aiMicOverlay)
             }
 
             // 真正顯示用的 tab bar：壓在麥克風上層，誤觸時也能看清楚分頁
@@ -586,7 +586,7 @@ struct MainTabView: View {
                 ExportProgressBarView()
                 // [v25.483] 照片匯入（iCloud 原圖下載）的進度，與匯出同一個位置
                 PhotoImportBarView()
-                bottomTabBar(namespace: tabBarNamespace)
+                AnyView(bottomTabBar(namespace: tabBarNamespace))
             }
 
             if let toast = aiToast {
@@ -861,21 +861,21 @@ struct MainTabView: View {
                     ForEach(lifeAvailableFeatures) { f in
                         // 「職涯」展開：父功能 + 橘色子功能 包在淡橘背景框
                         if f == .career && shouldExpandManagement {
-                            careerGroupedPills
+                            AnyView(careerGroupedPills)
                         }
                         // 「家庭」展開：父功能 + 粉色子功能 包在淡粉背景框
                         else if f == .family && shouldExpandFamily {
-                            familyGroupedPills
+                            AnyView(familyGroupedPills)
                         }
                         // 一般父分類 pill
                         else {
-                            subFeaturePill(f.title, icon: f.icon,
+                            AnyView(subFeaturePill(f.title, icon: f.icon,
                                            isSelected: isLifeParentSelected(f),
                                            locked: !FeatureGate.isFree(f) && !subscription.isPremium) {
                                 lifeFeatureRaw = f.rawValue
                                 if f == .career { managementFeatureRaw = "" }
                                 if f == .family { familyMgmtFeatureRaw = "" }
-                            }
+                            })
                         }
                     }
                 }
