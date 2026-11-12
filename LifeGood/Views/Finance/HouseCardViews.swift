@@ -1812,7 +1812,7 @@ private struct HCUtilityTrendBody: View {
             if !panel.legend.isEmpty {
                 UtilityTrendLegend(rows: panel.legend, type: panel.type, pal: pal)
             }
-            HCUtilityTrendCaption(text: panel.caption(for: pickedKey), note: panel.hiddenMeterNote,
+            HCUtilityTrendCaption(text: panel.caption(for: pickedKey), note: panel.captionNote,
                                   centered: true, pal: pal)
         }
     }

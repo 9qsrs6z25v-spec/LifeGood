@@ -102,6 +102,9 @@ struct UnifiedExport: Codable {
         var stocks: [Stock]
         var vehicles: [Vehicle]
         var realEstates: [RealEstate]
+        /// [v25.622] 每一期水電的度數、計費期間（UtilityReadingBook；同步鍵 lifegood_utility_readings_v1）。舊備份沒有，所以是 Optional；
+        /// 跟房子走（完整備份、「記帳理財」才帶；一期水電都沒有就不帶）
+        var utilityReadings: UtilityReadingBook?
     }
 
     struct LifeBundle: Codable {
@@ -198,7 +201,9 @@ struct UnifiedExport: Codable {
                 insurances: scope.carriesFinance ? finance.insurances : [],
                 stocks: scope.carriesFinance ? finance.stocks : [],
                 vehicles: scope.carriesFinance ? finance.vehicles : [],
-                realEstates: scope.carriesFinance ? finance.realEstates : []
+                realEstates: scope.carriesFinance ? finance.realEstates : [],
+                // [v25.622] 度數只帶這份檔案裡那幾期的；不帶理財、或一期水電都沒有就不帶（舊備份＝nil，匯入時不動本機）
+                utilityReadings: scope.carriesFinance ? UtilityReadingStore.shared.exportBook(forEstates: finance.realEstates) : nil
             ),
             life: LifeBundle(
                 profile: scope.carriesPersonal ? life.profile : nil,
@@ -522,11 +527,17 @@ enum UnifiedExporter {
             csv += "\n"
 
             csv += "## 房地產-水電瓦斯繳費 (RE Utility Payments)\n"
-            csv += "realEstateId,realEstateName,type,date,amount,note\n"
+            // [v25.622] 最後多 5 欄（表、度數、計費期間起迄「2026-07-13」、帳單標記；原本 6 欄一字不變、位置不變）。
+            // 度數走 value(for:)（UtilityReadingCSV.columns），讀這份 payload 裡那一包（背景執行緒也安全，不讀 store）
+            csv += "realEstateId,realEstateName,type,date,amount,note," + UtilityReadingCSV.extraHeader + "\n"
+            let readingIndex = UtilityReadingIndex(book: finance.utilityReadings ?? UtilityReadingBook())
             for r in finance.realEstates {
+                let slots = UtilityMeterSlotIndex(r.utilityMeterSlots())
                 for u in r.utilityPayments {
+                    let x: [String] = UtilityReadingCSV.columns(u, slots: slots, index: readingIndex)
                     csv += [r.id.uuidString, esc(r.name), esc(u.type.rawValue),
-                            iso.string(from: u.date), String(format: "%.2f", u.amount), esc(u.note)].joined(separator: ",") + "\n"
+                            iso.string(from: u.date), String(format: "%.2f", u.amount), esc(u.note),
+                            esc(x[0]), x[1], x[2], x[3], esc(x[4])].joined(separator: ",") + "\n"
                 }
             }
             csv += "\n"
@@ -959,6 +970,10 @@ enum UnifiedImporter {
                 finance.vehicles = payload.finance.vehicles
                 finance.realEstates = payload.finance.realEstates
             }
+            // [v25.622] 度數：備份裡有才換（舊備份沒有＝不動本機的）；理財整批歸這份檔案管才換
+            if scope.carriesFinance, let rb = payload.finance.utilityReadings {
+                UtilityReadingStore.shared.importReplacingAll(rb)
+            }
             life.withBatch {
                 // 里程碑是職涯、財富、旅行、家庭混在一起的一個集合，
                 // 部分範圍的檔案只換掉自己那幾類，其他類別留著
@@ -1366,6 +1381,10 @@ enum UnifiedImporter {
             }
             finance.realEstates = reArr
             result.realEstates = newRECount
+            // [v25.622] 度數：照 id 合併（同一期取後改的、墓碑勝過比它舊的；一樣新留本機的）
+            if scope.carriesFinance, let rb = payload.finance.utilityReadings {
+                UtilityReadingStore.shared.importMerging(rb)
+            }
         }
 
         // [v25.568] 匯入的是 v7 以前的備份（號碼還是明碼）：照新版第一次打開那樣搬成密文（這台封不了的整筆不動，下次再搬）

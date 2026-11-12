@@ -10,6 +10,10 @@ import Foundation
 // - v1 只有金額；度數、計費期間是 v3（新同步鍵），這一版沒有。
 // - [v25.621] v2 全頁「水電趨勢」：UtilityTrendSource 在 HouseCardData.build 算一次（全頁不重跑帳本），
 //   UtilityTrendPage.build 在全頁的 .task／換選擇時算好 UtilityTrendScreen，body 只讀。還是只有金額。
+// - [v25.622] v3 度數與計費期間：UtilityRow.reading（UtilityReadingIndex.value(for:) 驗過的值，UtilityReadings.swift）。
+//   小圖「一半以上的期有度數」才預設畫度數（defaultQuantity）、沒度數的期把線切開；全頁〔度數｜金額｜每度幾元〕、
+//   平均每天、每度幾元、有期間時約每月用期間算、去年同期兩期都有期間時用重疊天數配對（lastYear）。
+//   **沒有度數時 v1／v2 的結果一個字都不變**（唯一多的是全頁那一種完全沒度數時頁尾一行邀請，C1-1）。
 
 // MARK: - 猜類型
 
@@ -210,6 +214,8 @@ struct UtilityRow: Equatable {
     let photoCount: Int
     /// 只在記帳記的（S4）：點的說明句尾加「（記帳裡的）」
     let fromExpenseOnly: Bool
+    /// [v25.622] 這一期的度數、計費期間（UtilityReadingIndex.value(for:) 驗過的；只在記帳的、沒填的 nil）
+    var reading: UtilityReadingValue? = nil
 }
 
 /// 一間房子的全部水電列（舊到新），HouseCardData.build 算一次
@@ -244,8 +250,9 @@ enum UtilityRows {
     /// - S4 其他 mark == .utility 的列（只在記帳、或變動支出分類是水電瓦斯）：類型用 guessUtilityTypeIfAny 猜
     /// - 連到的記帳 linkedRealEstateId 是別間（M2）：不算
     /// - 固定支出年列（S5、M1）本來就不是 .utility 的非年列，不在這裡
+    /// [v25.622] readings：度數（只問 value(for:)；base 對不上、墓碑、孤兒都不算）。純函式不給預設值，sim／preview 明寫 `.empty`
     static func build(estate re: RealEstate, events: [HouseLedgerEvent], expensesById: [UUID: Expense],
-                      slots: UtilityMeterSlotIndex) -> UtilityRowSet {
+                      slots: UtilityMeterSlotIndex, readings: UtilityReadingIndex) -> UtilityRowSet {
         let payments: [UUID: UtilityPayment] = Dictionary(re.utilityPayments.map { ($0.id, $0) },
                                                            uniquingKeysWith: { a, _ in a })
         var orderOf: [UUID: Int] = [:]
@@ -291,9 +298,10 @@ enum UtilityRows {
             let type: UtilityType? = payment?.type ?? guessed
             if type == nil { result.untypedCount += 1 }
             let meter: UtilityMeterAssignment = slots.meterOf(payment, type: type)
+            let reading: UtilityReadingValue? = payment.flatMap { readings.value(for: $0) }
             let row = UtilityRow(key: e.id, type: type, meterId: meter.id, meterAssigned: meter.assigned,
                                  date: e.date, amount: e.amount, paymentId: payment?.id, expenseId: e.expenseId,
-                                 photoCount: e.photoCount, fromExpenseOnly: fromExpenseOnly)
+                                 photoCount: e.photoCount, fromExpenseOnly: fromExpenseOnly, reading: reading)
             let order: Int = payment.flatMap { orderOf[$0.id] } ?? Int.max
             out.append((row: row, order: order))
         }
@@ -434,11 +442,19 @@ struct UtilityTrendPanel: Equatable {
     let defaultCaption: String
     /// 點到一點時的說明行（key → 那句）
     let pickedCaptions: [String: String]
+    /// [v25.622] 小圖照畫金額、但這一種已有 2 期以上填了度數：「已有 3 期填了度數，在水電趨勢切〔度數〕看」
+    var usageNote: String? = nil
 
     /// 說明行：查得到點的那句，查不到（沒點、或點的那期刪了）用沒點時那句
     func caption(for key: String?) -> String {
         guard let key, let s = pickedCaptions[key] else { return defaultCaption }
         return s
+    }
+
+    /// [v25.622] 說明行下面的小字：「還有 1 個表沒畫」、「已有 3 期填了度數…」（有才有，一行一句）
+    var captionNote: String? {
+        let parts: [String] = [hiddenMeterNote, usageNote].compactMap { $0 }
+        return parts.isEmpty ? nil : parts.joined(separator: "\n")
     }
 }
 
@@ -481,8 +497,16 @@ enum UtilityTrendBuild {
             guard !mine.isEmpty else { continue }
             let history: [UtilityRow] = set.rows.filter { $0.type == t }
             kinds.append(t)
-            panels[t] = panel(t, rows: mine, history: history, slots: slots, asOf: asOf, cal: cal,
-                              title: "每期多少錢・近 2 年", maxPoints: maxPointsPerMeter)
+            // [v25.622] C1-補：近 2 年這一種有度數 ≥ 3 期、而且 ≥ 一半才預設畫度數；不然照畫金額，2 期以上有度數多一行小字
+            if defaultQuantity(mine) == .usage {
+                panels[t] = measurePanel(t, quantity: .usage, rows: mine, history: history, slots: slots, asOf: asOf,
+                                         cal: cal, title: "每期用了幾度・近 2 年", maxPoints: maxPointsPerMeter)
+            } else {
+                var p: UtilityTrendPanel = panel(t, rows: mine, history: history, slots: slots, asOf: asOf, cal: cal,
+                                                 title: "每期多少錢・近 2 年", maxPoints: maxPointsPerMeter)
+                p.usageNote = usageNudge(mine)
+                panels[t] = p
+            }
         }
         return UtilityTrendBoard(kinds: kinds, defaultKind: latestType, panels: panels)
     }
@@ -685,6 +709,8 @@ enum UtilityTrendBuild {
 
     /// 去年同期（v1 沒有計費期間）：同一個表裡，繳費日最接近「這期繳費日 −1 年」、差 ≤ 半個週期、比這期早的那一期。
     /// 用 Calendar 減一年（不用 365 天）；只看目標前後 3 期
+    /// [v25.622] 兩期都有計費期間 → 跟（這期期間往前一年）重疊最多、而且重疊 ≥ 這期天數一半的那期（overlapMatch）；
+    /// 有一邊沒期間才照繳費日。沒有度數、期間時結果跟 v1 一樣
     static func lastYear(of idx: Int, in rows: [UtilityRow], cycle: Int, cal: Calendar) -> UtilityRow? {
         let r = rows[idx]
         guard let target = cal.date(byAdding: .year, value: -1, to: r.date) else { return nil }
@@ -697,9 +723,15 @@ enum UtilityTrendBuild {
         let from = max(0, lo - 3)
         let to = min(idx - 1, lo + 3)
         guard from <= to else { return nil }
+        let mine: UtilityReadingPeriod? = r.reading?.period
+        if let p = mine, let hit = overlapMatch(p, rows: rows, from: from, to: to, cal: cal) {
+            return hit
+        }
         var best: UtilityRow? = nil
         var bestGap = Int.max
         for j in from...to {
+            // 兩期都有期間：只看重疊（上面沒配到就不拿繳費日硬配）
+            if mine != nil && rows[j].reading?.period != nil { continue }
             let gap: Int = abs(UtilityMath.days(target, rows[j].date, cal: cal))
             if gap < bestGap {
                 bestGap = gap
@@ -859,6 +891,9 @@ struct UtilityTrendPicks: Equatable {
     var meterId: String?
     /// true＝〔全部〕（資料超過 2 年才有這顆）；false＝近 2 年
     var allRange: Bool
+    /// [v25.622] 〔度數｜金額｜每度幾元〕；nil＝照預設（跟小圖同一條門檻）。有量可切時 build 校正過一定有值；
+    /// 沒量可切（只畫金額）時原樣留著，切回有度數的那一種照舊（沒選過＝照門檻、選過＝選的那個）
+    var quantity: UtilityQuantity? = nil
 }
 
 /// 表 Picker 的一項（同一種有 2 個以上的表才有）
@@ -889,6 +924,10 @@ struct UtilityTrendDetail: Equatable {
     let paymentId: UUID?
     /// 沒有〔打開這一期〕時的一行字
     let sourceNote: String?
+    /// [v25.622] 有計費期間時標題旁的小字「（7/13–9/11，61 天）」
+    var periodText: String? = nil
+    /// [v25.622] 明細下面的灰字（有才有）：「沒填計費期間，算不出每天平均」、「錢多得比用量多：…」
+    var notes: [String] = []
 }
 
 /// 統計卡（近 12 個月，照繳費日、從 asOf 往回）＋每年合計
@@ -922,6 +961,8 @@ struct UtilityPaymentLine: Identifiable, Equatable {
     /// 第一列以外上面畫細線
     let divider: Bool
     let accessibilityText: String
+    /// [v25.622] 「702 度」；沒填度數 nil（那格空白）
+    var usageText: String? = nil
 }
 
 /// 頁尾灰字一條
@@ -962,6 +1003,8 @@ struct UtilityTrendScreen: Equatable {
     let hints: [UtilityHintLine]
     /// kinds 空的時那一行
     let emptyText: String?
+    /// [v25.622] 〔度數｜金額｜每度幾元〕：這一種（＋選的表）有 2 期以上填了度數才有；空的＝只寫 quantityText「金額」
+    var quantityChoices: [UtilityQuantity] = []
 
     /// 點到的那期；沒點、或點的那期不在了（N7）用最近一期。只是查字典
     func detail(for key: String?) -> UtilityTrendDetail? {
@@ -997,24 +1040,39 @@ enum UtilityTrendPage {
         let hasOld: Bool = recent.count < kindRows.count
         let allRange: Bool = hasOld && (picks.allRange || recent.isEmpty)
         let shown: [UtilityRow] = allRange ? kindRows : recent
-        let resolved = UtilityTrendPicks(kind: kind, meterId: meterId, allRange: allRange)
+        // [v25.622] 量：這一種（＋選的表）有 2 期以上填了度數才有〔度數｜金額｜每度幾元〕；沒選過照小圖同一條門檻
+        let qChoices: [UtilityQuantity] = quantityChoices(kindRows)
+        let recentOfKind: [UtilityRow] = ofKind.filter { cal.startOfDay(for: $0.date) >= start2y }
+        let wanted: UtilityQuantity = picks.quantity ?? UtilityTrendBuild.defaultQuantity(recentOfKind)
+        let quantity: UtilityQuantity = qChoices.contains(wanted) ? wanted : .amount
+        // 沒量可切（例如〔水費〕）只畫金額，但不把「金額」記成選過的：電費 → 水費 → 電費，回來還是照門檻畫度數
+        let keptQuantity: UtilityQuantity? = qChoices.isEmpty ? picks.quantity : quantity
+        let resolved = UtilityTrendPicks(kind: kind, meterId: meterId, allRange: allRange, quantity: keptQuantity)
 
         var panel: UtilityTrendPanel? = nil
         if !shown.isEmpty {
-            let title: String = allRange ? "每期多少錢・全部" : "每期多少錢・近 2 年"
             let maxPoints: Int = allRange ? Int.max : UtilityTrendBuild.maxPointsPerMeter
-            let p: UtilityTrendPanel = UtilityTrendBuild.panel(kind, rows: shown, history: ofKind, slots: slots,
-                                                               asOf: asOf, cal: cal, title: title, maxPoints: maxPoints)
+            let p: UtilityTrendPanel = quantityPanel(kind, quantity: quantity, shown: shown, history: ofKind, slots: slots,
+                                                     asOf: asOf, cal: cal, allRange: allRange, maxPoints: maxPoints)
             panel = thinned(p)
         }
         let details: [String: UtilityTrendDetail] = detailMap(shown, type: kind, history: ofKind, slots: slots,
                                                               asOf: asOf, cal: cal)
-        let stats: UtilityTrendStats? = kinds.isEmpty ? nil : statsOf(kindRows, type: kind, asOf: asOf, cal: cal)
+        let single: Bool = meterId != nil || !hasManyMeters(kind, slots: slots)
+        var stats: UtilityTrendStats? = kinds.isEmpty ? nil : statsOf(kindRows, type: kind, asOf: asOf, cal: cal)
+        if let st = stats, single {
+            stats = withUsageStats(st, rows: kindRows, asOf: asOf, cal: cal)
+        }
         let lines: [UtilityPaymentLine] = paymentLines(src.rows.rows, slots: slots)
         let preview: [UtilityPaymentLine] = Array(lines.prefix(previewCount))
         let showAll: String? = lines.count > previewCount ? "看全部 \(lines.count) 筆" : nil
-        let hintLines: [UtilityHintLine] = hints(src, kind: kinds.isEmpty ? nil : kind, kindRows: kindRows,
+        var hintLines: [UtilityHintLine] = hints(src, kind: kinds.isEmpty ? nil : kind, kindRows: kindRows,
                                                  slots: slots, estateNames: estateNames, cal: cal)
+        // [v25.622] C1-1：那一種完全沒度數時頁尾一行（唯一的提及；只在全頁、灰字）
+        if !kinds.isEmpty && !ofKind.contains(where: { $0.reading?.usage != nil }) {
+            hintLines.append(UtilityHintLine(id: "usageInvite", text: "在每一期裡填度數（選填），這裡會多一張用量圖"))
+        }
+        let latest: String? = latestKey(shown, quantity: quantity)
         let head: String = src.isSold ? "持有期間的水電" : "水電趨勢"
         var empty: String? = nil
         if kinds.isEmpty {
@@ -1022,9 +1080,10 @@ enum UtilityTrendPage {
         }
         return UtilityTrendScreen(navTitle: "\(src.estateName)・\(head)", picks: resolved, kinds: kinds,
                                   meterChoices: choices, quantityText: "金額", showsRangeToggle: hasOld,
-                                  panel: panel, details: details, latestKey: shown.last?.key, stats: stats,
+                                  panel: panel, details: details, latestKey: latest, stats: stats,
                                   payments: lines, previewPayments: preview, showAllTitle: showAll,
-                                  paymentsTrailing: "\(lines.count) 筆", hints: hintLines, emptyText: empty)
+                                  paymentsTrailing: "\(lines.count) 筆", hints: hintLines, emptyText: empty,
+                                  quantityChoices: qChoices)
     }
 
     /// 表 Picker：這一種的趨勢表裡、有 ≥ 1 期指定到它的；2 個以上才給
@@ -1069,7 +1128,7 @@ enum UtilityTrendPage {
                                           accessibilityText: c.accessibilityText)
         return UtilityTrendPanel(type: p.type, title: p.title, chart: chart, pending: p.pending, pendingHint: p.pendingHint,
                                  legend: p.legend, hiddenMeterNote: p.hiddenMeterNote, defaultCaption: p.defaultCaption,
-                                 pickedCaptions: p.pickedCaptions)
+                                 pickedCaptions: p.pickedCaptions, usageNote: p.usageNote)
     }
 
     /// 每一期的明細（同一個表、照繳費日排好的全部歷史拿來比去年同期、上一期、推估約每月）
@@ -1107,15 +1166,22 @@ enum UtilityTrendPage {
                        many: Bool, slots: UtilityMeterSlotIndex, asOf: Date, cal: Calendar) -> UtilityTrendDetail {
         let head: String = "\(UtilityTrendBuild.dateText(r.date, asOf: asOf)) 繳"
         let amountText: String = MoneyFormat.short(r.amount)
-        var monthly: String? = nil
+        let usage: UtilityUsageFacts = UtilityUsageFacts.of(r, asOf: asOf)
+        var monthly: String? = usage.monthly
         var comparison: String? = nil
+        var notes: [String] = usage.notes
         if let list = meterRows, let i = position, i >= 0, i < list.count {
             comparison = UtilityTrendBuild.comparison(at: i, in: list, type: t, cycle: cycle, cal: cal)
-            if i > 0 {
+            // [v25.622] 兩期都有度數：「比去年同期每天多 10%、金額多 15%」（沒有度數時照 v2 只比金額）
+            if let d = UtilityTrendBuild.usageDelta(at: i, in: list, cycle: cycle, cal: cal) {
+                comparison = d.detailText
+                if let w = d.priceNote(t) { notes.append(w) }
+            }
+            if i > 0 && monthly == nil {
                 monthly = monthlyEstimate(r.amount, from: list[i - 1].date, to: r.date, cal: cal)
             }
         }
-        var facts: [UtilityStatLine] = []
+        var facts: [UtilityStatLine] = usage.facts
         if let m = monthly { facts.append(UtilityStatLine(id: "monthly", label: "約每月", value: m)) }
         if let c = comparison { facts.append(UtilityStatLine(id: "compare", label: "比較", value: c)) }
         if many {
@@ -1124,7 +1190,10 @@ enum UtilityTrendPage {
             facts.append(UtilityStatLine(id: "meter", label: label, value: name))
         }
         if r.photoCount > 0 { facts.append(UtilityStatLine(id: "receipt", label: "收據", value: "\(r.photoCount) 張")) }
-        var parts: [String] = [head, amountText]
+        var parts: [String] = [head + (usage.periodText ?? "")]
+        if let u = usage.usageText { parts.append(u) }
+        parts.append(amountText)
+        parts += usage.lineParts
         if let m = monthly { parts.append("約每月 " + m) }
         if let c = comparison { parts.append(c) }
         var note: String? = nil
@@ -1132,7 +1201,8 @@ enum UtilityTrendPage {
             note = r.fromExpenseOnly ? "這筆是在記帳裡記的，要看或改請到記帳" : "這筆記在房子的其他支出，要看或改請到帳本"
         }
         return UtilityTrendDetail(key: r.key, head: head, amountText: amountText, facts: facts,
-                                  line: parts.joined(separator: "・"), paymentId: r.paymentId, sourceNote: note)
+                                  line: parts.joined(separator: "・"), paymentId: r.paymentId, sourceNote: note,
+                                  periodText: usage.periodText, notes: notes)
     }
 
     /// 約每月（推估，v2 沒有計費期間）：上一期繳費日＋1 → 這期繳費日（頭尾都算＝兩個繳費日差幾天），
@@ -1281,12 +1351,15 @@ enum UtilityTrendPage {
             if r.fromExpenseOnly { subs.append("在記帳記的") }
             let sub: String? = subs.isEmpty ? nil : subs.joined(separator: "・")
             let money: String = MoneyFormat.short(r.amount)
+            // [v25.622] 有度數多一格「702 度」（沒填空白）
+            let usage: String? = r.reading?.usage.map { UtilityMath.usageText($0) }
             var spoken: String = "\(title)，\(money)"
+            if let u = usage { spoken += "，" + u }
             if let s = sub { spoken += "，" + s }
             if r.photoCount > 0 { spoken += "，收據 \(r.photoCount) 張" }
             out.append(UtilityPaymentLine(id: r.key, title: title, subText: sub, amountText: money,
                                           photoCount: r.photoCount, paymentId: r.paymentId, divider: !out.isEmpty,
-                                          accessibilityText: spoken))
+                                          accessibilityText: spoken, usageText: usage))
         }
         return out
     }
@@ -1403,5 +1476,584 @@ extension UtilityMath {
         let beforeMedian: Int = before.count % 2 == 1 ? before[mid] : (before[mid - 1] + before[mid]) / 2
         guard let a = cycleClass(beforeMedian), a != b else { return nil }
         return (from: dates[ends[k]], toMonthly: b == 1)
+    }
+}
+
+// MARK: - [v25.622] v3 度數與計費期間（judge_utility C1-補、C9、C12、C16；sim_util3.py 一個函式一個函式對照）
+
+/// 全頁〔度數｜金額｜每度幾元〕；小圖只有度數、金額兩種（defaultQuantity）
+enum UtilityQuantity: String, CaseIterable, Identifiable, Equatable {
+    case usage, amount, unitPrice
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .usage: return "度數"
+        case .amount: return "金額"
+        case .unitPrice: return "每度幾元"
+        }
+    }
+}
+
+extension UtilityMath {
+    /// 一位小數（四捨五入）：7.2069 → 「7.2」、8 → 「8.0」
+    static func oneDecimal(_ v: Double) -> String {
+        let r: Double = (v * 10).rounded() / 10
+        return String(format: "%.1f", r.isFinite ? r : 0)
+    }
+
+    /// 兩位小數（四捨五入）：2.26496 → 「2.26」
+    static func twoDecimals(_ v: Double) -> String {
+        let r: Double = (v * 100).rounded() / 100
+        return String(format: "%.2f", r.isFinite ? r : 0)
+    }
+
+    /// 整數加千分位：1936 → 「1,936」
+    static func grouped(_ n: Int) -> String {
+        let digits: [Character] = Array(String(n.magnitude))
+        var out = ""
+        for (i, ch) in digits.enumerated() {
+            if i > 0 && (digits.count - i) % 3 == 0 { out.append(",") }
+            out.append(ch)
+        }
+        return n < 0 ? "-" + out : out
+    }
+
+    /// 度數的數字：整數「702」「1,936」，有小數一位「28.5」
+    static func usageNumber(_ v: Double) -> String {
+        let r: Double = (v * 10).rounded() / 10
+        guard r.isFinite, abs(r) < 1e12 else { return "0" }
+        if let n = Int(exactly: r) { return grouped(n) }
+        return String(format: "%.1f", r)
+    }
+
+    /// 「702 度」（只寫「度」）
+    static func usageText(_ v: Double) -> String { usageNumber(v) + " 度" }
+
+    /// 「NT$2.26」
+    static func unitPriceText(_ v: Double) -> String { "NT$" + twoDecimals(v) }
+
+    /// CSV 的數字：「702」「28.5」（最多 2 位小數、去掉多餘的 0）
+    static func plainNumber(_ v: Double) -> String { UtilityUsageForm.usageFieldText(v) }
+
+    /// 計費期間「9/12–11/8」；起日不是 asOf 那年「2025/7/12–9/10」；跨年「2025/12/12–2026/2/10」
+    static func periodLabel(_ p: UtilityReadingPeriod, asOf: Date) -> String {
+        let cal: Calendar = HouseCardFormat.calendar
+        let a: String = HouseCardFormat.shortDate(p.start, now: asOf)
+        let sameYear: Bool = cal.component(.year, from: p.start) == cal.component(.year, from: p.end)
+        let b: String = sameYear ? HouseCardFormat.md(p.end) : HouseCardFormat.ymd(p.end)
+        return "\(a)–\(b)"
+    }
+}
+
+/// 一期的度數類明細（全頁明細卡；Data 先組好字）。沒有度數、期間時全部空的（v2 的明細一個字都不變）
+struct UtilityUsageFacts: Equatable {
+    /// 「（7/13–9/11，61 天）」
+    var periodText: String? = nil
+    /// 「702 度」
+    var usageText: String? = nil
+    /// 度數、平均每天、每度
+    var facts: [UtilityStatLine] = []
+    /// 明細那一句裡的「平均每天 11.5 度」「每度 NT$2.26」
+    var lineParts: [String] = []
+    /// 有期間：金額 ÷ 天數 × 30，四捨五入到十位「NT$780」（不標推估）
+    var monthly: String? = nil
+    /// 「沒填計費期間，算不出每天平均」
+    var notes: [String] = []
+
+    static func of(_ r: UtilityRow, asOf: Date) -> UtilityUsageFacts {
+        var f = UtilityUsageFacts()
+        guard let v = r.reading else { return f }
+        if let p = v.period {
+            f.periodText = "（\(UtilityMath.periodLabel(p, asOf: asOf))，\(p.days) 天）"
+            if let perDay = UtilityMath.ratio(r.amount, Double(p.days)) {
+                let raw: Double = perDay * 30
+                let tens: Double = (raw / 10).rounded() * 10
+                if tens.isFinite && tens > 0 { f.monthly = MoneyFormat.short(tens) }
+            }
+        }
+        guard let u = v.usage else { return f }
+        let ut: String = UtilityMath.usageText(u)
+        f.usageText = ut
+        f.facts.append(UtilityStatLine(id: "usage", label: "度數", value: ut))
+        if let p = v.period, let d = UtilityMath.ratio(u, Double(p.days)) {
+            let s: String = UtilityMath.oneDecimal(d) + " 度"
+            f.facts.append(UtilityStatLine(id: "perDay", label: "平均每天", value: s))
+            f.lineParts.append("平均每天 " + s)
+        } else if v.period == nil {
+            f.notes.append("沒填計費期間，算不出每天平均")
+        }
+        if u > 0, let price = UtilityMath.ratio(r.amount, u) {
+            let s: String = UtilityMath.unitPriceText(price)
+            f.facts.append(UtilityStatLine(id: "unitPrice", label: "每度", value: s))
+            f.lineParts.append("每度 " + s)
+        }
+        return f
+    }
+}
+
+/// 兩期比用量（C16「比什麼」）：兩期都有度數＋期間 → 每天平均；都有度數 → 度數。比較一律中性字、不加箭頭
+struct UtilityUsageDelta: Equatable {
+    /// true＝比每天平均；false＝比度數
+    let perDay: Bool
+    /// true＝去年同期；false＝上一期
+    let vsLastYear: Bool
+    /// 用量變化（%，絕對值、四捨五入）
+    let pct: Int
+    let more: Bool
+    /// 金額變化（%，絕對值）；算不出 nil
+    let amountPct: Int?
+    let amountMore: Bool
+    /// 金額 % − 用量 %（有號）≥ 10 個百分點
+    let priceGap: Bool
+
+    private var partner: String { vsLastYear ? "去年同期" : "上一期" }
+    private var basis: String { perDay ? "每天" : "度數" }
+
+    /// 「比去年同期多 18%」（前面已經寫了「每天 7.2 度」）
+    var plainText: String {
+        pct == 0 ? "跟\(partner)差不多" : "比\(partner)\(more ? "多" : "少") \(pct)%"
+    }
+
+    /// 「每天比去年同期多 10%」（點到一點的說明行）
+    var leadText: String { basis + plainText }
+
+    /// 「比去年同期每天多 18%」（VoiceOver）
+    var trailText: String {
+        pct == 0 ? "跟\(partner)\(basis)差不多" : "比\(partner)\(basis)\(more ? "多" : "少") \(pct)%"
+    }
+
+    /// 明細「比去年同期每天多 10%、金額多 15%」
+    var detailText: String {
+        guard let a = amountPct else { return trailText }
+        let money: String = a == 0 ? "金額差不多" : "金額\(amountMore ? "多" : "少") \(a)%"
+        return trailText + "、" + money
+    }
+
+    /// 「錢多得比用量多：電價可能調整過，或這期用得多、超過的那段每度比較貴」（跟去年同期比也不拿夏天當理由，U6）
+    func priceNote(_ t: UtilityType) -> String? {
+        guard priceGap else { return nil }
+        let word: String
+        switch t {
+        case .electricity: word = "電價"
+        case .water: word = "水價"
+        case .gas: word = "瓦斯價"
+        }
+        return "錢多得比用量多：\(word)可能調整過，或這期用得多、超過的那段每度比較貴"
+    }
+}
+
+extension UtilityTrendBuild {
+    /// C1-補：近 2 年這一種有度數 ≥ 3 期、而且 ≥ 一半 → 預設畫度數（全頁沒選過也用這條）
+    static func defaultQuantity(_ rows: [UtilityRow]) -> UtilityQuantity {
+        var n = 0
+        for r in rows where r.reading?.usage != nil { n += 1 }
+        return n >= 3 && n * 2 >= rows.count ? .usage : .amount
+    }
+
+    /// 小圖照畫金額時：2 期以上有度數多一行「已有 3 期填了度數，在水電趨勢切〔度數〕看」
+    static func usageNudge(_ rows: [UtilityRow]) -> String? {
+        var n = 0
+        for r in rows where r.reading?.usage != nil { n += 1 }
+        return n >= 2 ? "已有 \(n) 期填了度數，在水電趨勢切〔度數〕看" : nil
+    }
+
+    /// 一期在這個量的值：金額、度數、每度幾元（度數 > 0 才算）；沒有 nil
+    static func measure(_ r: UtilityRow, _ q: UtilityQuantity) -> Double? {
+        switch q {
+        case .amount:
+            return r.amount
+        case .usage:
+            return r.reading?.usage
+        case .unitPrice:
+            guard let u = r.reading?.usage, u > 0 else { return nil }
+            return UtilityMath.ratio(r.amount, u)
+        }
+    }
+
+    /// x：金額＝繳費日；度數、每度幾元＝計費迄日（沒期間＝繳費日）
+    static func xOf(_ r: UtilityRow, _ q: UtilityQuantity) -> Date {
+        if q == .amount { return r.date }
+        return r.reading?.period?.end ?? r.date
+    }
+
+    /// 去年同期（兩期都有期間）：去年各期裡跟（這期往前一年）重疊最多、重疊 ≥ 這期天數一半的那期。
+    /// 重疊天數＝max(0, min(迄) − max(起) + 1)，不用使用者的日期建範圍（N1）
+    static func overlapMatch(_ p: UtilityReadingPeriod, rows: [UtilityRow], from: Int, to: Int, cal: Calendar) -> UtilityRow? {
+        guard from <= to,
+              let s0 = cal.date(byAdding: .year, value: -1, to: p.start),
+              let e0 = cal.date(byAdding: .year, value: -1, to: p.end) else { return nil }
+        var best: UtilityRow? = nil
+        var bestOverlap = 0
+        for j in from...to {
+            guard let q = rows[j].reading?.period else { continue }
+            let lo: Date = max(cal.startOfDay(for: s0), cal.startOfDay(for: q.start))
+            let hi: Date = min(cal.startOfDay(for: e0), cal.startOfDay(for: q.end))
+            guard hi >= lo else { continue }
+            let overlap: Int = UtilityMath.days(lo, hi, cal: cal) + 1
+            if overlap > bestOverlap {
+                bestOverlap = overlap
+                best = rows[j]
+            }
+        }
+        guard let b = best, bestOverlap * 2 >= p.days else { return nil }
+        return b
+    }
+
+    /// 比用量：有去年同期比去年同期、沒有比上一期；兩期都要有度數，不然 nil（只比金額）
+    static func usageDelta(at idx: Int, in rows: [UtilityRow], cycle: Int, cal: Calendar) -> UtilityUsageDelta? {
+        guard idx >= 0, idx < rows.count else { return nil }
+        let r: UtilityRow = rows[idx]
+        guard let a = r.reading, let ua = a.usage else { return nil }
+        let ly: UtilityRow? = lastYear(of: idx, in: rows, cycle: cycle, cal: cal)
+        let partner: UtilityRow? = ly ?? (idx > 0 ? rows[idx - 1] : nil)
+        guard let b = partner, let rb = b.reading, let ub = rb.usage else { return nil }
+        var x: Double = ua
+        var y: Double = ub
+        var perDay = false
+        if let pa = a.period, let pb = rb.period,
+           let dx = UtilityMath.ratio(ua, Double(pa.days)), let dy = UtilityMath.ratio(ub, Double(pb.days)) {
+            x = dx
+            y = dy
+            perDay = true
+        }
+        guard let pct = UtilityMath.percentMagnitude(x, vs: y), let ru = UtilityMath.ratio(x, y) else { return nil }
+        let amountPct: Int? = UtilityMath.percentMagnitude(r.amount, vs: b.amount)
+        var gap = false
+        if let ra = UtilityMath.ratio(r.amount, b.amount) {
+            let g: Double = (ra - 1) * 100 - (ru - 1) * 100
+            gap = g.isFinite && g >= 10
+        }
+        return UtilityUsageDelta(perDay: perDay, vsLastYear: ly != nil, pct: pct, more: x > y, amountPct: amountPct,
+                                 amountMore: r.amount > b.amount, priceGap: gap)
+    }
+
+    /// 每度幾元比較：「比去年同期貴 5%」「比上一期便宜 3%」「跟去年同期差不多」
+    static func unitPriceCompare(at idx: Int, in rows: [UtilityRow], cycle: Int, cal: Calendar) -> String? {
+        guard idx >= 0, idx < rows.count, let x = measure(rows[idx], .unitPrice) else { return nil }
+        let ly: UtilityRow? = lastYear(of: idx, in: rows, cycle: cycle, cal: cal)
+        let partner: UtilityRow? = ly ?? (idx > 0 ? rows[idx - 1] : nil)
+        guard let b = partner, let y = measure(b, .unitPrice), let pct = UtilityMath.percentMagnitude(x, vs: y) else { return nil }
+        let word: String = ly != nil ? "去年同期" : "上一期"
+        if pct == 0 { return "跟\(word)差不多" }
+        return "比\(word)\(x > y ? "貴" : "便宜") \(pct)%"
+    }
+
+    /// 一期的開頭：有期間「9/12–11/8 」；沒有「11/10 繳那期」
+    static func measureLead(_ r: UtilityRow, asOf: Date) -> String {
+        if let p = r.reading?.period { return UtilityMath.periodLabel(p, asOf: asOf) + " " }
+        return "\(dateText(r.date, asOf: asOf)) 繳那期"
+    }
+
+    /// 沒點時的說明行：「9/12–11/8 每天 7.2 度，比去年同期多 18%」「11/10 繳那期用了 418 度」「9/12–11/8 每度 NT$1.91，比去年同期貴 3%」
+    static func measureDefault(_ r: UtilityRow, quantity q: UtilityQuantity, position: Int?, in past: [UtilityRow],
+                               cycle: Int, asOf: Date, cal: Calendar) -> String {
+        let lead: String = measureLead(r, asOf: asOf)
+        if q == .unitPrice {
+            var s: String = lead + "每度 " + UtilityMath.unitPriceText(measure(r, .unitPrice) ?? 0)
+            if let p = position, let c = unitPriceCompare(at: p, in: past, cycle: cycle, cal: cal) { s += "，" + c }
+            return s
+        }
+        let u: Double = r.reading?.usage ?? 0
+        var perDay: Double? = nil
+        if let p = r.reading?.period { perDay = UtilityMath.ratio(u, Double(p.days)) }
+        var s: String
+        if let d = perDay {
+            s = lead + "每天 " + UtilityMath.oneDecimal(d) + " 度"
+        } else {
+            s = lead + "用了 " + UtilityMath.usageText(u)
+        }
+        if let p = position, let delta = usageDelta(at: p, in: past, cycle: cycle, cal: cal) {
+            let tail: String = (delta.perDay && perDay != nil) ? delta.plainText : delta.leadText
+            s += "，" + tail
+        }
+        return s
+    }
+
+    /// 點到一點：「7/13–9/11 用 702 度・NT$1,590，每天比去年同期多 10%」「7/13–9/11 每度 NT$2.26（702 度・NT$1,590），比去年同期貴 5%」
+    static func measurePicked(_ r: UtilityRow, quantity q: UtilityQuantity, position: Int?, in past: [UtilityRow],
+                              cycle: Int, meterName: String?, asOf: Date, cal: Calendar) -> String {
+        let lead: String = measureLead(r, asOf: asOf)
+        let money: String = MoneyFormat.short(r.amount)
+        let usage: String = UtilityMath.usageText(r.reading?.usage ?? 0)
+        var s: String
+        var c: String? = nil
+        if q == .unitPrice {
+            s = lead + "每度 " + UtilityMath.unitPriceText(measure(r, .unitPrice) ?? 0) + "（\(usage)・\(money)）"
+            if let p = position { c = unitPriceCompare(at: p, in: past, cycle: cycle, cal: cal) }
+        } else {
+            s = lead + "用 " + usage + "・" + money
+            if let p = position { c = usageDelta(at: p, in: past, cycle: cycle, cal: cal)?.leadText }
+        }
+        if let c { s += "，" + c }
+        if let n = meterName, !n.isEmpty { s = "\(n)：" + s }
+        return s
+    }
+
+    /// 一個表的點（度數、每度幾元）：照繳費日順序；沒有值的期把線切開、x 往回走也切（P1-3）
+    static func measureSegments(_ rows: [UtilityRow], quantity q: UtilityQuantity, meterId: String, type: UtilityType,
+                                shape: UtilityTrendShape) -> [UtilityTrendPoint] {
+        var out: [UtilityTrendPoint] = []
+        var seg = 0
+        var lastX: Date? = nil
+        var gap = false
+        for r in rows {
+            guard let y = measure(r, q) else {
+                gap = true
+                continue
+            }
+            let x: Date = xOf(r, q)
+            if let lx = lastX, gap || x < lx { seg += 1 }
+            gap = false
+            lastX = x
+            out.append(UtilityTrendPoint(key: r.key, x: x, y: y, seriesId: "\(meterId)#\(seg)", type: type,
+                                         shape: shape, assigned: true, hollow: false, visible: true))
+        }
+        return out
+    }
+
+    /// 每度幾元的 y：不從 0 起；上下留兩成（lo == hi 上下補 10%），不低於 0
+    static func unitYDomain(_ points: [UtilityTrendPoint], average: Double?) -> ClosedRange<Double> {
+        var ys: [Double] = points.map(\.y).filter { $0.isFinite }
+        if let a = average, a.isFinite { ys.append(a) }
+        let lo0: Double = ys.min() ?? 0
+        let hi0: Double = ys.max() ?? 1
+        var lo: Double = lo0
+        var hi: Double = hi0
+        if hi - lo < 0.000_001 {
+            let pad: Double = max(abs(lo) * 0.1, 0.1)
+            lo -= pad
+            hi += pad
+        } else {
+            let pad: Double = (hi - lo) * 0.2
+            lo -= pad
+            hi += pad
+        }
+        lo = max(0, lo)
+        guard lo.isFinite, hi.isFinite, hi > lo else { return 0...1 }
+        return lo...hi
+    }
+
+    /// VoiceOver：「電費近 2 年 6 期有度數，每期 330 到 702 度，最近一期 418 度，比去年同期每天多 18%」／
+    /// 「電費近 2 年 6 期，每度 NT$1.82 到 NT$2.26」
+    static func measureSpoken(_ t: UtilityType, quantity q: UtilityQuantity, points: [UtilityTrendPoint],
+                              latestUsage: Double?, tail: String?) -> String {
+        let ys: [Double] = points.map(\.y)
+        let lo: Double = ys.min() ?? 0
+        let hi: Double = ys.max() ?? 0
+        if q == .unitPrice {
+            return "\(t.rawValue)近 2 年 \(points.count) 期，每度 \(UtilityMath.unitPriceText(lo)) 到 \(UtilityMath.unitPriceText(hi))"
+        }
+        var s = "\(t.rawValue)近 2 年 \(points.count) 期有度數，每期 \(UtilityMath.usageNumber(lo)) 到 \(UtilityMath.usageNumber(hi)) 度"
+        if let u = latestUsage { s += "，最近一期 " + UtilityMath.usageText(u) }
+        if let tail { s += "，" + tail }
+        return s
+    }
+
+    /// 度數、每度幾元的圖（跟金額的 panel 同一套：表期數多的優先、最多 3 個表、灰點不連線、≥ 4 點才有平均）。
+    /// 沒有值的期不畫、把線切開；x＝計費迄日（沒期間＝繳費日）
+    static func measurePanel(_ t: UtilityType, quantity q: UtilityQuantity, rows: [UtilityRow], history: [UtilityRow],
+                             slots: UtilityMeterSlotIndex, asOf: Date, cal: Calendar, title: String,
+                             maxPoints: Int) -> UtilityTrendPanel {
+        var byMeter: [String: [UtilityRow]] = [:]
+        var unassigned: [UtilityRow] = []
+        for r in rows {
+            if r.meterAssigned, let mid = r.meterId {
+                byMeter[mid, default: []].append(r)
+            } else {
+                unassigned.append(r)
+            }
+        }
+        var valued: [String: Int] = [:]
+        for (mid, list) in byMeter {
+            var n = 0
+            for r in list where measure(r, q) != nil { n += 1 }
+            if n > 0 { valued[mid] = n }
+        }
+        let meterIds: [String] = valued.keys.sorted { (a: String, b: String) -> Bool in
+            let na: Int = valued[a] ?? 0
+            let nb: Int = valued[b] ?? 0
+            if na != nb { return na > nb }
+            let oa: Int = slots.order(of: a)
+            let ob: Int = slots.order(of: b)
+            return oa != ob ? oa < ob : a < b
+        }
+        let drawn: [String] = Array(meterIds.prefix(maxMeters))
+        let hiddenCount: Int = meterIds.count - drawn.count
+        let multi: Bool = drawn.count >= 2
+        let shapes: [UtilityTrendShape] = [.circle, .triangle, .square]
+        var historyByMeter: [String: [UtilityRow]] = [:]
+        for r in history where r.meterAssigned {
+            if let mid = r.meterId { historyByMeter[mid, default: []].append(r) }
+        }
+
+        var points: [UtilityTrendPoint] = []
+        var lines: [UtilityTrendPoint] = []
+        var picked: [String: String] = [:]
+        var assignedYs: [Double] = []
+        var latest: (row: UtilityRow, meter: String)? = nil
+        var primaryCycle = 30
+        for (i, mid) in drawn.enumerated() {
+            let mine: [UtilityRow] = Array((byMeter[mid] ?? []).suffix(maxPoints))
+            let past: [UtilityRow] = historyByMeter[mid] ?? mine
+            let cycle: Int = UtilityMath.cycleDays(past.map(\.date), cal: cal)
+            if i == 0 { primaryCycle = cycle }
+            let shape: UtilityTrendShape = shapes[min(i, shapes.count - 1)]
+            let segs: [UtilityTrendPoint] = measureSegments(mine, quantity: q, meterId: mid, type: t, shape: shape)
+            points += segs
+            lines += lineOnly(segs)
+            assignedYs += segs.map(\.y)
+            let name: String? = multi ? slots.displayName(mid) : nil
+            let indexOf: [String: Int] = indexByKey(past)
+            for r in mine where measure(r, q) != nil {
+                picked[r.key] = measurePicked(r, quantity: q, position: indexOf[r.key], in: past, cycle: cycle,
+                                              meterName: name, asOf: asOf, cal: cal)
+                if let cur = latest {
+                    if r.date > cur.row.date { latest = (row: r, meter: mid) }
+                } else {
+                    latest = (row: r, meter: mid)
+                }
+            }
+        }
+        let grays: [UtilityRow] = Array(unassigned.suffix(maxPoints)).filter { measure($0, q) != nil }
+        for r in grays {
+            guard let y = measure(r, q) else { continue }
+            points.append(UtilityTrendPoint(key: r.key, x: xOf(r, q), y: y, seriesId: "none#" + r.key, type: t,
+                                            shape: .circle, assigned: false, hollow: false, visible: true))
+            picked[r.key] = measurePicked(r, quantity: q, position: nil, in: [], cycle: 30, meterName: nil,
+                                          asOf: asOf, cal: cal) + "（沒指定是哪個表）"
+        }
+        points.sort { (a: UtilityTrendPoint, b: UtilityTrendPoint) -> Bool in a.x != b.x ? a.x < b.x : a.key < b.key }
+
+        let average: Double? = assignedYs.count >= 4 ? assignedYs.reduce(0, +) / Double(assignedYs.count) : nil
+
+        var entries: [UtilityLegendEntry] = []
+        if multi {
+            for (i, mid) in drawn.enumerated() {
+                entries.append(UtilityLegendEntry(id: "m-" + mid, mark: .dot(shapes[min(i, shapes.count - 1)]),
+                                                  text: slots.displayName(mid)))
+            }
+        }
+        if !grays.isEmpty {
+            entries.append(UtilityLegendEntry(id: "none", mark: .unassigned, text: "沒指定是哪個表（\(grays.count) 期）"))
+        }
+        if average != nil {
+            entries.append(UtilityLegendEntry(id: "avg", mark: .average, text: "每期平均"))
+        }
+        var legend: [UtilityLegendRow] = []
+        var k = 0
+        while k < entries.count {
+            let chunk: [UtilityLegendEntry] = Array(entries[k..<min(k + 2, entries.count)])
+            legend.append(UtilityLegendRow(id: legend.count, entries: chunk))
+            k += 2
+        }
+        let hiddenNote: String? = hiddenCount > 0 ? "還有 \(hiddenCount) 個表沒畫" : nil
+
+        var caption = ""
+        var tail: String? = nil
+        if let la = latest {
+            let past: [UtilityRow] = historyByMeter[la.meter] ?? []
+            let cycle: Int = UtilityMath.cycleDays(past.map(\.date), cal: cal)
+            let pos: Int? = indexByKey(past)[la.row.key]
+            let head: String = multi ? "\(slots.displayName(la.meter))：" : ""
+            caption = head + measureDefault(la.row, quantity: q, position: pos, in: past, cycle: cycle, asOf: asOf, cal: cal)
+            if q == .usage, let p = pos {
+                tail = usageDelta(at: p, in: past, cycle: cycle, cal: cal)?.trailText
+            }
+        } else if let g = grays.last {
+            caption = measureDefault(g, quantity: q, position: nil, in: [], cycle: 30, asOf: asOf, cal: cal)
+        }
+
+        guard points.count >= 2 else {
+            let pending: String
+            if q == .unitPrice {
+                pending = points.isEmpty ? "這段時間沒有算得出每度幾元的期（要填度數）" : "只有 1 期算得出每度幾元，再填 1 期度數就畫出變化"
+            } else {
+                pending = points.isEmpty ? "這段時間的\(t.rawValue)還沒有填度數" : "只有 1 期填了度數，再填 1 期就畫出變化"
+            }
+            return UtilityTrendPanel(type: t, title: title, chart: nil, pending: pending, pendingHint: nil,
+                                     legend: [], hiddenMeterNote: nil, defaultCaption: caption, pickedCaptions: [:])
+        }
+
+        let yDom: ClosedRange<Double> = q == .unitPrice ? unitYDomain(points, average: average)
+                                                          : yDomain(points, average: average)
+        let first: String = points.first?.key ?? ""
+        let last: String = points.last?.key ?? ""
+        let spoken: String = measureSpoken(t, quantity: q, points: points, latestUsage: latest?.row.reading?.usage, tail: tail)
+        let chart = UtilityTrendChartData(
+            type: t, points: points, lines: lines, average: average,
+            xDomain: xDomain(points, cycle: primaryCycle, cal: cal),
+            yDomain: yDom,
+            identity: "\(t.rawValue)-\(q.rawValue)-\(points.count)-\(first)-\(last)",
+            accessibilityText: spoken)
+        return UtilityTrendPanel(type: t, title: title, chart: chart, pending: nil, pendingHint: nil,
+                                 legend: legend, hiddenMeterNote: hiddenNote, defaultCaption: caption, pickedCaptions: picked)
+    }
+}
+
+extension UtilityTrendPage {
+    /// 〔度數｜金額｜每度幾元〕：這幾期裡有 2 期以上填了度數才有
+    static func quantityChoices(_ rows: [UtilityRow]) -> [UtilityQuantity] {
+        var n = 0
+        for r in rows where r.reading?.usage != nil { n += 1 }
+        return n >= 2 ? [.usage, .amount, .unitPrice] : []
+    }
+
+    /// 照量選圖：金額＝v1／v2 那張（一個字都不變）；度數、每度幾元＝measurePanel
+    static func quantityPanel(_ t: UtilityType, quantity q: UtilityQuantity, shown: [UtilityRow], history: [UtilityRow],
+                              slots: UtilityMeterSlotIndex, asOf: Date, cal: Calendar, allRange: Bool,
+                              maxPoints: Int) -> UtilityTrendPanel {
+        let range: String = allRange ? "全部" : "近 2 年"
+        switch q {
+        case .amount:
+            return UtilityTrendBuild.panel(t, rows: shown, history: history, slots: slots, asOf: asOf, cal: cal,
+                                           title: "每期多少錢・" + range, maxPoints: maxPoints)
+        case .usage:
+            return UtilityTrendBuild.measurePanel(t, quantity: .usage, rows: shown, history: history, slots: slots,
+                                                  asOf: asOf, cal: cal, title: "每期用了幾度・" + range, maxPoints: maxPoints)
+        case .unitPrice:
+            return UtilityTrendBuild.measurePanel(t, quantity: .unitPrice, rows: shown, history: history, slots: slots,
+                                                  asOf: asOf, cal: cal, title: "每度幾元・" + range, maxPoints: maxPoints)
+        }
+    }
+
+    /// 沒點時的明細：金額＝最近一期（v2）；度數、每度幾元＝最近一期有值的（都沒有就最近一期）
+    static func latestKey(_ shown: [UtilityRow], quantity q: UtilityQuantity) -> String? {
+        guard q != .amount else { return shown.last?.key }
+        let hit: UtilityRow? = shown.last(where: { UtilityTrendBuild.measure($0, q) != nil })
+        return (hit ?? shown.last)?.key
+    }
+
+    /// 統計卡多兩行（只在單一個表時）：「每期平均 484 度（4 期有填）」「平均每天 8.0 度」（近 12 個月、照繳費日）
+    static func withUsageStats(_ st: UtilityTrendStats, rows: [UtilityRow], asOf: Date, cal: Calendar) -> UtilityTrendStats {
+        let back: Date = cal.startOfDay(for: cal.date(byAdding: .month, value: -12, to: asOf) ?? asOf)
+        var n = 0
+        var sum = 0.0
+        var daySum = 0
+        var periodUsage = 0.0
+        for r in rows where cal.startOfDay(for: r.date) >= back {
+            guard let u = r.reading?.usage else { continue }
+            n += 1
+            sum += u
+            if let p = r.reading?.period {
+                daySum += p.days
+                periodUsage += u
+            }
+        }
+        guard n > 0, let avg = UtilityMath.ratio(sum, Double(n)) else { return st }
+        var lines: [UtilityStatLine] = st.lines
+        var extra: [String] = []
+        let avgText: String = "\(UtilityMath.usageText(avg))（\(n) 期有填）"
+        lines.append(UtilityStatLine(id: "usageAvg", label: "每期平均", value: avgText))
+        extra.append("每期平均 " + avgText)
+        if let d = UtilityMath.ratio(periodUsage, Double(daySum)) {
+            let s: String = UtilityMath.oneDecimal(d) + " 度"
+            lines.append(UtilityStatLine(id: "usagePerDay", label: "平均每天", value: s))
+            extra.append("平均每天 " + s)
+        }
+        let summary: String = st.summary.isEmpty ? st.summary : st.summary + "・" + extra.joined(separator: "・")
+        return UtilityTrendStats(title: st.title, lines: lines, summary: summary, emptyText: st.emptyText,
+                                 yearNote: st.yearNote, years: st.years)
     }
 }

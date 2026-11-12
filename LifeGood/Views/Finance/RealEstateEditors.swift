@@ -166,6 +166,23 @@ struct UtilityPaymentEditor: View {
     @State private var isSaving = false
     /// [v25.621] L10：編輯的這一期已經在別台被刪了（存檔不把它加回來）
     @State private var showGone = false
+    // [v25.622] 度數和計費期間（UtilityUsageSection；規則全在 UtilityReadings.swift 的 UtilityUsageForm）
+    @State private var usageOpen = false
+    @State private var usageText = ""
+    /// true＝期間算數（會存）；false＝只是從繳費日猜的灰字（U10：沒動過不存）
+    @State private var hasPeriod = false
+    @State private var periodStart = Date()
+    @State private var periodEnd = Date()
+    /// 「從」「到」那兩列打開了（點過「計費期間」那一列）
+    @State private var periodTouched = false
+    /// 同一個表的上一期（onAppear／換類型／換表時算一次，打字不重算）
+    @State private var usagePrevious: UtilityPreviousPeriod? = nil
+    /// 打開時讀到的度數、期間（index.value(for:)；沒有 nil）
+    @State private var openedReading: UtilityReadingValue? = nil
+    /// 打開時的基本欄位（存檔時一樣＝只改了度數那一段，走快路）
+    @State private var openedBasics: UtilityEditorBasics? = nil
+    /// 度數是照哪一種讀的（onAppear 設 type 時那一次 onChange 不清度數）
+    @State private var usageType: UtilityType? = nil
 
     private var bankMilestones: [LifeMilestone] {
         lifeStore.milestones.filter {
@@ -225,6 +242,8 @@ struct UtilityPaymentEditor: View {
                 Text(slot.menuTitle).tag(Optional(slot.id))
             }
         }
+        // [v25.622] 換表：重算「上一期」（同一個表的）
+        .onChange(of: meterId) { _, _ in refreshUsagePrevious() }
     }
 
     private var meterFooter: String {
@@ -239,8 +258,58 @@ struct UtilityPaymentEditor: View {
 
     /// 換了水電類型：原本選的表不是這一種的就清掉（讀進來的那一筆本來就對得上，不會被清）
     private func typeChanged() {
-        guard let id = meterId else { return }
-        if !meterChoices.contains(where: { $0.id == id }) { meterId = nil }
+        if let id = meterId, !meterChoices.contains(where: { $0.id == id }) { meterId = nil }
+        // [v25.622] 換類型：度數清掉、期間留著（onAppear 帶進類型那一次不清）；表清好之後才重算上一期
+        if let t = usageType, t != type {
+            usageText = ""
+            usageType = type
+            refreshUsagePrevious()
+        }
+    }
+
+    /// [v25.622] 打開時的基本欄位（同一天就算一樣）
+    private var currentBasics: UtilityEditorBasics {
+        UtilityEditorBasics(type: type, dayKey: UtilityDay.key(date), amountText: amountText, note: note, meterId: meterId,
+                            photos: photoFileNames, bankId: selectedBankMilestoneId, bankCurrency: selectedBankCurrency,
+                            cardId: selectedCreditCardMilestoneId)
+    }
+
+    /// [v25.622] onAppear 最後叫一次：讀這一期的度數（只問 index.value(for:)）、上一期、預設期間、要不要自動打開
+    private func loadUsage() {
+        // 只讀一次：onAppear 再跑一次（例如收據相機全螢幕關掉後）不把打到一半的度數蓋回去
+        guard openedBasics == nil else { return }
+        usageType = type
+        if let e = editing {
+            openedReading = UtilityReadingStore.shared.index.value(for: e)
+        }
+        usageText = UtilityUsageForm.usageFieldText(openedReading?.usage)
+        refreshUsagePrevious()
+        if let p = openedReading?.period {
+            periodStart = p.start
+            periodEnd = p.end
+            hasPeriod = true
+        }
+        usageOpen = UtilityUsageForm.autoOpens(opened: openedReading, previous: usagePrevious)
+        openedBasics = currentBasics
+    }
+
+    /// [v25.622] 上一期（同一個表、繳費日比這期早、最近的那筆）；期間沒動過、打開時也沒有期間才重帶預設
+    private func refreshUsagePrevious() {
+        guard let estate = store.realEstates.first(where: { $0.id == estateId }) else {
+            usagePrevious = nil
+            return
+        }
+        usagePrevious = UtilityUsageForm.previous(estate: estate, editingId: editing?.id, type: type, meterId: meterId,
+                                                  paidOn: date, index: UtilityReadingStore.shared.index)
+        if !periodTouched && openedReading?.period == nil {
+            let d = UtilityUsageForm.defaults(previous: usagePrevious, paidOn: date)
+            periodStart = d.start
+            periodEnd = d.end
+            hasPeriod = d.real
+        }
+        if UtilityUsageForm.autoOpens(opened: openedReading, previous: usagePrevious) {
+            usageOpen = true
+        }
     }
 
     private func selectBank(_ id: UUID, code: String) {
@@ -304,6 +373,11 @@ struct UtilityPaymentEditor: View {
                         Text(meterFooter)
                     }
                 }
+
+                // [v25.622] 度數和計費期間（選填；收起來時只有一行）
+                UtilityUsageSection(type: type, previous: usagePrevious, open: $usageOpen, usageText: $usageText,
+                                    hasPeriod: $hasPeriod, periodStart: $periodStart, periodEnd: $periodEnd,
+                                    periodTouched: $periodTouched)
 
                 if hasPaymentTargets {
                     Section {
@@ -415,6 +489,8 @@ struct UtilityPaymentEditor: View {
                         selectedCreditCardMilestoneId = exp.linkedCreditCardMilestoneId
                     }
                 }
+                // [v25.622] 度數、上一期、預設期間、基本欄位快照（上面都帶好之後）
+                loadUsage()
             }
             .alert("確定刪除？", isPresented: $showDeleteConfirm) {
                 Button("刪除", role: .destructive) { deleteRecord() }
@@ -438,10 +514,30 @@ struct UtilityPaymentEditor: View {
         guard let amount = Double(amountText), amount.isFinite, amount > 0 else {
             showError = true; return
         }
+        // [v25.622] 度數、期間有紅字就擋存檔（區塊沒打開過＝原封不動，不會把預設的期間偷偷存進去）
+        let openedDraft: UtilityReadingDraft = openedReading?.draft ?? .empty
+        guard var editedDraft = UtilityUsageForm.edited(open: usageOpen, usageText: usageText, hasPeriod: hasPeriod,
+                                                        start: periodStart, end: periodEnd, opened: openedDraft) else { return }
+        // 度數那格還是打開時帶進去的字（沒改過）→ 留原本的值：帶回輸入框時四捨五入到 2 位，
+        // 不能因為只改了備註或期間，就把 28.555 改寫成 28.56
+        if usageText == UtilityUsageForm.usageFieldText(openedReading?.usage) { editedDraft.usage = openedDraft.usage }
         guard var estate = store.realEstates.first(where: { $0.id == estateId }) else { return }
         // [v25.621] L10：editing 在 store 找不到（別台刪了）→ 不 append、不新建記帳、不重建扣款，跳提示
         if let e = editing, !estate.utilityPayments.contains(where: { $0.id == e.id }) {
             showGone = true
+            return
+        }
+        // [v25.622] C5-1 快路：基本欄位跟打開時一樣（只改了度數那一段）→ 只寫度數那一包；
+        // 不碰記帳、扣款、房子（不新建記帳、不推三個整包）。一樣也不寫（recordSave 比對 opened／edited）
+        if let e = editing, let ob = openedBasics, ob == currentBasics {
+            isSaving = true
+            let pid = e.id
+            let eid = estate.id
+            let t = type
+            dismiss()
+            DispatchQueue.main.async {
+                UtilityReadingStore.shared.recordSave(paymentId: pid, estateId: eid, type: t, opened: openedDraft, edited: editedDraft)
+            }
             return
         }
         isSaving = true
@@ -519,8 +615,15 @@ struct UtilityPaymentEditor: View {
         }
         // 先關閉 sheet，下一個 runloop 才改 @Published store（避免真機 present/dismiss 交易期間改 observed state 閃退）
         let financeStore = store
+        // [v25.622] 度數寫在同一輪、financeStore.update 之前（卡片只重算一次）；recordId 新增時就是新的 UUID
+        let readingEstateId = estate.id
+        let readingType = type
         dismiss()
-        DispatchQueue.main.async { financeStore.update(estate) }
+        DispatchQueue.main.async {
+            UtilityReadingStore.shared.recordSave(paymentId: recordId, estateId: readingEstateId, type: readingType,
+                                                  opened: openedDraft, edited: editedDraft)
+            financeStore.update(estate)
+        }
     }
 
     private func deleteRecord() {
@@ -578,6 +681,113 @@ struct UtilityPaymentEditor: View {
         while s.hasSuffix("0") { s.removeLast() }
         if s.hasSuffix(".") { s.removeLast() }
         return s
+    }
+}
+
+// MARK: - [v25.622] 繳費表單「度數和計費期間」（judge_utility C13）
+
+/// 收起來：一行「＋ 度數和計費期間（選填）」；打開：用了幾度、計費期間（點一下展開「從」「到」）、清掉這兩欄。
+/// 全部 @Binding（狀態在 UtilityPaymentEditor）；規則、字都在 UtilityUsageForm。表單不顯示天數、欄位旁只寫「度」
+fileprivate struct UtilityUsageSection: View {
+    let type: UtilityType
+    /// 同一個表的上一期（placeholder「上一期 486 度」；沒有期間時才給〔1 個月〕〔2 個月〕）
+    let previous: UtilityPreviousPeriod?
+    @Binding var open: Bool
+    @Binding var usageText: String
+    @Binding var hasPeriod: Bool
+    @Binding var periodStart: Date
+    @Binding var periodEnd: Date
+    @Binding var periodTouched: Bool
+
+    private var usagePlaceholder: String { previous?.usagePlaceholder ?? "帳單上的度數" }
+    private var usageError: String? { UtilityUsageForm.usageMessage(usageText) }
+    private var periodError: String? { UtilityUsageForm.periodMessage(hasPeriod: hasPeriod, start: periodStart, end: periodEnd) }
+    private var periodNote: String? { UtilityUsageForm.periodWarning(hasPeriod: hasPeriod, start: periodStart, end: periodEnd) }
+    private var summary: String {
+        let s = UtilityUsageForm.periodSummary(start: periodStart, end: periodEnd)
+        return hasPeriod ? s : "例如 " + s
+    }
+    private var summaryStyle: HierarchicalShapeStyle { hasPeriod ? .primary : .secondary }
+    private var showsMonthButtons: Bool { previous?.period == nil }
+
+    var body: some View {
+        Section {
+            if open {
+                usageRow
+                if let m = usageError {
+                    Text(m).font(.caption).foregroundStyle(.red)
+                }
+                periodRow
+                if periodTouched {
+                    pickers
+                }
+                if let m = periodError {
+                    Text(m).font(.caption).foregroundStyle(.red)
+                }
+                if let w = periodNote {
+                    Text(w).font(.caption).foregroundStyle(.secondary)
+                }
+                Button("清掉這兩欄", role: .destructive) { clear() }
+            } else {
+                Button(UtilityUsageForm.collapsedTitle) { open = true }
+            }
+        } header: {
+            realEstateEditorSectionHeader("度數和計費期間", icon: "chart.line.uptrend.xyaxis", color: .orange)
+        } footer: {
+            if open {
+                Text(UtilityUsageForm.footer(type))
+            }
+        }
+    }
+
+    private var usageRow: some View {
+        HStack {
+            Text("用了幾度")
+            TextField(usagePlaceholder, text: $usageText)
+                .keyboardType(.decimalPad)
+                .multilineTextAlignment(.trailing)
+            Text("度").foregroundStyle(.secondary)
+        }
+    }
+
+    /// 點一下展開「從」「到」；點過就算動過（照畫面上那兩個日期存）。只展開不收：
+    /// periodTouched 只有〔清掉這兩欄〕會變回 false，換類型、換表才不會把選好的期間換回預設
+    private var periodRow: some View {
+        Button {
+            periodTouched = true
+            hasPeriod = true
+        } label: {
+            HStack {
+                Text("計費期間").foregroundStyle(.primary)
+                Spacer(minLength: 8)
+                Text(summary).foregroundStyle(summaryStyle)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var pickers: some View {
+        DatePicker("從", selection: $periodStart, displayedComponents: .date)
+        DatePicker("到", selection: $periodEnd, displayedComponents: .date)
+        if showsMonthButtons {
+            HStack(spacing: 16) {
+                Button("1 個月") { setMonths(1) }.buttonStyle(.borderless)
+                Button("2 個月") { setMonths(2) }.buttonStyle(.borderless)
+                Spacer(minLength: 0)
+            }
+        }
+    }
+
+    /// 〔1 個月〕〔2 個月〕（L6）：到＝從＋N 個月−1 天
+    private func setMonths(_ n: Int) {
+        periodEnd = UtilityUsageForm.endAfter(months: n, from: periodStart)
+        hasPeriod = true
+    }
+
+    private func clear() {
+        usageText = ""
+        hasPeriod = false
+        periodTouched = false
     }
 }
 

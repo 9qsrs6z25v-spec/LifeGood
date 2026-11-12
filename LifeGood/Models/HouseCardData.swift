@@ -1147,13 +1147,15 @@ struct HouseCardData {
     var media = HouseMediaData()
 
     static func build(_ re: RealEstate, expense: ExpenseStore, now: Date = Date()) -> HouseCardData {
-        build(re, expenses: expense.expenses, ntd: { expense.ntdValue(of: $0) }, kinds: ExpenseKindStore.shared.index, now: now)
+        build(re, expenses: expense.expenses, ntd: { expense.ntdValue(of: $0) }, kinds: ExpenseKindStore.shared.index,
+              readings: UtilityReadingStore.shared.index, now: now)
     }
 
     /// [v25.615] kinds：記帳的細項（地價稅…；ExpenseKinds.swift）。純函式不給預設值，sim／preview 明寫 `.empty`
-    static func build(_ re: RealEstate, expenses: [Expense], ntd: (Expense) -> Double, kinds: ExpenseKindIndex, now: Date = Date(), calendar: Calendar = .current) -> HouseCardData {
+    /// [v25.622] readings：每一期水電的度數、計費期間（UtilityReadings.swift；只准問 value(for:)）。一樣必填，sim／preview 明寫 `.empty`
+    static func build(_ re: RealEstate, expenses: [Expense], ntd: (Expense) -> Double, kinds: ExpenseKindIndex, readings: UtilityReadingIndex, now: Date = Date(), calendar: Calendar = .current) -> HouseCardData {
         let facts = HouseFacts.build(re, expenses: expenses, now: now, calendar: calendar)
-        let c = HouseBuildContext.make(re, facts: facts, expenses: expenses, ntd: ntd, kinds: kinds, now: now, calendar: calendar)
+        let c = HouseBuildContext.make(re, facts: facts, expenses: expenses, ntd: ntd, kinds: kinds, readings: readings, now: now, calendar: calendar)
         let trimmed = re.name.trimmingCharacters(in: .whitespacesAndNewlines)
         let name = trimmed.isEmpty ? "未命名房屋" : trimmed
         let ledger = HouseLedger.build(c)
@@ -1221,13 +1223,15 @@ private struct HouseBuildContext {
     let excluded: Set<UUID>
     /// [v25.615] 記帳的細項（只准問 kind(of:)／taxKind(of:)）
     let kinds: ExpenseKindIndex
+    /// [v25.622] 每一期水電的度數、計費期間（只准問 value(for:)；UtilityRows.build 用）
+    let readings: UtilityReadingIndex
 
     var notStarted: Bool { facts.hasMortgage && !facts.hasStarted }
 
     func amount(_ ex: Expense) -> Double { ntd[ex.id] ?? ex.amount }
 
     static func make(_ re: RealEstate, facts: HouseFacts, expenses: [Expense], ntd: (Expense) -> Double,
-                     kinds: ExpenseKindIndex, now: Date, calendar: Calendar) -> HouseBuildContext {
+                     kinds: ExpenseKindIndex, readings: UtilityReadingIndex, now: Date, calendar: Calendar) -> HouseBuildContext {
         let byId = Dictionary(expenses.map { ($0.id, $0) }, uniquingKeysWith: { a, _ in a })
         let money = Dictionary(expenses.map { ($0.id, ntd($0)) }, uniquingKeysWith: { a, _ in a })
         var excluded = RealEstateSale.mortgageExpenseIds(of: re, expenses: expenses)
@@ -1236,7 +1240,8 @@ private struct HouseBuildContext {
         }
         if let sale = re.saleLinkedExpenseId { excluded.insert(sale) }
         return HouseBuildContext(re: re, facts: facts, expenses: expenses, byId: byId, ntd: money,
-                                 now: now, asOf: facts.asOf, cal: calendar, excluded: excluded, kinds: kinds)
+                                 now: now, asOf: facts.asOf, cal: calendar, excluded: excluded, kinds: kinds,
+                                 readings: readings)
     }
 
     /// 這一天在 asOf 當天或之前
@@ -2243,7 +2248,7 @@ extension HouseCardData {
     /// 本體在 UtilityTrendData.swift（HouseBuildContext 是 private，那邊吃公開的輸入），擁有權規則只有 HouseLedger.build 一份
     fileprivate static func utilityRows(_ c: HouseBuildContext, ledger: HouseLedger) -> UtilityRowSet {
         UtilityRows.build(estate: c.re, events: ledger.events, expensesById: c.byId,
-                          slots: UtilityMeterSlotIndex(c.re.utilityMeterSlots()))
+                          slots: UtilityMeterSlotIndex(c.re.utilityMeterSlots()), readings: c.readings)
     }
 
     /// [v25.621] 全頁「水電趨勢」的來源：rows（同一批）＋固定支出 S5、M1、賣出後那幾期（本體在 UtilityTrendData.swift）

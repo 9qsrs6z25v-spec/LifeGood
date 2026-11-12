@@ -977,6 +977,14 @@ extension RealEstateDetailView {
             for name in p.photoFileNames where !stillUsed.contains(name) { UtilityPayment.deletePhoto(name) }
         }
         store.update(re)
+        // [v25.622] C14：被拿掉那一期有度數、留下那一期沒有 → 度數搬過去（新 id、base 用留下那期的類型）。
+        // 不是 sheet dismiss，store.update 之後同一輪即可；留下那期已經有就不搬（recordMove 自己判斷）
+        for d in dups where d.keep == .utility {
+            guard let kept = re.utilityPayments.first(where: { $0.linkedExpenseId == d.expenseId }) else { continue }
+            for gone in paymentsBefore where gone.linkedExpenseId == d.expenseId && !keptIds.contains(gone.id) {
+                UtilityReadingStore.shared.recordMove(from: gone, to: kept)
+            }
+        }
     }
 
     /// 連到 expenseId 的列：keep 是 true 時留第一列，其餘（或全部）拿掉

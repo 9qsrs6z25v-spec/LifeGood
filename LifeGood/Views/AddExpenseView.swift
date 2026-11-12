@@ -4400,6 +4400,15 @@ struct AddExpenseView: View {
         lifeStore.rewriteStockSettlements(stock, rates: FinanceRates(store))
     }
 
+    /// [v25.622] C14：記帳換房子時，舊房子那一期（這一輪 save 會在「換房子」那段 oldRE.utilityPayments.removeAll 刪掉的那筆）。
+    /// 條件跟那段一模一樣（變動支出、連既有房子、原本連的房子不是這間、而且找得到）；不會刪就 nil（照舊給新 id）
+    private func utilityPaymentMovingHere(to re: RealEstate, expenseId: UUID) -> UtilityPayment? {
+        guard expenseType == .variable, selectedAssetLink == .realEstate, realEstateLinkExisting,
+              let oldREId = editingExpense?.linkedRealEstateId, oldREId != re.id,
+              let oldRE = financeStore.realEstates.first(where: { $0.id == oldREId }) else { return nil }
+        return oldRE.utilityPayments.first(where: { $0.linkedExpenseId == expenseId })
+    }
+
     /// 同步房地產支出（房屋價金→已支出章節，其餘→變動支出章節）
     private func syncRealEstateVariableExpense(realEstateId: UUID, expenseId: UUID, amount: Double) {
         guard var re = financeStore.realEstates.first(where: { $0.id == realEstateId }) else { return }
@@ -4471,11 +4480,22 @@ struct AddExpenseView: View {
                     .first(where: { $0.linkedExpenseId == expenseId })?.type
                 let resolvedType: UtilityType = selectedUtilityType ?? previousType
                     ?? guessUtilityType(title: title, note: note, estateName: re.name)
-                re.utilityPayments.append(UtilityPayment(
+                // [v25.622] C14：舊房子那一期這一輪一定會在呼叫端（save 換房子那段 oldRE.utilityPayments.removeAll）刪掉
+                // → 沿用它的 id 和照片（度數用 id 對，跟著過去）；meterId 新房子的表裡有才沿用。不會刪就照舊給新 id
+                let moving: UtilityPayment? = utilityPaymentMovingHere(to: re, expenseId: expenseId)
+                var appended = UtilityPayment(
+                    id: moving?.id ?? UUID(),
                     type: resolvedType, date: date, amount: amount,
+                    photoFileName: moving?.photoFileName,
+                    photoFileNames: moving?.photoFileNames ?? [],
                     note: note.trimmingCharacters(in: .whitespaces),
                     linkedExpenseId: expenseId
-                ))
+                )
+                if let mid = moving?.meterId,
+                   re.utilityMeterSlots().contains(where: { $0.id == mid && $0.type == resolvedType }) {
+                    appended.meterId = mid
+                }
+                re.utilityPayments.append(appended)
             }
         } else {
             // 其餘類別 → variableExpenses（變動支出）

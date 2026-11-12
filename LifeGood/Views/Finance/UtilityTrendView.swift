@@ -7,6 +7,8 @@
 //    這頁只在 .task(id: source) 與換選擇（onChange(of: picks)）時叫 UtilityTrendPage.build 算 @State screen；body 只讀 screen。
 //  - 閃退規則：NavigationStack 裡只包一層 AnyView(scroller)；卡全部 fileprivate struct（不准泛型 card<Content>）；
 //    圖沿用 UtilityTrendChart（height 200）；這頁不寫任何 store；改一期用自己的 sheet(item:)＋.appStores()。
+//  - [v25.622] v3：選擇列多〔度數｜金額｜每度幾元〕（這一種有 2 期以上填了度數才有，自己一列）；明細多期間小字與灰字；
+//    列表多一格度數（沒填空白）。字與數字一樣全在 Data 算好（UtilityTrendScreen），這裡只畫。
 //
 
 import SwiftUI
@@ -117,7 +119,8 @@ struct UtilityTrendView: View {
                     .foregroundStyle(.secondary)
             }
             if !s.kinds.isEmpty {
-                UTPickerBar(kinds: s.kinds, meters: s.meterChoices, quantityText: s.quantityText, picks: $picks)
+                UTPickerBar(kinds: s.kinds, meters: s.meterChoices, quantityText: s.quantityText,
+                            quantities: s.quantityChoices, picks: $picks)
             }
             if let p = s.panel {
                 UTChartCard(panel: p, showsRangeToggle: s.showsRangeToggle, pal: pal,
@@ -179,11 +182,17 @@ struct UtilityTrendView: View {
 // MARK: - 選擇列
 
 /// 種類 segmented（Text，不放 Label）＋量（v2 只寫「金額」）＋兩個表以上才有表 Picker
+/// [v25.622] 有 2 期以上填了度數：量〔度數｜金額｜每度幾元〕segmented 自己一列（不然照舊只寫「金額」兩字）
 fileprivate struct UTPickerBar: View {
     let kinds: [UtilityType]
     let meters: [UtilityMeterChoice]
     let quantityText: String
+    /// [v25.622] 空的＝沒有量可以切
+    let quantities: [UtilityQuantity]
     @Binding var picks: UtilityTrendPicks
+
+    /// [v25.622] 有量的 segmented 時，左下那兩字就不寫
+    private var metaText: String { quantities.isEmpty ? quantityText : "" }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -194,8 +203,11 @@ fileprivate struct UTPickerBar: View {
                 }
             }
             .pickerStyle(.segmented)
+            if !quantities.isEmpty {
+                quantityPicker
+            }
             HStack(spacing: 8) {
-                Text(quantityText)
+                Text(metaText)
                     .font(.footnote.weight(.semibold))
                     .foregroundStyle(.secondary)
                 Spacer(minLength: 8)
@@ -204,6 +216,17 @@ fileprivate struct UTPickerBar: View {
                 }
             }
         }
+    }
+
+    /// [v25.622] 〔度數｜金額｜每度幾元〕（selection 是 Optional：tag 一律 Optional(q)）
+    private var quantityPicker: some View {
+        Picker("量", selection: $picks.quantity) {
+            ForEach(quantities) { q in
+                Text(q.title)
+                    .tag(Optional(q))
+            }
+        }
+        .pickerStyle(.segmented)
     }
 
     private var meterPicker: some View {
@@ -317,8 +340,21 @@ fileprivate struct UTDetailCard: View {
             }
             .accessibilityElement(children: .ignore)
             .accessibilityLabel(d.line)
+            // [v25.622] 有計費期間：「（7/13–9/11，61 天）」
+            if let p = d.periodText {
+                Text(p)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+            }
             ForEach(d.facts) { f in
                 UTStatRow(line: f)
+            }
+            // [v25.622] 「沒填計費期間，算不出每天平均」「錢多得比用量多：…」（灰字、中性色）
+            ForEach(d.notes, id: \.self) { n in
+                Text(n)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
             footer(d)
         }
@@ -455,6 +491,9 @@ fileprivate struct UTPaymentRow: View {
     let pal: TripBoardPalette
     let onOpen: (UUID) -> Void
 
+    /// [v25.622] 度數那一格：「702 度」；沒填空白（不用 if：列 ≤ 14）
+    private var usageCell: String { line.usageText ?? "" }
+
     var body: some View {
         if let pid = line.paymentId {
             Button {
@@ -486,6 +525,10 @@ fileprivate struct UTPaymentRow: View {
                     .font(.caption)
                     .foregroundStyle(.secondary)
             }
+            Text(usageCell)
+                .font(.caption)
+                .monospacedDigit()
+                .foregroundStyle(.secondary)
             Text(line.amountText)
                 .font(.subheadline.weight(.bold))
                 .monospacedDigit()

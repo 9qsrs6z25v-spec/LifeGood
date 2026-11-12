@@ -27,6 +27,14 @@ class FinanceStore: ObservableObject {
             name: .cloudSyncDidPullChanges,
             object: nil
         )
+        // [v25.622] 水電度數那一包變了（表單存檔、iCloud 合併、備份）：只跳 modifyID 讓房子卡片重算。
+        // 用 selector（同一輪就跳；不用 addObserver(forName:queue: .main)，那會排到下一輪、同一次存檔算兩次）
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(utilityReadingsChanged(_:)),
+            name: .utilityReadingsDidChange,
+            object: nil
+        )
     }
 
     deinit {
@@ -44,6 +52,11 @@ class FinanceStore: ObservableObject {
             return
         }
         load()
+    }
+
+    /// [v25.622] 只跳 modifyID（不指派 realEstates、不存、不推：lifegood_realestates 一個 byte 都不動）
+    @objc private func utilityReadingsChanged(_ note: Notification) {
+        modifyID = UUID()
     }
 
     // MARK: - 儲蓄險 CRUD
@@ -255,6 +268,8 @@ class FinanceStore: ObservableObject {
         saveStocks()
         saveVehicles()
         saveRealEstates()
+        // [v25.622] 水電度數那一包也清（寫一包空的推上去）
+        UtilityReadingStore.shared.clearAll()
     }
 }
 
