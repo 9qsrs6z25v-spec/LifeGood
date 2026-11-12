@@ -261,8 +261,21 @@ struct UtilityPaymentEditor: View {
         if let id = meterId, !meterChoices.contains(where: { $0.id == id }) { meterId = nil }
         // [v25.622] 換類型：度數清掉、期間留著（onAppear 帶進類型那一次不清）；表清好之後才重算上一期
         if let t = usageType, t != type {
-            usageText = ""
             usageType = type
+            // 這一期在新類型下本來就有度數（舊 iPad 改過類型、或電→水→電）→ 帶回來、當成打開時那一份（沒改就不寫）；沒有才清掉
+            var probe: UtilityPayment? = editing
+            probe?.type = type
+            if let p = probe, let v = UtilityReadingStore.shared.index.value(for: p) {
+                openedReading = v
+                usageText = UtilityUsageForm.usageFieldText(v.usage)
+                if let per = v.period, !periodTouched {
+                    periodStart = per.start
+                    periodEnd = per.end
+                    hasPeriod = true
+                }
+            } else {
+                usageText = ""
+            }
             refreshUsagePrevious()
         }
     }

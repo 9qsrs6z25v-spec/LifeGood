@@ -233,6 +233,12 @@ extension UtilityReadingBook {
                 edited: UtilityReadingDraft, now: Date) -> UtilityReadingBook? {
         guard edited != opened else { return nil }
         let raw: UtilityReading? = rawReading(paymentId)
+        // 原本那筆是別的類型的度數或期間（舊 iPad 改過類型、藏著）、打開時沒看到、這次也沒填度數 → 不寫
+        // （不然只帶了上一期推出來的期間，就把藏著的度數洗掉，改回原本的類型也回不來）
+        if let o = raw, let b = o.base, b != type.rawValue, opened.isEmpty, edited.usage == nil,
+           o.usage != nil || o.periodStart != nil || o.periodEnd != nil {
+            return nil
+        }
         var r: UtilityReading = raw ?? UtilityReading(id: paymentId)
         let sameBase: Bool = raw?.base == type.rawValue
         if !sameBase {
@@ -395,6 +401,8 @@ enum UtilityUsageForm {
     static let usageError = "度數要填 0 或正的數字"
     static let periodOrderError = "『到』要在『從』之後"
     static let longPeriodWarning = "超過 6 個月了，確定是同一張帳單嗎？（超過 6 個月不算每天平均）"
+    /// 超過 186 天（約 6 個月）讀的時候整段不算，存了也白存、下次打開還可能被推估的期間換掉 → 擋存檔
+    static let longPeriodError = "計費期間最長 6 個月，請確認『從』『到』"
     static let collapsedTitle = "＋ 度數和計費期間（選填）"
 
     /// 度數欄：去掉空白和千分位逗號；空的＝不填；負的、nan、inf、≥ 1,000,000、不是數字＝擋存檔（0 可以：空屋）
@@ -414,13 +422,13 @@ enum UtilityUsageForm {
     /// 紅字（擋存檔）：有期間、「到」早於「從」（照日曆日比）
     static func periodMessage(hasPeriod: Bool, start: Date, end: Date) -> String? {
         guard hasPeriod else { return nil }
-        return UtilityDay.days(start, end) < 0 ? periodOrderError : nil
+        if UtilityDay.days(start, end) < 0 { return periodOrderError }
+        return UtilityDay.span(start, end) > UtilityReadingIndex.maxDays ? longPeriodError : nil
     }
 
-    /// 只提醒、不擋：超過 186 天（約 6 個月）
+    /// 只提醒、不擋。[v25.622 審查] 超過 186 天改成 periodMessage 擋存檔（longPeriodError），這裡不再重複提醒
     static func periodWarning(hasPeriod: Bool, start: Date, end: Date) -> String? {
-        guard hasPeriod, UtilityDay.days(start, end) >= 0 else { return nil }
-        return UtilityDay.span(start, end) > UtilityReadingIndex.maxDays ? longPeriodWarning : nil
+        return nil
     }
 
     /// 「7/13 – 9/11（約 2 個月）」（表單不顯示天數，UX §3）

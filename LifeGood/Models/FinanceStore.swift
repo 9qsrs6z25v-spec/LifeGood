@@ -29,6 +29,9 @@ class FinanceStore: ObservableObject {
         )
         // [v25.622] 水電度數那一包變了（表單存檔、iCloud 合併、備份）：只跳 modifyID 讓房子卡片重算。
         // 用 selector（同一輪就跳；不用 addObserver(forName:queue: .main)，那會排到下一輪、同一次存檔算兩次）
+        // 開 App 就建好度數那一包（同 ExpenseStore 的 ExpenseKindStore）：第一次 syncNow 拉下來之前就在聽、照 id 合併，
+        // 不然拉到的雲端那包會直接蓋掉本機還沒推上去的度數
+        _ = UtilityReadingStore.shared
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(utilityReadingsChanged(_:)),
