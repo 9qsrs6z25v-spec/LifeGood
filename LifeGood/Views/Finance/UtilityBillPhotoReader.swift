@@ -31,8 +31,8 @@ enum UtilityBillPhotoReader {
             if Task.isCancelled { return nil }
             let boxes: [UtilityOCRBox] = await recognize(url: url)
             if Task.isCancelled { return nil }
-            let lines: [String] = UtilityBillOCR.rows(from: boxes)
-            let r: UtilityBillReading = UtilityBillOCR.parse(lines: lines, paidOn: paidOn, type: type)
+            // [final skew] rows → parse；斜太多排不成行的那張記成「可能有金額」（不拿別張收據的金額來補）
+            let r: UtilityBillReading = UtilityBillOCR.reading(boxes: boxes, paidOn: paidOn, type: type)
             results.append(r)
             if r.hasUsageOrPeriod { break }
         }

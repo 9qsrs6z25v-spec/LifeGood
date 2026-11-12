@@ -9,6 +9,8 @@ import Foundation
 // - fill(_:now:)：只填空的欄（已經填了的不覆蓋，只在灰字裡說照片上是多少）；marks(...)：填進去的欄旁標「從照片讀的，請核對」。
 // 不碰任何 store、不寫檔、不寫 UserDefaults、不 print／不寫 log：照片上有姓名、地址、電號，讀到的字只在記憶體、用完就丟。
 // 結果只進繳費表單的 @State，使用者按〔儲存〕才照舊走 save → recordSave（不自動存）。只進 App target。
+// [final] 寧可讀不到也不要填錯：日期、數字被讀壞（1B、I,590、1;590、7 0 2、|09|）整段不收、不取前段或後段；表頭夾了別的欄、
+//   數字行不只一個數、上一行像一排數字、紀錄表的起訖行、斜拍又看不出斜度 → 不填；收據的金額只在帳單上確定沒有金額時才補。
 
 /// Vision 讀到的一塊字（正規化座標，左下是 0,0）
 struct UtilityOCRBox: Equatable {
@@ -43,6 +45,11 @@ struct UtilityBillReading: Equatable {
     var datesOutOfRange: Bool = false
     /// 灰字提示（對不起來、有兩個不同的值、類型不對）
     var hints: [String] = []
+    /// [harden-5] 照片看不出是哪一種帳單、又讀到度數或期間（或有提示）→ 灰字最後多一句「請確認上面選的是…」（不算 hints：不擋「沒找到…」那句）
+    var typeNote: String? = nil
+    /// [final F1] 這張照片上可能有應繳金額：有應繳金額的標籤（讀不讀得到都算），或整張有字卻斜太多讀不了（reading(boxes:)）。
+    /// 這張自己沒讀到金額 → 不拿別張（超商收據）的金額來補
+    var mayHaveAmount: Bool = false
 
     var hasAnything: Bool { usage != nil || startKey != nil || amount != nil }
     /// [review flow-1] 有度數或期間（超商收據那種只有金額的不算）
@@ -105,6 +112,10 @@ enum UtilityBillOCR {
     static let maxPhotos = 3
     /// 大圖先縮到長邊 ≤ 2000 像素再辨識
     static let maxPixel: Double = 2000
+    /// [final skew] 看不出斜度時，外接矩形估出來的斜度（sin）超過這個（約 1.5°）→ 讀不到
+    static let tiltMax: Double = 0.026
+    /// [final skew] boxTilt 兩塊字的寬差至少這麼多才拿來算
+    static let tiltMinWidthGap: Double = 0.05
     /// 日期跟繳費日相差幾天以內才收
     static let windowDays = 366
     static let maxAmount: Double = 1_000_000
@@ -112,7 +123,18 @@ enum UtilityBillOCR {
     static let indexTolerance: Double = 0.01
 
     /// 「去年同期」「上期」「上月」…：標籤前面、或標籤到數字中間有這些字 → 那個數字不是這一期的（research §4.4）
-    static let distractors: [String] = ["去年", "上期", "上次", "上月", "前期", "前次", "同期", "平均", "每度", "下期", "下次", "累計", "前月"]
+    /// [harden-1] 加「上一期」「上個月」「前年」「歷史」…這些比較的字（都不含「本期」；「上期指數」這種標籤本身照認）
+    /// [final E1] 加「尖峰」「離峰」「夏月」：時間電價、夏月／非夏月分開的那一列只是一部分的度數（「半尖峰」「非夏月」也含在裡面）
+    static let distractors: [String] = ["去年", "上期", "上次", "上月", "前期", "前次", "同期", "平均", "每度", "下期", "下次", "累計", "前月",
+                                        "上一期", "前一期", "上個月", "上一次", "前一次", "上年度", "前年", "歷史", "平均每日",
+                                        "尖峰", "離峰", "夏月"]
+    /// [harden-4] 沒標籤的「起 ~ 訖」那一行有這些字 → 是繳費期限、代收期間，不是計費期間
+    static let periodStopWords: [String] = ["期限", "代收", "繳費", "繳款", "截止", "到期"]
+    /// [final B2] 有這些字的照片 → 沒標籤的起訖行不算（多半是用電紀錄表的一列）
+    static let historyWords: [String] = ["紀錄", "記錄", "歷史", "近期", "近6期", "近六期"]
+    /// [harden-5] 照片看不出是哪一種帳單時，水費、瓦斯費一期超過這麼多度就不填（多半是讀到電費單）
+    static let unknownTypeMaxUsage: Double = 300
+    static let unknownTypePrefix = "照片上看不出是電費、水費還是瓦斯費，請確認上面選的是"
 
     // MARK: 照片
 
@@ -126,20 +148,32 @@ enum UtilityBillOCR {
     }
 
     /// 幾張照片的結果（從新到舊）：第一張有度數或期間的（[review flow-1] 只有金額的收據不算；這張自己沒有金額、也沒有
-    /// 「兩個不同的金額」→ 用最新那張讀到的金額）；都沒有 → 第一張讀到金額的；再沒有 → 第一張有話要說的（類型不對、日期差太遠…）；都沒有 nil
+    /// 「兩個不同的金額」、[final F1] 也沒有應繳金額的標籤（有標籤卻讀不到＝金額讀壞了）→ 用別張讀到的金額 otherAmount）；
+    /// 都沒有 → 讀到 otherAmount 那個金額的第一張；再沒有 → 第一張有話要說的（類型不對、日期差太遠…）；都沒有 nil
     static func pick(_ readings: [UtilityBillReading]) -> UtilityBillReading? {
         for r in readings where r.hasUsageOrPeriod {
-            guard r.amount == nil, !r.hints.contains(amountConflict) else { return r }
+            guard r.amount == nil, !r.mayHaveAmount, !r.hints.contains(amountConflict) else { return r }
             var m: UtilityBillReading = r
-            for o in readings where o.amount != nil {
-                m.amount = o.amount
-                break
-            }
+            m.amount = otherAmount(readings)
             return m
         }
-        for r in readings where r.hasAnything { return r }
+        if let a = otherAmount(readings) {
+            for r in readings where r.amount == a { return r }
+        }
         for r in readings where r.hasSomethingToSay { return r }
         return nil
+    }
+
+    /// [final F1] 幾張照片讀到的金額：都一樣才用（兩張不一樣 → nil）；有一張的金額有標籤卻讀不到（讀壞了）→ nil（不拿收據的來補）
+    static func otherAmount(_ readings: [UtilityBillReading]) -> Double? {
+        var found: Double? = nil
+        for o in readings {
+            if o.mayHaveAmount && o.amount == nil { return nil }
+            guard let a = o.amount else { continue }
+            if let f = found, f != a { return nil }
+            found = a
+        }
+        return found
     }
 
     // MARK: 一塊一塊的字 → 一行一行
@@ -176,7 +210,7 @@ enum UtilityBillOCR {
     }
 
     /// [review parse-1] 斜拍轉正：寬的字塊（上緣長 ≥ 左緣 2 倍）上緣斜度取中位數，每塊的中心轉回水平、寬高用上緣和左緣的長度。
-    /// 沒有角的資料、斜度是 0 → 原封不動；斜超過 45° → nil（讀不到，不猜）
+    /// 沒有角的資料、斜度是 0 → 原封不動（[final skew] 但外接矩形看起來是斜的 boxTilt > tiltMax → nil）；斜超過 45° → nil（讀不到，不猜）
     static func leveled(_ boxes: [UtilityOCRBox]) -> [UtilityOCRBox]? {
         var angles: [Double] = []
         for b in boxes where b.dirX > 0 {
@@ -184,10 +218,10 @@ enum UtilityBillOCR {
             let h: Double = (b.upX * b.upX + b.upY * b.upY).squareRoot()
             if h > 0 && w >= 2 * h { angles.append(atan2(b.dirY, b.dirX)) }
         }
-        guard !angles.isEmpty else { return boxes }
+        guard !angles.isEmpty else { return boxTilt(boxes) > tiltMax ? nil : boxes }
         angles.sort()
         let t: Double = angles[angles.count / 2]
-        if t == 0 { return boxes }
+        if t == 0 { return boxTilt(boxes) > tiltMax ? nil : boxes }
         if abs(t) > Double.pi / 4 { return nil }
         let cs: Double = cos(t)
         let sn: Double = sin(t)
@@ -203,6 +237,42 @@ enum UtilityBillOCR {
             out.append(UtilityOCRBox(text: b.text, minX: x - w / 2, minY: y - h / 2, maxX: x + w / 2, maxY: y + h / 2))
         }
         return out
+    }
+
+    /// [final skew] 看不出斜度（沒有角、或四個角就是水平的外接矩形）時：斜 θ 拍的字塊，外接矩形的高 ≈ 字高＋寬 × sin θ。
+    /// 兩塊一組（寬差 ≥ tiltMinWidthGap）算「高差 ÷ 寬差」取中位數（不到 5 組 → 0）
+    static func boxTilt(_ boxes: [UtilityOCRBox]) -> Double {
+        var ws: [Double] = []
+        var hs: [Double] = []
+        for b in boxes where !b.text.trimmingCharacters(in: .whitespaces).isEmpty {
+            let w: Double = b.maxX - b.minX
+            let h: Double = b.maxY - b.minY
+            if w > 0 && h > 0 {
+                ws.append(w)
+                hs.append(h)
+            }
+        }
+        var slopes: [Double] = []
+        for i in ws.indices {
+            for j in ws.indices where j > i {
+                let dw: Double = ws[j] - ws[i]
+                if abs(dw) >= tiltMinWidthGap { slopes.append((hs[j] - hs[i]) / dw) }
+            }
+        }
+        guard slopes.count >= 5 else { return 0 }
+        slopes.sort()
+        return slopes[slopes.count / 2]
+    }
+
+    /// 一張照片的字塊 → 讀到的值（rows → parse）。[final skew] 有字卻排不成行（斜太多）→ 什麼都不填，
+    /// 而且 mayHaveAmount（不知道這張上面的金額是多少，不拿別張收據的金額來補）
+    static func reading(boxes: [UtilityOCRBox], paidOn: Date, type: UtilityType) -> UtilityBillReading {
+        let lines: [String] = rows(from: boxes)
+        var r: UtilityBillReading = parse(lines: lines, paidOn: paidOn, type: type)
+        if lines.isEmpty {
+            for b in boxes where !b.text.trimmingCharacters(in: .whitespaces).isEmpty { r.mayHaveAmount = true }
+        }
+        return r
     }
 
     private static func rowText(_ g: [(index: Int, box: UtilityOCRBox)]) -> String {
@@ -222,7 +292,8 @@ enum UtilityBillOCR {
     /// 全形 → 半形、各種波浪號和破折號 → 「~」「-」、中文字中間的空白拿掉、
     /// 數字旁邊的 O／o → 0、l／I／| → 1（一直換到不再變；只換旁邊是數字的）。
     /// [review parse-5] l／I／| 只在「有日期記號的那一段」（空白隔開；有 / - ~ 年 月、或兩個以上的 .）或兩邊都是數字時才換；
-    /// 其他地方數字頭尾的 | 是表格框線 → 空白（「702|」「|1,590」），l／I 不換（numbers 不收貼著 l／I 的數字：可能是框線也可能是 1，不猜）
+    /// 其他地方不換（numbers 不收貼著 l／I 的數字：可能是框線也可能是 1，不猜）。
+    /// [final C1] 數字頭尾的 | 也不換成空白了（「|09|」可能是 109、「7|」可能是 71）：留著，numbers 不收貼著 | 的數字
     static func normalize(_ s: String) -> String {
         var view = String.UnicodeScalarView()
         for u in s.unicodeScalars {
@@ -233,7 +304,7 @@ enum UtilityBillOCR {
                 view.append(" ")
             } else if v == 0x301C || v == 0x223C {
                 view.append("~")
-            } else if v == 0x2010 || v == 0x2011 || v == 0x2012 || v == 0x2013 || v == 0x2014 || v == 0x2212 {
+            } else if (v >= 0x2010 && v <= 0x2014) || v == 0x2212 {
                 view.append("-")
             } else {
                 view.append(u)
@@ -252,13 +323,8 @@ enum UtilityBillOCR {
                 let prevDigit: Bool = i > 0 && digit(chars[i - 1]) != nil
                 let nextDigit: Bool = i + 1 < chars.count && digit(chars[i + 1]) != nil
                 guard prevDigit || nextDigit else { continue }
-                if to == "0" || dateish[i] || (prevDigit && nextDigit) {
-                    chars[i] = to
-                } else if chars[i] == "|" {
-                    chars[i] = " "
-                } else {
-                    continue
-                }
+                guard to == "0" || dateish[i] || (prevDigit && nextDigit) else { continue }
+                chars[i] = to
                 changed = true
             }
         }
@@ -291,8 +357,18 @@ enum UtilityBillOCR {
         return out
     }
 
-    /// [review parse-5] 沒換掉的 l／I（貼著數字的話那個數字不收）
-    private static func isLetterOne(_ ch: Character) -> Bool { ch == "l" || ch == "I" }
+    /// [harden-3] 英文字母（沒換掉的 l／I 也是；貼著數字的話那個數字不收）
+    private static func isLatinLetter(_ ch: Character) -> Bool {
+        guard let a = ch.asciiValue else { return false }
+        return (a >= 65 && a <= 90) || (a >= 97 && a <= 122)
+    }
+
+    /// [harden-3] i 起是「kWh」（大小寫都算）、後面不再接英文字母：度數的單位，不算壞字
+    private static func kwhUnitAt(_ c: [Character], _ i: Int) -> Bool {
+        guard i + 3 <= c.count else { return false }
+        let w: String = String(c[i..<(i + 3)]).lowercased()
+        return w == "kwh" && (i + 3 == c.count || !isLatinLetter(c[i + 3]))
+    }
 
     /// 「計 費 度 數」→「計費度數」：一段空白兩邊都是非 ASCII 的字（中文）才拿掉
     private static func dropSpacesBetweenWide(_ c: [Character]) -> [Character] {
@@ -367,6 +443,8 @@ enum UtilityBillOCR {
         let labels: [LabelHit]
         let dates: [DateHit]
         let numbers: [NumberHit]
+        /// [final C1] 壞掉、不收的數字的開頭位置
+        let bad: [Int]
     }
 
     struct Candidate {
@@ -377,7 +455,9 @@ enum UtilityBillOCR {
     }
 
     /// 這一行裡所有的日期：民國年 3 位數（100–199）+1911、西元 4 位數（2000–2199）；
-    /// 「115/07/13」「115.07.13」「115-07-13」「115年07月13日」（中間可以有空白）；月、日要是真的那一天
+    /// 「115/07/13」「115.07.13」「115-07-13」「115年07月13日」（中間可以有空白）；月、日要是真的那一天。
+    /// [final B1] 日期被讀壞的不收、也不取前段：前面貼著英文字母、後面緊接英文字母／數字／? 這種（「115/09/1B」不是 9/1）、
+    /// 日是一位數又隔一個空白接一兩位數（「115/09/1 1」）；「年」式一定要有「日」（「115年9月1 1日」）
     static func dates(in c: [Character]) -> [DateHit] {
         var out: [DateHit] = []
         var i = 0
@@ -393,7 +473,7 @@ enum UtilityBillOCR {
     }
 
     private static func dateAt(_ c: [Character], _ i: Int) -> DateHit? {
-        if i > 0 && digit(c[i - 1]) != nil { return nil }
+        if i > 0 && (digit(c[i - 1]) != nil || isLatinLetter(c[i - 1])) { return nil }
         guard let yr = readDigits(c, i, maxDigits: 4) else { return nil }
         let yearLen: Int = yr.end - i
         let y: Int
@@ -418,15 +498,35 @@ enum UtilityBillOCR {
         j = skipSpaces(c, mo.end)
         guard j < c.count, c[j] == sep2 else { return nil }
         j = skipSpaces(c, j + 1)
+        let dayAt: Int = j
         guard let dd = readDigits(c, j, maxDigits: 2) else { return nil }
         j = dd.end
         if sep1 == "年" {
             let k: Int = skipSpaces(c, j)
-            if k < c.count && c[k] == "日" { j = k + 1 }
+            guard k < c.count, c[k] == "日" else { return nil }
+            j = k + 1
+        } else if !dateTailOK(c, j, oneDigitDay: dd.end - dayAt == 1) {
+            return nil
         }
         guard mo.value >= 1, mo.value <= 12, dd.value >= 1, dd.value <= daysIn(year: y, month: mo.value) else { return nil }
         let key = String(format: "%04ld-%02ld-%02ld", y, mo.value, dd.value)
         return DateHit(key: key, start: i, end: j)
+    }
+
+    /// [final B1] 日期後面可以接的英數符號（空白、中文字、行尾也可以）
+    private static let dateTailMarks: Set<Character> = ["~", "-", "(", ")", "[", "]", ","]
+
+    /// [final B1] 「/」「.」「-」式的日期最後一位後面：緊接英文字母、數字、其他符號（「1B」「1?」）→ 讀壞了；
+    /// 日是一位數、隔空白又接一兩位數或英文字母（「1 1」「1 g」）→ 也是讀壞了
+    private static func dateTailOK(_ c: [Character], _ j: Int, oneDigitDay: Bool) -> Bool {
+        guard j < c.count else { return true }
+        let ch: Character = c[j]
+        if ch.isASCII && ch != " " && !dateTailMarks.contains(ch) { return false }
+        if oneDigitDay {
+            let k: Int = skipSpaces(c, j)
+            if k > j && k < c.count && (readDigits(c, k, maxDigits: 2) != nil || isLatinLetter(c[k])) { return false }
+        }
+        return true
     }
 
     /// 從 i 起連續的數字（1…maxDigits 位；多一位就不算）
@@ -459,10 +559,16 @@ enum UtilityBillOCR {
         }
     }
 
-    /// 這一行裡的數字（日期那幾段不算）：「1,590」去千分位；「21-40-0218-50-1」（電號）、「10:30」、「115/07」這種不算；
-    /// 逗號後面不是剛好 3 位數就當分隔（「702,640」→ 702、640）
+    /// 這一行裡的數字（日期那幾段不算）：「1,590」「702,640」去千分位；「21-40-0218-50-1」（電號）、「10:30」、「115/07」這種不算；
+    /// [harden-3] 逗號後面不是剛好 3 位數（「1,59」「1,5900」）、貼著英文字母（「7B2」「S02」「1,5B0」；後面接 kWh 不算）→ 整個不收，不取前段
     static func numbers(in c: [Character], skipping dates: [DateHit]) -> [NumberHit] {
+        numberScan(c, dates).hits
+    }
+
+    /// [final C1] 數字＋壞掉的數字（不收的那幾個的開頭位置）：同一段有壞掉的數字 → candidates 整段不填（不拿下一個數字）
+    private static func numberScan(_ c: [Character], _ dates: [DateHit]) -> (hits: [NumberHit], bad: [Int]) {
         var out: [NumberHit] = []
+        var bad: [Int] = []
         var i = 0
         while i < c.count {
             if let d = dateCovering(dates, i) {
@@ -477,12 +583,38 @@ enum UtilityBillOCR {
             while j < c.count && isNumberChar(c[j]) && dateCovering(dates, j) == nil {
                 j += 1
             }
-            // [review parse-5] 貼著沒換掉的 l／I（「I702」「702l」）→ 不收
-            let glued: Bool = (i > 0 && isLetterOne(c[i - 1])) || (j < c.count && isLetterOne(c[j]))
-            if !glued { out += numberTokens(c, i, j) }
+            // [review parse-5][harden-3][final C1] 頭尾貼著壞字 → 不收
+            if brokenEdge(c, i, j) {
+                bad.append(i)
+            } else if let hits = numberTokens(c, i, j) {
+                out += hits
+            } else {
+                bad.append(i)
+            }
             i = j
         }
-        return out
+        return (hits: out, bad: bad)
+    }
+
+    /// [final C1] 數字頭尾的壞字：「;」「'」「|」（千分位、1 被讀壞，或框線）
+    private static let glueMarks: Set<Character> = [";", "'", "|"]
+
+    /// [harden-3][final C1] i..<j 這個數字的頭尾貼著壞字：英文字母（後面接 kWh 不算）、; ' |；前面貼著逗號、小數點（「I,590」的 590、「|.004」）；
+    /// 尾巴是逗號、跳過空白又接數字（「1, 590」的 1）
+    private static func brokenEdge(_ c: [Character], _ i: Int, _ j: Int) -> Bool {
+        if i > 0 {
+            let p: Character = c[i - 1]
+            if p == "," || p == "." || isLatinLetter(p) || glueMarks.contains(p) { return true }
+        }
+        var end: Int = j
+        while end > i && digit(c[end - 1]) == nil { end -= 1 }
+        if c[end..<j].contains(",") {
+            let k: Int = skipSpaces(c, j)
+            if k < c.count && digit(c[k]) != nil { return true }
+        }
+        guard j < c.count else { return false }
+        if isLatinLetter(c[j]) { return !kwhUnitAt(c, j) }
+        return glueMarks.contains(c[j])
     }
 
     private static func dateCovering(_ dates: [DateHit], _ i: Int) -> DateHit? {
@@ -494,7 +626,8 @@ enum UtilityBillOCR {
         digit(ch) != nil || ch == "," || ch == "." || ch == "-" || ch == "/" || ch == ":"
     }
 
-    private static func numberTokens(_ c: [Character], _ a: Int, _ b: Int) -> [NumberHit] {
+    /// 一段數字字元 → 數字；[] ＝不是數字（電號、時間、半個日期），nil ＝壞掉的數字（[final C1] 記成 bad）
+    private static func numberTokens(_ c: [Character], _ a: Int, _ b: Int) -> [NumberHit]? {
         var end = b
         while end > a && digit(c[end - 1]) == nil { end -= 1 }
         guard end > a else { return [] }
@@ -511,21 +644,16 @@ enum UtilityBillOCR {
             }
         }
         parts.append(cur)
-        if parts.count > 1 && thousands(parts) {
+        if parts.count > 1 {
+            // [harden-3] 不是千分位的逗號（「1,59」「1,5900」）：多半是壞字截斷 → 整個不收
+            guard thousands(parts) else { return nil }
             var joined: [Character] = []
             for p in parts { joined += p }
-            guard let v = plainNumber(joined) else { return [] }
+            guard let v = plainNumber(joined) else { return nil }
             return [NumberHit(value: v, start: a, end: end)]
         }
-        var out: [NumberHit] = []
-        var pos = a
-        for p in parts {
-            if let v = plainNumber(p) {
-                out.append(NumberHit(value: v, start: pos, end: pos + p.count))
-            }
-            pos += p.count + 1
-        }
-        return out
+        guard let v = plainNumber(run) else { return nil }
+        return [NumberHit(value: v, start: a, end: end)]
     }
 
     /// 「1,590」「12,342.5」：第一段 1–3 位、後面每段小數點前剛好 3 位、只有最後一段可以有小數點
@@ -623,10 +751,18 @@ enum UtilityBillOCR {
         return false
     }
 
+    /// [harden-4] 整行有沒有這幾個字其中一個
+    private static func containsAny(_ c: [Character], _ list: [String]) -> Bool {
+        let s = String(c)
+        for w in list where s.contains(w) { return true }
+        return false
+    }
+
     static func scan(_ text: String, words: [Word]) -> Line {
         let c: [Character] = Array(text)
         let ds: [DateHit] = dates(in: c)
-        return Line(chars: c, labels: labels(in: c, words: words), dates: ds, numbers: numbers(in: c, skipping: ds))
+        let ns: (hits: [NumberHit], bad: [Int]) = numberScan(c, ds)
+        return Line(chars: c, labels: labels(in: c, words: words), dates: ds, numbers: ns.hits, bad: ns.bad)
     }
 
     // MARK: 照片是哪一種帳單
@@ -696,6 +832,8 @@ enum UtilityBillOCR {
                     if let c = dateCandidate(lines, li, l, segEnd) { out.append(c) }
                     continue
                 }
+                // [final C1] 這一段有壞掉的數字（「I,590」「10,05 8」「1;590」）→ 整段不填，不拿下一個數字、也不往下借
+                if hasBad(ln, l.end, segEnd) { continue }
                 var firstAt: Int? = nil
                 for (ni, n) in ln.numbers.enumerated() where n.start >= l.end && n.end <= segEnd {
                     firstAt = ni
@@ -704,43 +842,167 @@ enum UtilityBillOCR {
                 if let ni = firstAt {
                     let n: NumberHit = ln.numbers[ni]
                     if hasDistractor(ln.chars, l.end, n.start) { continue }
-                    let v: Double? = l.field == .amount ? amountNumber(ln, ni, segEnd, joinSpaces: true) : meterNumber(ln, ni, l.field)
-                    out.append(Candidate(field: l.field, priority: l.priority, number: v, dates: []))
+                    let got: (value: Double?, last: Int) = pickNumber(ln, ni, l.field, from: l.end, end: segEnd, joinSpaces: true)
+                    out.append(Candidate(field: l.field, priority: l.priority, number: got.value, dates: []))
                 } else if !hasDistractor(ln.chars, l.end, segEnd) {
                     pending.append(l)
                 }
             }
             guard !pending.isEmpty, li + 1 < lines.count else { continue }
             let nx: Line = lines[li + 1]
-            guard nx.labels.isEmpty, !hasDistractor(nx.chars, 0, nx.chars.count) else { continue }
-            // [review parse-1] 上一行是沒被借走的「光數字」那種行 → 數字那一欄整排比標籤高半行（斜拍）：往下借會借到下一個標籤的數字，不借
-            if li > 0 && !lent[li - 1] && bareNumbers(lines[li - 1]) { continue }
+            guard nx.labels.isEmpty, nx.bad.isEmpty, !hasDistractor(nx.chars, 0, nx.chars.count) else { continue }
+            // [review parse-1][final D1] 上一行是沒被借走、像一排數字的行（「702」「702 kWh」「I 31」「起 至 訖 702」）→
+            // 數字那一欄整排比標籤高半行（斜拍）：往下借會借到下一個標籤的數字，不借
+            if li > 0 && !lent[li - 1] && numberColumn(lines[li - 1]) { continue }
+            // [harden-2] 借的那行要是光數字的一行（開頭是「尖峰」「夏月」「用戶」這種字的不借），後面也不能緊接著同樣形狀的
+            // 數字行（多列表格：時間電價、夏月／非夏月）→ 不從這個表取（指數對得上也不算；有「計費度數 702」那種總數行照用那一行）
+            if !bareNumbers(nx) || tableRow(lines, li + 2, like: nx) { continue }
+            // [final A1] 表頭夾了不是標籤的欄（「流動電費 應繳總金額」「基本費 計費度數」）→ 不知道數字行哪一個是哪一欄，不借
+            if !headerOnly(ln, pending) { continue }
             if pending.count == nx.numbers.count {
                 // 表頭一行、數字一行：照順序一對一（欄跟欄之間的空白不接）
                 lent[li + 1] = true
                 for (pi, l) in pending.enumerated() {
-                    let v: Double? = l.field == .amount
-                        ? amountNumber(nx, pi, nx.chars.count, joinSpaces: false) : meterNumber(nx, pi, l.field)
-                    out.append(Candidate(field: l.field, priority: l.priority, number: v, dates: []))
+                    let from: Int = pi == 0 ? 0 : nx.numbers[pi - 1].end
+                    let got: (value: Double?, last: Int) = pickNumber(nx, pi, l.field, from: from, end: nx.numbers[pi].end, joinSpaces: false)
+                    out.append(Candidate(field: l.field, priority: l.priority, number: got.value, dates: []))
                 }
-            } else if pending.count == 1, !nx.numbers.isEmpty {
-                lent[li + 1] = true
+            } else if pending.count == 1 {
+                // [final A1] 只有一個標籤：數字行要剛好被這一個值用完（「120 702」不知道是哪一個）
                 let l: LabelHit = pending[0]
-                let v: Double? = l.field == .amount
-                    ? amountNumber(nx, 0, nx.chars.count, joinSpaces: true) : meterNumber(nx, 0, l.field)
-                out.append(Candidate(field: l.field, priority: l.priority, number: v, dates: []))
+                // [final A1] 往下借的不接空白千分位（「61 312」可能是抄表日數和金額兩欄）
+                let got: (value: Double?, last: Int) = pickNumber(nx, 0, l.field, from: 0, end: nx.chars.count, joinSpaces: false)
+                if got.last == nx.numbers.count - 1 {
+                    lent[li + 1] = true
+                    out.append(Candidate(field: l.field, priority: l.priority, number: got.value, dates: []))
+                }
             }
         }
         return out
     }
 
-    /// [review parse-1] 光數字的一行（沒有標籤；只有數字、, . 空白、度、元、NT$）
-    private static func bareNumbers(_ ln: Line) -> Bool {
-        guard ln.labels.isEmpty, !ln.numbers.isEmpty else { return false }
-        for ch in ln.chars where digit(ch) == nil {
-            if ch != "," && ch != "." && ch != " " && ch != "度" && ch != "元" && ch != "N" && ch != "T" && ch != "$" { return false }
+    /// 一個標籤拿第 i 個數字（金額照 amountNumber、度數和指數照 meterNumber）；last＝用到第幾個數字（金額的空白千分位會多用幾個）。
+    /// 拿到的數字前後不對勁 → nil（不填）：
+    /// [final D2] 單位不對（金額後面接「度」「kWh」；度數、指數後面接「元」）；
+    /// [final C2/D2] from 到數字中間有別的字（「計費度數 流動電費 4,298」「用電度數 g 496」「本期用電度數 NT$523」）；
+    /// [final C2] 同一段（end 之前）隔空白緊接著數字、英文字母、年月日（「7 0 2」「1 702」「15 90」「43 Z kWh」「115 年」）
+    private static func pickNumber(_ ln: Line, _ i: Int, _ field: Field, from: Int, end: Int,
+                                   joinSpaces: Bool) -> (value: Double?, last: Int) {
+        let c: [Character] = ln.chars
+        let money: Bool = field == .amount
+        var value: Double?
+        var last: Int = i
+        if money {
+            let a: (value: Double, last: Int) = amountNumber(ln, i, end, joinSpaces: joinSpaces)
+            value = a.value
+            last = a.last
+        } else {
+            value = meterNumber(ln, i, field)
+        }
+        let k: Int = skipSpaces(c, ln.numbers[last].end)
+        if k < c.count && money && (c[k] == "度" || kwhUnitAt(c, k)) { value = nil }
+        if k < c.count && !money && c[k] == "元" { value = nil }
+        if !gapOK(c, from, ln.numbers[i].start, money: money) { value = nil }
+        if k < end && k < c.count && oddAfter(c, k) { value = nil }
+        return (value: value, last: last)
+    }
+
+    /// [final C2/D2] 標籤到數字中間可以有的字（金額另外可以有 NT$、$、新臺幣；kWh 也可以）
+    private static let gapChars: Set<Character> = [" ", ":", "(", ")", "度", "元", "本", "期"]
+    private static let moneyGapChars: Set<Character> = ["$", "新", "台", "臺", "幣"]
+
+    private static func gapOK(_ c: [Character], _ a: Int, _ b: Int, money: Bool) -> Bool {
+        var i: Int = a
+        while i < b {
+            let ch: Character = c[i]
+            if gapChars.contains(ch) || (money && moneyGapChars.contains(ch)) {
+                i += 1
+            } else if money && ch == "N" && i + 1 < b && c[i + 1] == "T" {
+                i += 2
+            } else if kwhUnitAt(c, i) {
+                i += 3
+            } else {
+                return false
+            }
         }
         return true
+    }
+
+    /// [final C2] 數字後面（跳過空白）是數字、年月日、英文字母（kWh 不算）→ 不對勁
+    private static let dateWords: Set<Character> = ["年", "月", "日"]
+
+    private static func oddAfter(_ c: [Character], _ k: Int) -> Bool {
+        let ch: Character = c[k]
+        if digit(ch) != nil || dateWords.contains(ch) { return true }
+        return isLatinLetter(ch) && !kwhUnitAt(c, k)
+    }
+
+    /// [final C1] a..<b 裡有壞掉的數字
+    private static func hasBad(_ ln: Line, _ a: Int, _ b: Int) -> Bool {
+        for p in ln.bad where p >= a && p < b { return true }
+        return false
+    }
+
+    /// [review parse-1] 光數字的一行（沒有標籤；只有數字、, . 空白、度、元、NT$、[final D1] kWh）
+    private static let bareChars: Set<Character> = [",", ".", " ", "度", "元", "N", "T", "$"]
+
+    private static func bareNumbers(_ ln: Line) -> Bool {
+        guard ln.labels.isEmpty, !ln.numbers.isEmpty else { return false }
+        var i = 0
+        while i < ln.chars.count {
+            if digit(ln.chars[i]) != nil || bareChars.contains(ln.chars[i]) {
+                i += 1
+            } else if kwhUnitAt(ln.chars, i) {
+                i += 3
+            } else {
+                return false
+            }
+        }
+        return true
+    }
+
+    /// [final D1] 像一排數字的行：沒有標籤、有數字（壞掉的也算）；除了日期只有數字、英文字母、這幾個符號
+    private static let columnChars: Set<Character> = [",", ".", " ", "度", "元", "$", "~", "-", "至", "到", "/", ":", "(", ")", ";", "'", "|"]
+
+    private static func numberColumn(_ ln: Line) -> Bool {
+        guard ln.labels.isEmpty, !ln.numbers.isEmpty || !ln.bad.isEmpty else { return false }
+        for (i, ch) in ln.chars.enumerated() where digit(ch) == nil && dateCovering(ln.dates, i) == nil {
+            if !columnChars.contains(ch) && !isLatinLetter(ch) { return false }
+        }
+        return true
+    }
+
+    /// [final A1] 表頭只能有標籤和這幾個字（空白、冒號、括號、單位）
+    private static let headerChars: Set<Character> = [" ", ":", "(", ")", "度", "元"]
+
+    /// [final A1] 表頭那一行：第一個標籤前面、每個等著往下借的標籤後面（到下一個標籤），只有 headerChars
+    private static func headerOnly(_ ln: Line, _ pending: [LabelHit]) -> Bool {
+        guard let first = ln.labels.first, headerFill(ln.chars, 0, first.start) else { return false }
+        for l in pending {
+            var segEnd: Int = ln.chars.count
+            for m in ln.labels where m.start >= l.end {
+                segEnd = m.start
+                break
+            }
+            if !headerFill(ln.chars, l.end, segEnd) { return false }
+        }
+        return true
+    }
+
+    private static func headerFill(_ c: [Character], _ a: Int, _ b: Int) -> Bool {
+        guard a < b else { return true }
+        for ch in c[a..<b] where !headerChars.contains(ch) { return false }
+        return true
+    }
+
+    /// [harden-2] 第 k 行跟數字行同樣形狀（沒有標籤、數字一樣多）→ 多列表格的下一列。
+    /// [final A1] 第 k 行也像一排數字（numberColumn；數字個數不一樣、讀壞了也算：「61」下面還有「1 408」）→ 一樣當成表格，不借
+    private static func tableRow(_ lines: [Line], _ k: Int, like nx: Line) -> Bool {
+        guard k < lines.count else { return false }
+        let ln: Line = lines[k]
+        guard ln.labels.isEmpty else { return false }
+        if !ln.numbers.isEmpty && ln.numbers.count == nx.numbers.count { return true }
+        return numberColumn(ln)
     }
 
     /// [review parse-6] 度數：「1.936」（1–3 位、小數點、剛好 3 位）多半是千分位被讀成小數點，分不出來 → nil（不收、不猜）。
@@ -753,12 +1015,12 @@ enum UtilityBillOCR {
 
     /// [v25.624 G1] 應繳金額的千分位被讀成小數點或空白：「1.590」「1 590」「12 345」→ 1590、12345。只給金額用（台幣帳單的金額
     /// 不會有 3 位小數）；空白只接「1–2 位數＋剛好一個空白＋剛好 3 位數」（「590 120」可能是兩欄，不接），接到 ≥ 1,000,000 就不收。
-    /// 表頭一行、數字一行（照順序一對一）時不接空白。度數、指數一律不接（「702 640」可能是本期、去年同期兩欄）
-    private static func amountNumber(_ ln: Line, _ i: Int, _ end: Int, joinSpaces: Bool) -> Double {
+    /// 表頭一行、數字一行（照順序一對一）時不接空白。度數、指數一律不接（「702 640」可能是本期、去年同期兩欄）。last＝接到第幾個數字
+    private static func amountNumber(_ ln: Line, _ i: Int, _ end: Int, joinSpaces: Bool) -> (value: Double, last: Int) {
         let n: NumberHit = ln.numbers[i]
         let run: [Character] = Array(ln.chars[n.start..<n.end])
-        if let v = dotThousands(run) { return v }
-        guard joinSpaces, run.count <= 2, allDigits(run) else { return n.value }
+        if let v = dotThousands(run) { return (value: v, last: i) }
+        guard joinSpaces, run.count <= 2, allDigits(run) else { return (value: n.value, last: i) }
         var value: Double = n.value
         var prevEnd: Int = n.end
         var k: Int = i + 1
@@ -771,7 +1033,7 @@ enum UtilityBillOCR {
             prevEnd = next.end
             k += 1
         }
-        return value
+        return (value: value, last: k - 1)
     }
 
     /// 「1.590」：1–3 位數、一個小數點、剛好 3 位數 → 1590；其他 nil
@@ -791,7 +1053,9 @@ enum UtilityBillOCR {
         return true
     }
 
-    /// 期間要 2 個日期、抄表日要 1 個：先拿同一行標籤後面的，不夠再往下最多 2 行補（遇到有標籤或「去年」的行就停）
+    /// 期間要 2 個日期、抄表日要 1 個：先拿同一行標籤後面的，不夠再往下最多 2 行補（遇到有標籤或「去年」的行就停）。
+    /// [final B3] 期間的兩個日期在同一行時，中間只能有 ~ - 至 到（「115/07/13 列印日期 115/09/15」不收）；
+    /// 起日在標籤這一行、訖日在下一行（折行）→ 不收（分不出下一行那個是不是列印日、出帳日）
     private static func dateCandidate(_ lines: [Line], _ li: Int, _ l: LabelHit, _ segEnd: Int) -> Candidate? {
         let ln: Line = lines[li]
         let need: Int = l.field == .period ? 2 : 1
@@ -801,12 +1065,19 @@ enum UtilityBillOCR {
         }
         if let first = inSeg.first {
             if hasDistractor(ln.chars, l.end, first.start) { return nil }
+            // [final B3] 標籤到第一個日期中間只能有空白、冒號、括號、「自」「民國」（「本期抄表日 列印日 115/09/12」不收）
+            for ch in ln.chars[l.end..<first.start] where !dateGapChars.contains(ch) { return nil }
         } else if hasDistractor(ln.chars, l.end, segEnd) {
             return nil
         }
         var keys: [String] = []
-        for d in inSeg where keys.count < need {
-            keys.append(d.key)
+        if need == 2 && inSeg.count >= 2 {
+            guard let p = rangePair(ln, inSeg[0], inSeg[1]) else { return nil }
+            keys = p
+        } else if need == 2 && inSeg.count == 1 {
+            return nil
+        } else if let first = inSeg.first {
+            keys = [first.key]
         }
         var k: Int = li + 1
         while keys.count < need && k < lines.count && k <= li + 2 {
@@ -814,13 +1085,29 @@ enum UtilityBillOCR {
             if !nx.labels.isEmpty || hasDistractor(nx.chars, 0, nx.chars.count) { break }
             // [review parse-3] 借的那行只能有日期和 ~ - 至 到（「繳費期限 115/09/25」「列印日期 …」那種不借）
             if !onlyDates(nx) { break }
-            for d in nx.dates where keys.count < need {
-                keys.append(d.key)
+            if keys.isEmpty && need == 2 && nx.dates.count >= 2 {
+                guard let p = rangePair(nx, nx.dates[0], nx.dates[1]) else { return nil }
+                keys = p
+            } else {
+                for d in nx.dates where keys.count < need {
+                    keys.append(d.key)
+                }
             }
             k += 1
         }
         guard keys.count == need else { return nil }
         return Candidate(field: l.field, priority: l.priority, number: nil, dates: keys)
+    }
+
+    /// [final B3] 標籤到第一個日期中間可以有的字
+    private static let dateGapChars: Set<Character> = [" ", ":", "(", ")", "自", "從", "由", "民", "國"]
+
+    /// [final B3] 同一行的兩個日期中間（去掉空白、「民國」）剛好是 ~ - 至 到 其中一個 → 起訖
+    private static func rangePair(_ ln: Line, _ a: DateHit, _ b: DateHit) -> [String]? {
+        let raw: String = String(ln.chars[a.end..<b.start]).replacingOccurrences(of: "民國", with: "")
+        let mid: String = raw.trimmingCharacters(in: .whitespaces)
+        guard mid == "~" || mid == "-" || mid == "至" || mid == "到" else { return nil }
+        return [a.key, b.key]
     }
 
     /// [review parse-1] 數字的標籤（度數、指數、金額）後面只有日期、或日期的標籤（期間、抄表日）後面只有數字、
@@ -844,10 +1131,10 @@ enum UtilityBillOCR {
     }
 
     /// [review parse-1] 這一行只有度數、指數、金額的標籤（中間只有空白、冒號），自己沒有數字，下一行也借不到
-    /// （沒有下一行、下一行有標籤、有「去年」這些字、沒有數字）
+    /// （沒有下一行、下一行有標籤、有「去年」這些字、沒有數字）。[final C1] 壞掉的數字也算有數字（是讀壞了，不是錯開）
     private static func dangling(_ lines: [Line], _ li: Int) -> Bool {
         let ln: Line = lines[li]
-        guard !ln.labels.isEmpty, ln.numbers.isEmpty, ln.dates.isEmpty else { return false }
+        guard !ln.labels.isEmpty, ln.numbers.isEmpty, ln.bad.isEmpty, ln.dates.isEmpty else { return false }
         var covered: [Bool] = Array(repeating: false, count: ln.chars.count)
         for l in ln.labels {
             if l.field.isDate { return false }
@@ -856,7 +1143,7 @@ enum UtilityBillOCR {
         for (i, ch) in ln.chars.enumerated() where !covered[i] && ch != " " && ch != ":" { return false }
         guard li + 1 < lines.count else { return true }
         let nx: Line = lines[li + 1]
-        return !nx.labels.isEmpty || nx.numbers.isEmpty || hasDistractor(nx.chars, 0, nx.chars.count)
+        return !nx.labels.isEmpty || (nx.numbers.isEmpty && nx.bad.isEmpty) || hasDistractor(nx.chars, 0, nx.chars.count)
     }
 
     /// [review parse-3] 這一行除了日期只有空白和 ~ - 至 到
@@ -868,18 +1155,18 @@ enum UtilityBillOCR {
         return true
     }
 
-    /// 沒有標籤的「115/07/13 ~ 115/09/11」那種一行（兩個日期中間只有 ~ - 至 到；整行沒有「去年」這些字）
+    /// 沒有標籤的「115/07/13 ~ 115/09/11」那種一行（兩個日期中間只有 ~ - 至 到；整行沒有「去年」這些字；
+    /// [harden-4] 也沒有「期限」「代收」「繳費」這些字。訖日 ≤ 繳費日在 parse 的 endsBy 一起擋）。
+    /// [final B2] 整行只有日期（「115/05/13~115/07/12 486」那種用電紀錄的一列不算），而且整張照片只有一段（兩段以上 → 都不算）；
+    /// 照片上有「紀錄」「歷史」「近期」這些字（用電紀錄表）→ 都不算
     private static func rangeLines(_ lines: [Line]) -> [[String]] {
+        for ln in lines where containsAny(ln.chars, historyWords) { return [] }
         var out: [[String]] = []
         for ln in lines where ln.labels.isEmpty && ln.dates.count >= 2 && !hasDistractor(ln.chars, 0, ln.chars.count) {
-            let a: DateHit = ln.dates[0]
-            let b: DateHit = ln.dates[1]
-            let mid: String = String(ln.chars[a.end..<b.start]).trimmingCharacters(in: .whitespaces)
-            if mid == "~" || mid == "-" || mid == "至" || mid == "到" {
-                out.append([a.key, b.key])
-            }
+            if containsAny(ln.chars, periodStopWords) || !onlyDates(ln) { continue }
+            if let p = rangePair(ln, ln.dates[0], ln.dates[1]), !out.contains(p) { out.append(p) }
         }
-        return out
+        return out.count == 1 ? out : []
     }
 
     /// 同一種欄位：priority 最小的那幾個裡、不重複的值（照出現順序）。只有一個才算讀到
@@ -938,15 +1225,20 @@ enum UtilityBillOCR {
             if !n.trimmingCharacters(in: .whitespaces).isEmpty { norm.append(n) }
         }
         var r = UtilityBillReading()
-        if let photoType = detectType(norm), photoType != type {
+        let photoType: UtilityType? = detectType(norm)
+        if let pt = photoType, pt != type {
             r.mismatch = true
-            r.hints = [mismatchText(photo: photoType, chosen: type)]
+            r.hints = [mismatchText(photo: pt, chosen: type)]
             return r
         }
         let ws: [Word] = words(for: type)
         var scanned: [Line] = []
         for n in norm {
             scanned.append(scan(n, words: ws))
+        }
+        // [final F1] 有應繳金額的標籤（讀不到、行對不齊也算）→ pick 不拿別張的金額來補
+        for ln in scanned {
+            for l in ln.labels where l.field == .amount { r.mayHaveAmount = true }
         }
         // [review parse-1] 保險：行對不齊（斜拍、Vision 的角沒轉正）→ 什麼都不填（讀錯比讀不到糟）
         if misaligned(scanned) { return r }
@@ -990,6 +1282,11 @@ enum UtilityBillOCR {
         } else if let d = diff, d >= 0, isUsage(d), let c = r.currentIndex, let p = r.previousIndex {
             hints.append(indexOnlyText(current: c, previous: p, diff: d))
         }
+        // [harden-5] 看不出是哪一種帳單：水費、瓦斯費一期超過 300 度 → 不填度數、只提示（多半是拿電費單在水費那期讀）
+        if photoType == nil, type != .electricity, let u = r.usage, u > unknownTypeMaxUsage {
+            r.usage = nil
+            hints.append(unknownTypeUsageText(u, type: type))
+        }
 
         // 應繳金額
         let amounts: [Double] = distinctNumbers(cands, .amount, isAmount)
@@ -1029,6 +1326,8 @@ enum UtilityBillOCR {
             hints.append(periodConflict)
         }
         r.hints = hints
+        // [harden-5] 看不出是哪一種帳單、又讀到度數或期間（或有提示）→ 灰字多一句請確認類型（只有金額的收據不加，照舊說沒找到）
+        if photoType == nil && (r.hasUsageOrPeriod || !hints.isEmpty) { r.typeNote = unknownTypeText(type) }
         return r
     }
 
@@ -1088,6 +1387,7 @@ enum UtilityBillOCR {
             lines.append(sameAsFilled)
         }
         lines += r.hints
+        if let n = r.typeNote { lines.append(n) }
         f.message = lines.isEmpty ? nil : lines.joined(separator: "\n")
         return f
     }
@@ -1125,6 +1425,15 @@ enum UtilityBillOCR {
 
     static func mismatchText(photo: UtilityType, chosen: UtilityType) -> String {
         "這張看起來是\(photo.rawValue)帳單，這一期選的是\(chosen.rawValue)；類型改對再讀一次"
+    }
+
+    /// [harden-5]「照片上看不出是電費、水費還是瓦斯費，請確認上面選的是水費」
+    static func unknownTypeText(_ t: UtilityType) -> String {
+        unknownTypePrefix + t.rawValue
+    }
+
+    static func unknownTypeUsageText(_ u: Double, type t: UtilityType) -> String {
+        "照片上的度數（\(UtilityMath.usageNumber(u))）比\(t.rawValue)一期常見的多，度數請看帳單自己填"
     }
 
     static func indexMismatchText(usage: Double, current: Double, previous: Double, diff: Double) -> String {
