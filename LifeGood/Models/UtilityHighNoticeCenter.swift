@@ -83,10 +83,12 @@ final class UtilityHighNoticeCenter {
             await saved(estateId: estateId, paymentId: paymentId, type: type, center: center)
         case .deleted(let estateId, let paymentId):
             let pending: [String] = await Self.pendingIds(center)
+            // [審查補 logic-2] 刪的是舊期（例如去年同期那期）：最新那期可能就不偏高了，在等的那則也拿掉
+            let extra: [String] = Self.noLongerHigh(estateId: estateId, pending: pending)
             let plan: UtilityHighNoticePlan = UtilityHighNotice.plan(.gone, estateId: estateId, paymentId: paymentId,
                                                                      type: nil, shownName: nil, enabled: false,
                                                                      now: Date(), cal: Calendar.current,
-                                                                     pending: pending, log: Self.loadLog())
+                                                                     pending: pending, log: Self.loadLog(), also: extra)
             await apply(plan, center: center)
         case .enabledChanged:
             guard !UtilityHighNotice.isEnabled else { return }
@@ -127,8 +129,10 @@ final class UtilityHighNoticeCenter {
             await apply(quiet, center: center)
             return
         }
+        let pending: [String] = await Self.pendingIds(center)
         var verdict: UtilityHighVerdict = .gone
         var rawName: String? = nil
+        var extra: [String] = []
         if let re = AppStores.finance.realEstates.first(where: { $0.id == estateId }) {
             rawName = re.name
             let card: HouseCardData = HouseCardData.build(re, expense: AppStores.expense,
@@ -136,14 +140,16 @@ final class UtilityHighNoticeCenter {
             if let src = card.utilities.trendSource {
                 verdict = UtilityHighNotice.verdict(rows: src.rows.rows, paymentId: paymentId, asOf: src.asOf,
                                                     isSold: src.isSold, cal: Calendar.current)
+                // [審查補 logic-2] 改的是舊期（標估計、改去年同期那期、換種類）：別期在等、現在不偏高的那則也拿掉
+                extra = UtilityHighNotice.noLongerHigh(rows: src.rows.rows, estateId: estateId, pending: pending,
+                                                       asOf: src.asOf, isSold: src.isSold, cal: Calendar.current)
             }
         }
         let shown: String? = UtilityHighNotice.shownName(rawName, hide: UtilityHighNotice.hidesName)
-        let pending: [String] = await Self.pendingIds(center)
         let plan: UtilityHighNoticePlan = UtilityHighNotice.plan(verdict, estateId: estateId, paymentId: paymentId,
                                                                  type: type, shownName: shown, enabled: true,
                                                                  now: Date(), cal: Calendar.current,
-                                                                 pending: pending, log: Self.loadLog())
+                                                                 pending: pending, log: Self.loadLog(), also: extra)
         await apply(plan, center: center)
     }
 
@@ -219,6 +225,19 @@ final class UtilityHighNoticeCenter {
             }
         }
         removeAndForget(drop, center: center)
+    }
+
+    /// [審查補 logic-2] 刪了一期之後：這間房子還有在等的水電通知才算（跟房子詳情同一支 HouseCardData.build）；
+    /// 那一期現在不偏高了（或房子不在了）→ 要拿掉的那幾則
+    @MainActor
+    private static func noLongerHigh(estateId: UUID, pending: [String]) -> [String] {
+        let mine: [String] = pending.filter { $0.hasPrefix(UtilityHighNotice.estatePrefix(estateId)) }
+        guard !mine.isEmpty else { return [] }
+        guard let re = AppStores.finance.realEstates.first(where: { $0.id == estateId }) else { return mine }
+        let card: HouseCardData = HouseCardData.build(re, expense: AppStores.expense, vehicles: AppStores.finance.vehicles)
+        guard let src = card.utilities.trendSource else { return [] }
+        return UtilityHighNotice.noLongerHigh(rows: src.rows.rows, estateId: estateId, pending: mine,
+                                              asOf: src.asOf, isSold: src.isSold, cal: Calendar.current)
     }
 
     // MARK: 小工具

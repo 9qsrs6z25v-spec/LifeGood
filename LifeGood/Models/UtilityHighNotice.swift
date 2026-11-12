@@ -240,6 +240,21 @@ enum UtilityHighNotice {
         return .high(vsLastYear: baselineIsLastYear(row, history: history, cal: cal))
     }
 
+    /// [審查補 logic-2] 存了／刪了一期之後：這間房子還在等的水電通知，那一期現在 v4 已經不判斷偏高了
+    /// （舊期改了度數、標了估計、去年同期那期改了或刪了、換了種類、不是最新的了…）→ 這幾則要拿掉。只拿掉、不排
+    static func noLongerHigh(rows: [UtilityRow], estateId: UUID, pending: [String], asOf: Date, isSold: Bool,
+                             cal: Calendar) -> [String] {
+        var out: [String] = []
+        for id in pending {
+            guard let p = parse(id), p.estateId == estateId else { continue }
+            let sameType: Bool = rows.last(where: { $0.paymentId == p.paymentId })?.type == p.type
+            let v: UtilityHighVerdict = verdict(rows: rows, paymentId: p.paymentId, asOf: asOf, isSold: isSold, cal: cal)
+            if sameType, case .high = v { continue }
+            out.append(id)
+        }
+        return out
+    }
+
     /// 偏高那期的基準是不是去年同期（跟 highAlerts／judge 同一張表、同一個週期、同一個 baseline；只拿來選字）
     static func baselineIsLastYear(_ row: UtilityRow, history: [UtilityRow], cal: Calendar) -> Bool {
         guard let m = row.meterId else { return false }
@@ -320,13 +335,14 @@ enum UtilityHighNotice {
     /// - 這一期自己的（不管哪一種：換了類型的舊那則也算）一律先拿掉
     /// - 最新的一期、不偏高：這間這一種還在等的（舊期的）也拿掉
     /// - 最新的一期、偏高、開著、30 天內沒送過：這間這一種還在等的換成這一則（同一期重存＝取代）
+    /// - [審查補 logic-2] also＝noLongerHigh 的結果（別期在等、但現在已經不偏高的）一起拿掉
     static func plan(_ v: UtilityHighVerdict, estateId: UUID, paymentId: UUID, type t: UtilityType?,
                      shownName: String?, enabled: Bool, now: Date, cal: Calendar,
-                     pending: [String], log given: UtilityHighNoticeLog) -> UtilityHighNoticePlan {
+                     pending: [String], log given: UtilityHighNoticeLog, also: [String] = []) -> UtilityHighNoticePlan {
         let log: UtilityHighNoticeLog = settled(given, now: now, pending: pending, cal: cal)
         let ePrefix: String = estatePrefix(estateId)
         let tail: String = "." + paymentId.uuidString
-        var remove: [String] = pending.filter { $0.hasPrefix(ePrefix) && $0.hasSuffix(tail) }
+        var remove: [String] = pending.filter { $0.hasPrefix(ePrefix) && $0.hasSuffix(tail) } + also
         var add: UtilityHighNoticeJob? = nil
         var addGroup: String? = nil
         if let t {
