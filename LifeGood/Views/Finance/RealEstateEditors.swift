@@ -649,6 +649,8 @@ struct UtilityPaymentEditor: View {
             dismiss()
             DispatchQueue.main.async {
                 UtilityReadingStore.shared.recordSave(paymentId: pid, estateId: eid, type: t, opened: openedDraft, edited: editedDraft)
+                // [v25.625 水電 v6] 度數寫完才判斷「這期用得比較多」要不要通知（只看最新的一期；字、時間全在 UtilityHighNotice）
+                UtilityHighNoticeCenter.shared.afterSave(estateId: eid, paymentId: pid, type: t)
             }
             return
         }
@@ -735,6 +737,8 @@ struct UtilityPaymentEditor: View {
             UtilityReadingStore.shared.recordSave(paymentId: recordId, estateId: readingEstateId, type: readingType,
                                                   opened: openedDraft, edited: editedDraft)
             financeStore.update(estate)
+            // [v25.625 水電 v6] 房子、度數都寫完才判斷要不要通知（換了類型時舊那則一起拿掉）
+            UtilityHighNoticeCenter.shared.afterSave(estateId: readingEstateId, paymentId: recordId, type: readingType)
         }
     }
 
@@ -751,8 +755,14 @@ struct UtilityPaymentEditor: View {
         }
         estate.utilityPayments.removeAll { $0.id == e.id }
         let financeStore = store
+        let deletedEstateId = estate.id
+        let deletedId = e.id
         dismiss()
-        DispatchQueue.main.async { financeStore.update(estate) }
+        DispatchQueue.main.async {
+            financeStore.update(estate)
+            // [v25.625 水電 v6] 這一期還在等的那則水電通知拿掉
+            UtilityHighNoticeCenter.shared.afterDelete(estateId: deletedEstateId, paymentId: deletedId)
+        }
     }
 
     /// [v25.530] 同步銀行扣款紀錄：先把所有帳戶裡連到 ids 的舊紀錄清掉（換了扣款帳戶時，舊帳戶那筆

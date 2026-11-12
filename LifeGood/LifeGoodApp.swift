@@ -95,6 +95,13 @@ extension AppDelegate: UNUserNotificationCenterDelegate {
             Task { @MainActor in
                 OrgMoveNoticeRouter.shared.open(raw)
             }
+        } else if let raw = info[UtilityHighNotice.estateInfoKey] as? String,
+                  let id = UUID(uuidString: raw) {
+            // [v25.625 水電 v6] 「水電用得比較多」→ 理財 › 房地產，打開那一間（找不到就停在房地產）。
+            // 跟小工具「接下來要繳」點房貸同一個總入口；不開水電趨勢那一頁（要大改路由，不做）
+            Task { @MainActor in
+                _ = WidgetLink.apply(WidgetLink.url(for: .financeHouse(id: id), fromWidget: false), store: AppStores.life)
+            }
         }
         completionHandler()
     }
@@ -269,6 +276,8 @@ struct LifeGoodApp: App {
                         WidgetSnapshotWriter.shared.writeNow()
                         // [財富 v4] 財富提醒跟著今天往前走（過了截止日、標成已繳、換了月）重排；要排的跟上次一樣就不動通知中心
                         WealthReminderCenter.shared.rebuildSoon()
+                        // [v25.625 水電 v6] 待發的水電通知：那一期在別台刪了、換了種類、房子刪了或賣了就拿掉（不排新的）
+                        UtilityHighNoticeCenter.shared.appBecameActive()
                         Task {
                             await subscription.refreshStatus()
                             // [手錶 v7a] 回前景：訂閱、AI 設定可能改了，手錶包的「說一句能不能用」跟著對；

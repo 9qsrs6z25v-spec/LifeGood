@@ -1365,6 +1365,8 @@ struct SettingsView: View {
                 transferReminderToggle
                 // [v25.596 轉組織 v3] 交接提醒（只這台；家人那支預設關）
                 orgMoveNoticeToggle
+                // [v25.625 水電 v6] 水電用得比較多時通知我＋通知裡不要出現房子名稱（只這台；拆成 struct，body 裡只放一個名字）
+                UtilityNoticeSettingsRows()
             }
         } header: {
             Text("會議提醒")
