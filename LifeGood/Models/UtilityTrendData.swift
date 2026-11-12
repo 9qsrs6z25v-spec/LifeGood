@@ -2261,6 +2261,8 @@ extension UtilityTrendBuild {
     /// 差很多：≥ 1.6 倍或 ≤ 0.5 倍
     static let outlierHigh: Double = 1.6
     static let outlierLow: Double = 0.5
+    /// 門檻都是「≥」：浮點誤差（18/60−12/60＝0.0999…98）不能讓剛好落在門檻上的期判成沒過
+    static let judgeEpsilon: Double = 1e-9
     /// 天數不到 20 天的期不判斷、不當基準
     static let minJudgeDays = 20
     /// 最近幾期同季節：往前最多看 12 期、取 3–6 期
@@ -2375,11 +2377,11 @@ extension UtilityTrendBuild {
         guard idx >= 0, idx < rows.count else { return nil }
         let ly: Int? = lastYearIndex(at: idx, in: rows, cycle: cycle, cal: cal)
         if let cur = facts.perDay[idx], let b = baseline(at: idx, lastYear: ly, values: facts.perDay, facts: facts),
-           let r = UtilityMath.ratio(cur, b.value), r >= outlierHigh || r <= outlierLow {
+           let r = UtilityMath.ratio(cur, b.value), r >= outlierHigh - judgeEpsilon || r <= outlierLow + judgeEpsilon {
             return UtilityBillOutlier(perDay: true, ratio: r, vsLastYear: b.lastYear)
         }
         if let cur = facts.amount[idx], let b = baseline(at: idx, lastYear: ly, values: facts.amount, facts: facts),
-           let r = UtilityMath.ratio(cur, b.value), r >= outlierHigh || r <= outlierLow {
+           let r = UtilityMath.ratio(cur, b.value), r >= outlierHigh - judgeEpsilon || r <= outlierLow + judgeEpsilon {
             return UtilityBillOutlier(perDay: false, ratio: r, vsLastYear: b.lastYear)
         }
         return nil
@@ -2404,7 +2406,7 @@ extension UtilityTrendBuild {
                 streak = 0
                 continue
             }
-            let high: Bool = cur >= b.value * highRatio && cur - b.value >= highMargin(t)
+            let high: Bool = cur >= b.value * highRatio - judgeEpsilon && cur - b.value >= highMargin(t) - judgeEpsilon
             streak = high ? streak + 1 : 0
             var home = 0
             if high && t == .electricity, let p = r.reading?.period {

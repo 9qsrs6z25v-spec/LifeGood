@@ -236,16 +236,21 @@ extension UtilityReadingBook {
     /// - 其他 → 寫整筆（base＝現在的類型、updatedAt＝now）；原本的 extra 留著，指數、標記只在 base 對得上時留著
     func saving(paymentId: UUID, estateId: UUID, type: UtilityType, opened: UtilityReadingDraft,
                 edited: UtilityReadingDraft, now: Date) -> UtilityReadingBook? {
-        guard edited != opened else { return nil }
         let raw: UtilityReading? = rawReading(paymentId)
-        // 原本那筆是別的類型的度數或期間（舊 iPad 改過類型、藏著）、打開時沒看到、這次也沒填度數 → 不寫
-        // （不然只帶了上一期推出來的期間，就把藏著的度數洗掉，改回原本的類型也回不來）
+        let sameBase: Bool = raw?.base == type.rawValue
+        // [v25.623 審查] 表單裡換過類型（opened 是舊類型那份、base 對不上）又選了跟舊的一樣的標記：
+        // edited == opened 不代表沒改，照畫面上選的寫（不然只有金額／期間的期，選的標記存不進去）
+        let retyped: Bool = raw != nil && !sameBase && !opened.isEmpty && edited.billKind != nil
+            && raw?.billKind == opened.billKind
+        guard edited != opened || retyped else { return nil }
+        // 原本那筆是別的類型的度數、期間、指數或標記（舊 iPad 改過類型、藏著）、打開時沒看到、這次也沒填度數 → 不寫
+        // （不然只帶了上一期推出來的期間，就把藏著的度數、標記洗掉，改回原本的類型也回不來）
         if let o = raw, let b = o.base, b != type.rawValue, opened.isEmpty, edited.usage == nil,
-           o.usage != nil || o.periodStart != nil || o.periodEnd != nil {
+           o.usage != nil || o.periodStart != nil || o.periodEnd != nil || o.meterReading != nil
+            || !(o.billKind ?? "").isEmpty {
             return nil
         }
         var r: UtilityReading = raw ?? UtilityReading(id: paymentId)
-        let sameBase: Bool = raw?.base == type.rawValue
         if !sameBase {
             r.meterReading = nil
             r.billKind = nil
