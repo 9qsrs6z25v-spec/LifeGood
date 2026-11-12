@@ -483,12 +483,22 @@ struct AddExpenseView: View {
         if let go = onSwitchToOneTime, !isEditing, isFixedTax {
             Section {
                 Button {
+                    discardUnsavedPhotosBeforeSwitch()
                     DispatchQueue.main.async { go() }
                 } label: {
                     Label(oneTimeSwitchText, systemImage: "arrow.uturn.right")
                 }
             }
         }
+    }
+
+    /// [v25.626] 〔只繳這一次〕會把整張表單換成另一張（不走〔取消〕）：固定支出現在也有照片區，
+    /// 先拍了地價稅單再按〔只繳這一次〕，這次新拍、還沒存的檔要先刪掉，不然沒有紀錄指著它、還會被備份上去（同 cancelAddExpense 的規則）
+    private func discardUnsavedPhotosBeforeSwitch() {
+        let kept: Set<String> = Set(editingExpense?.photoFileNames ?? [])
+        let unsaved: [String] = photoFileNames.filter { !kept.contains($0) }
+        unsaved.forEach { Expense.deletePhoto($0) }
+        photoFileNames = photoFileNames.filter { kept.contains($0) }
     }
 
     /// 重複提示選了（shift：從下一年開始）：記下來、再存一次（這次不會再問）
@@ -835,8 +845,8 @@ struct AddExpenseView: View {
                     }
                     // [v25.424] 旅遊期間的花費可以直接掛到那一趟行程上
                     if showTripLinkSection { AnyView(tripLinkSection) }
-                    // 進階模式：分類區塊下方加照片廊
-                    if advancedMode || isVehicleFine {
+                    // 照片區：進階模式、稅費／規費／罰款、已經有照片（[v25.626] 條件在 showPhotoSection）
+                    if showPhotoSection {
                         AnyView(photoGallerySection)
                     }
                 } else {
@@ -848,6 +858,10 @@ struct AddExpenseView: View {
                         if effectiveFixedAssetLink == .insurance { AnyView(fixedInsuranceLinkSection) }
                     }
                     AnyView(categorySection)
+                    // [v25.626] 固定支出一律有照片區（地價稅單、繳款收據）：放在類別（含稅費細項、週期）後面
+                    if showPhotoSection {
+                        AnyView(photoGallerySection)
+                    }
                 }
 
                 // 固定支出：保險/貸款子分類
@@ -1345,11 +1359,46 @@ struct AddExpenseView: View {
         Self.fmtCurrencyFormatter.string(from: NSNumber(value: v)) ?? "NT$0"
     }
 
+    // MARK: - [v25.626] 照片區什麼時候出現、footer 寫什麼（radar/judge_taxphoto.md §C1、§C3）
+
+    /// 固定支出（任何類別，例如「稅費・地價稅」每年）的 footer
+    private static let photoFooterFixed: String = "可拍照、從相簿一次選多張，或從檔案選 PDF（例如地價稅單、繳款收據），會跟著這筆存起來；存好後在固定支出那一筆的詳情可以看、可以匯出。"
+    /// 變動支出的稅費／規費／罰款（一般「稅費」、房子「稅費」、車子稅費細項與罰款）的 footer
+    private static let photoFooterSlip: String = "可拍照、從相簿一次選多張，或從檔案選 PDF（例如稅單、罰單、繳款收據），會跟著這筆存起來；存好後再點開這一筆就看得到。"
+    /// 其他變動支出（進階模式）的 footer：25.625 以前的原句，一字不改
+    private static let photoFooterDefault: String = "可拍照、從相簿一次選多張，或從檔案選 PDF 帳單原檔，會跟著本筆支出儲存。儲存後會在美食地圖等頁面顯示。"
+
+    /// 變動支出選了「有單子要留」的：一般「稅費」分類、連房子的「稅費」、連車子的稅費細項或罰款（chosenVehicleKind）
+    private var variableHasSlip: Bool {
+        guard expenseType == .variable else { return false }
+        if selectedVariableCategory == .tax { return true }
+        if chosenVehicleKind != nil { return true }
+        return selectedAssetLink == .realEstate && selectedRealEstateExpenseCategory == .tax
+    }
+
+    /// 照片區要不要出現：固定支出一律有；變動支出進階模式、罰款（25.616）、稅費／規費；
+    /// 已經有照片的也一直顯示（換分類或關掉進階模式，照片不會變成看不到卻還存著）
+    private var showPhotoSection: Bool {
+        if expenseType == .fixed { return true }
+        if advancedMode || isVehicleFine { return true }
+        if variableHasSlip { return true }
+        return !photoFileNames.isEmpty
+    }
+
+    /// 照片區 footer：固定支出、變動的稅費／規費／罰款、其他照舊
+    private var photoFooterText: String {
+        if expenseType == .fixed { return Self.photoFooterFixed }
+        if variableHasSlip { return Self.photoFooterSlip }
+        return Self.photoFooterDefault
+    }
+
     // MARK: - 多張照片 Section
 
-    /// 在進階模式分類下方顯示照片廊：拍照 / 相簿多選 / 看大圖 / 刪除
+    /// 照片廊（出現條件 showPhotoSection）：拍照 / 相簿多選 / 看大圖 / 刪除
     private var photoGallerySection: some View {
         let expenseId = editingExpense?.id ?? generatedNewExpenseId
+        // [v25.626] 打開時就有的照片：表單裡移除只拿掉、不刪檔（按取消時那筆還指著它）；這次新加的才立刻刪
+        let keptPhotoNames: Set<String> = Set(editingExpense?.photoFileNames ?? [])
         return Section {
             MultiPhotoGallery(
                 fileNames: $photoFileNames,
@@ -1358,7 +1407,9 @@ struct AddExpenseView: View {
                     Expense.savePhoto(data, expenseId: expenseId, photoId: UUID())
                 },
                 onDeleteFile: { name in
-                    Expense.deletePhoto(name)
+                    if !keptPhotoNames.contains(name) {
+                        Expense.deletePhoto(name)
+                    }
                 },
                 onSavePDF: { data in
                     Expense.savePDF(data, expenseId: expenseId)
@@ -1369,7 +1420,7 @@ struct AddExpenseView: View {
         } header: {
             Text("照片")
         } footer: {
-            Text("可拍照、從相簿一次選多張，或從檔案選 PDF 帳單原檔，會跟著本筆支出儲存。儲存後會在美食地圖等頁面顯示。")
+            Text(photoFooterText)
         }
     }
 
@@ -4256,6 +4307,13 @@ struct AddExpenseView: View {
         // [v25.564] 新增的變動支出：記住這次的付款方式（下次新增帶入）
         if expenseType == .variable && !isEditing { rememberPayment() }
         if isEditing { store.update(expense) } else { store.add(expense) }
+        // [v25.626] 表單裡移除的「打開時就有」的照片：照片區只拿掉不刪檔（取消時那筆還指著它），存好了才刪，不留孤兒檔
+        if let before = editingExpense {
+            let keptNames = Set(expense.photoFileNames)
+            for name in before.photoFileNames where !keptNames.contains(name) {
+                Expense.deletePhoto(name)
+            }
+        }
         // [v25.615] 細項存在另一個鍵（ExpenseKinds.swift；Expense 一個欄位都沒加）：先 dismiss，下一個 runloop 才寫。
         // 每一次存檔都叫（沒選細項時它自己判斷要不要寫墓碑）
         let kindSaved = expense
