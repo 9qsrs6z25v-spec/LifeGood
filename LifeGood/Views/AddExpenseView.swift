@@ -264,6 +264,9 @@ struct AddExpenseView: View {
 
     // MARK: - 多張照片
     @State private var photoFileNames: [String] = []
+    /// [v25.626] 打開編輯時那一筆的照片（loadEditing 記一次）：表單開著時 editingExpense 可能跟著 store 換新（固定支出詳情 sheet 傳的是 current），
+    /// 「移除只拿掉、存好才刪」一律照這份，不會刪到表單裡從沒出現過的照片
+    @State private var loadedPhotoNames: [String] = []
 
     // MARK: - 旅遊關聯（[v25.424] 變動支出）
     @State private var linkedTripPlanId: UUID?
@@ -1398,7 +1401,7 @@ struct AddExpenseView: View {
     private var photoGallerySection: some View {
         let expenseId = editingExpense?.id ?? generatedNewExpenseId
         // [v25.626] 打開時就有的照片：表單裡移除只拿掉、不刪檔（按取消時那筆還指著它）；這次新加的才立刻刪
-        let keptPhotoNames: Set<String> = Set(editingExpense?.photoFileNames ?? [])
+        let keptPhotoNames: Set<String> = Set(loadedPhotoNames)
         return Section {
             MultiPhotoGallery(
                 fileNames: $photoFileNames,
@@ -4307,10 +4310,11 @@ struct AddExpenseView: View {
         // [v25.564] 新增的變動支出：記住這次的付款方式（下次新增帶入）
         if expenseType == .variable && !isEditing { rememberPayment() }
         if isEditing { store.update(expense) } else { store.add(expense) }
-        // [v25.626] 表單裡移除的「打開時就有」的照片：照片區只拿掉不刪檔（取消時那筆還指著它），存好了才刪，不留孤兒檔
-        if let before = editingExpense {
+        // [v25.626] 表單裡移除的「打開時就有」的照片：照片區只拿掉不刪檔（取消時那筆還指著它），存好了才刪，不留孤兒檔。
+        // 依據是打開時的 loadedPhotoNames，不是現在的 editingExpense（表單開著時別處加進那一筆的照片，表單裡沒有，不能當成被移除）
+        if editingExpense != nil {
             let keptNames = Set(expense.photoFileNames)
-            for name in before.photoFileNames where !keptNames.contains(name) {
+            for name in loadedPhotoNames where !keptNames.contains(name) {
                 Expense.deletePhoto(name)
             }
         }
@@ -4861,6 +4865,7 @@ struct AddExpenseView: View {
         if let lon = expense.placeLongitude { placeLongitude = lon }
         suppressNextCompleterUpdate = true
         photoFileNames = expense.photoFileNames
+        loadedPhotoNames = expense.photoFileNames
         selectedCurrencyCode = expense.currencyCode
         // 還原為原始幣別金額顯示：儲蓄險直接用 amount（未乘匯率），其他類型要除以匯率還原
         let editingIsSavingsIns = expense.fixedCategory == .insurance
