@@ -23,7 +23,8 @@ enum UtilityBillPhotoReader {
         return out
     }
 
-    /// 一張一張讀（從新到舊），第一張讀到東西的就停；都沒有 → 第一張有話要說的；什麼都沒有、或被取消 → nil
+    /// 一張一張讀（從新到舊），第一張讀到度數或期間的就停（[review flow-1] 只有金額的超商收據不停，繼續讀舊的帳單）；
+    /// 挑哪一張照 UtilityBillOCR.pick；什麼都沒有、或被取消 → nil
     static func read(urls: [URL], paidOn: Date, type: UtilityType) async -> UtilityBillReading? {
         var results: [UtilityBillReading] = []
         for url in urls {
@@ -33,7 +34,7 @@ enum UtilityBillPhotoReader {
             let lines: [String] = UtilityBillOCR.rows(from: boxes)
             let r: UtilityBillReading = UtilityBillOCR.parse(lines: lines, paidOn: paidOn, type: type)
             results.append(r)
-            if r.hasAnything { break }
+            if r.hasUsageOrPeriod { break }
         }
         return UtilityBillOCR.pick(results)
     }
@@ -63,12 +64,19 @@ enum UtilityBillPhotoReader {
             return []
         }
         let observations: [VNRecognizedTextObservation] = request.results ?? []
+        // [review parse-1] 橫的座標乘上寬高比（跟直的同一個單位），四個角才算得出真的斜度
+        let aspect: Double = image.height > 0 ? Double(image.width) / Double(image.height) : 1
         var out: [UtilityOCRBox] = []
         for o in observations {
             guard let text = o.topCandidates(1).first?.string else { continue }
             let b: CGRect = o.boundingBox
-            out.append(UtilityOCRBox(text: text, minX: Double(b.minX), minY: Double(b.minY),
-                                     maxX: Double(b.maxX), maxY: Double(b.maxY)))
+            let tl: CGPoint = o.topLeft
+            let tr: CGPoint = o.topRight
+            let bl: CGPoint = o.bottomLeft
+            out.append(UtilityOCRBox(text: text, minX: Double(b.minX) * aspect, minY: Double(b.minY),
+                                     maxX: Double(b.maxX) * aspect, maxY: Double(b.maxY),
+                                     dirX: Double(tr.x - tl.x) * aspect, dirY: Double(tr.y - tl.y),
+                                     upX: Double(tl.x - bl.x) * aspect, upY: Double(tl.y - bl.y)))
         }
         return out
     }
