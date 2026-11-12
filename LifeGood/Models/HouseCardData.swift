@@ -1146,20 +1146,23 @@ struct HouseCardData {
     /// 「照片與文件」的張數（D 畫）
     var media = HouseMediaData()
 
-    static func build(_ re: RealEstate, expense: ExpenseStore, now: Date = Date()) -> HouseCardData {
+    /// [v25.623] vehicles：車子的家充紀錄（水電偏高提示接「這期車子在家充了 6 次」；FinanceStore.vehicles，只讀）
+    static func build(_ re: RealEstate, expense: ExpenseStore, vehicles: [Vehicle], now: Date = Date()) -> HouseCardData {
         build(re, expenses: expense.expenses, ntd: { expense.ntdValue(of: $0) }, kinds: ExpenseKindStore.shared.index,
-              readings: UtilityReadingStore.shared.index, now: now)
+              readings: UtilityReadingStore.shared.index,
+              homeCharges: UtilityHomeCharges.make(vehicles: vehicles, expenses: expense.expenses), now: now)
     }
 
     /// [v25.615] kinds：記帳的細項（地價稅…；ExpenseKinds.swift）。純函式不給預設值，sim／preview 明寫 `.empty`
     /// [v25.622] readings：每一期水電的度數、計費期間（UtilityReadings.swift；只准問 value(for:)）。一樣必填，sim／preview 明寫 `.empty`
-    static func build(_ re: RealEstate, expenses: [Expense], ntd: (Expense) -> Double, kinds: ExpenseKindIndex, readings: UtilityReadingIndex, now: Date = Date(), calendar: Calendar = .current) -> HouseCardData {
+    /// [v25.623] homeCharges：家充紀錄（UtilityHomeCharges.make）。一樣必填，sim／preview 明寫 `.empty`
+    static func build(_ re: RealEstate, expenses: [Expense], ntd: (Expense) -> Double, kinds: ExpenseKindIndex, readings: UtilityReadingIndex, homeCharges: UtilityHomeCharges, now: Date = Date(), calendar: Calendar = .current) -> HouseCardData {
         let facts = HouseFacts.build(re, expenses: expenses, now: now, calendar: calendar)
         let c = HouseBuildContext.make(re, facts: facts, expenses: expenses, ntd: ntd, kinds: kinds, readings: readings, now: now, calendar: calendar)
         let trimmed = re.name.trimmingCharacters(in: .whitespacesAndNewlines)
         let name = trimmed.isEmpty ? "未命名房屋" : trimmed
         let ledger = HouseLedger.build(c)
-        let rows = utilityRows(c, ledger: ledger)
+        let rows = utilityRows(c, ledger: ledger, homeCharges: homeCharges)
         let checks = HouseCheck.build(c, ledger: ledger)
         let scene = sceneModel(c, name: name)
 
@@ -2246,9 +2249,15 @@ extension HouseCardData {
 
     /// [v25.620] 水電列（judge C7）：帳本裡 mark == .utility 的非年列，build 算一次，給水電區、每個月住這裡、小圖。
     /// 本體在 UtilityTrendData.swift（HouseBuildContext 是 private，那邊吃公開的輸入），擁有權規則只有 HouseLedger.build 一份
-    fileprivate static func utilityRows(_ c: HouseBuildContext, ledger: HouseLedger) -> UtilityRowSet {
-        UtilityRows.build(estate: c.re, events: ledger.events, expensesById: c.byId,
-                          slots: UtilityMeterSlotIndex(c.re.utilityMeterSlots()), readings: c.readings)
+    fileprivate static func utilityRows(_ c: HouseBuildContext, ledger: HouseLedger,
+                                        homeCharges: UtilityHomeCharges) -> UtilityRowSet {
+        var set: UtilityRowSet = UtilityRows.build(estate: c.re, events: ledger.events, expensesById: c.byId,
+                                                   slots: UtilityMeterSlotIndex(c.re.utilityMeterSlots()), readings: c.readings)
+        // [v25.623] 家充只接在自己住的房子（出租、賣掉的不接「這期車子在家充了 6 次」）
+        if !c.re.isSold && !(c.re.monthlyRental > 0) {
+            set.homeCharges = homeCharges
+        }
+        return set
     }
 
     /// [v25.621] 全頁「水電趨勢」的來源：rows（同一批）＋固定支出 S5、M1、賣出後那幾期（本體在 UtilityTrendData.swift）

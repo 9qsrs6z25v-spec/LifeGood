@@ -9,6 +9,9 @@ import Foundation
 //   開 App、背景、同步、畫面算資料時一律不寫（commit 只在這幾條路裡清墓碑）。
 // - 日期只存「2026-07-13」（UtilityDay；H2：在哪個時區打開都是那一天），不存 Date。
 // - 這個檔只進 App target（不進小工具、手錶）；字只在房子詳情、水電趨勢、繳費表單出現。
+// - [v25.623] 帳單標記（billKind，v3 就有的欄位、CSV 也有）有畫面了：繳費表單「這期差很多，是補繳或估計的嗎？」
+//   〔一般〕〔估計抄表〕〔含補繳〕〔有扣減〕。寫入一樣只走 recordSave → saving：只有這次真的改了才寫，
+//   沒改就照原本那筆（舊版、別台寫的不洗掉）。UtilityReading 沒有加欄位、沒有新同步鍵。
 
 // MARK: - 日期 key（只准用這一組）
 
@@ -124,15 +127,17 @@ extension UtilityReading {
 
 // MARK: - 表單填的那兩欄（打開時一份、存檔時一份；一樣就不寫）
 
-/// 度數＋計費期間（期間是日期 key）。三個都 nil＝空的
+/// 度數＋計費期間（期間是日期 key）＋[v25.623] 帳單標記。四個都 nil＝空的
 struct UtilityReadingDraft: Equatable {
     var usage: Double?
     var startKey: String?
     var endKey: String?
+    /// [v25.623] 帳單標記（nil＝一般；「估計」「補繳」「扣減」）。saving 只在 edited 跟 opened 不一樣時才寫
+    var billKind: String? = nil
 
     static let empty = UtilityReadingDraft(usage: nil, startKey: nil, endKey: nil)
 
-    var isEmpty: Bool { usage == nil && startKey == nil && endKey == nil }
+    var isEmpty: Bool { usage == nil && startKey == nil && endKey == nil && billKind == nil }
 }
 
 // MARK: - 合併、清墓碑、寫（純函式；UtilityReadingStore 只叫這些）
@@ -245,6 +250,11 @@ extension UtilityReadingBook {
             r.meterReading = nil
             r.billKind = nil
         }
+        // [v25.623] 帳單標記：這次真的改了才寫（沒改 → 原本那筆的照舊；別台、別版寫的、不認得的字都不洗掉）。
+        // 類型對不上（表單裡換了類型）→ 上面已清掉，照畫面上選的寫（opened 是舊類型那份，不能拿來比「沒改」）
+        if edited.billKind != opened.billKind || !sameBase {
+            r.billKind = edited.billKind
+        }
         r.estateId = estateId
         r.base = type.rawValue
         r.usage = edited.usage
@@ -296,9 +306,9 @@ struct UtilityReadingValue: Equatable {
     let meterReading: Double?
     let billKind: String?
 
-    /// 表單打開時的那一份
+    /// 表單打開時的那一份（[v25.623] 帶帳單標記）
     var draft: UtilityReadingDraft {
-        UtilityReadingDraft(usage: usage, startKey: period?.startKey, endKey: period?.endKey)
+        UtilityReadingDraft(usage: usage, startKey: period?.startKey, endKey: period?.endKey, billKind: billKind)
     }
 }
 
@@ -472,6 +482,7 @@ enum UtilityUsageForm {
     }
 
     /// 存檔時那兩欄的值；nil＝有紅字（擋存檔）。區塊沒打開過 → 原封不動回 opened（不會把預設的期間偷偷存進去）
+    /// [v25.623] 帳單標記照 opened 帶著走（表單再用畫面上選的蓋過去）：漏蓋也只是「沒改」，不會把標記洗掉
     static func edited(open: Bool, usageText: String, hasPeriod: Bool, start: Date, end: Date,
                        opened: UtilityReadingDraft) -> UtilityReadingDraft? {
         guard open else { return opened }
@@ -484,7 +495,7 @@ enum UtilityUsageForm {
         guard periodMessage(hasPeriod: hasPeriod, start: start, end: end) == nil else { return nil }
         let startKey: String? = hasPeriod ? UtilityDay.key(start) : nil
         let endKey: String? = hasPeriod ? UtilityDay.key(end) : nil
-        return UtilityReadingDraft(usage: usage, startKey: startKey, endKey: endKey)
+        return UtilityReadingDraft(usage: usage, startKey: startKey, endKey: endKey, billKind: opened.billKind)
     }
 
     /// 度數帶回輸入框：「702」「28.5」（最多 2 位小數、去掉多餘的 0）
@@ -530,6 +541,123 @@ enum UtilityUsageForm {
         case .gas:
             return "帳單上『使用度數』和『計費期間』，1 度＝1 立方公尺。不填也沒關係，圖會用金額畫。"
         }
+    }
+}
+
+// MARK: - [v25.623] 帳單標記（繳費表單「這期差很多，是補繳或估計的嗎？」；judge_utility C19 v4）
+
+/// UtilityReading.billKind 存的字（nil＝一般）。字串、不是 enum：不認得的字原樣留著、照樣算「有標記」
+enum UtilityBillKind {
+    static let estimated = "估計"
+    static let catchUp = "補繳"
+    static let deducted = "扣減"
+
+    /// 一顆選項：stored＝存進去的字（nil＝一般）、title＝畫面上的字
+    struct Choice: Identifiable, Equatable {
+        let stored: String?
+        let title: String
+        /// 用存的字當 id（一般＝""，存的字不會是空的）：別版寫了跟畫面字一樣的「估計抄表」也不會跟內建那顆撞 id
+        var id: String { stored ?? "" }
+    }
+
+    /// 〔一般〕〔估計抄表〕〔含補繳〕〔有扣減〕
+    static let choices: [Choice] = [
+        Choice(stored: nil, title: "一般"),
+        Choice(stored: estimated, title: "估計抄表"),
+        Choice(stored: catchUp, title: "含補繳"),
+        Choice(stored: deducted, title: "有扣減"),
+    ]
+
+    /// 表單用的選項：現在的字不認得（別版寫的）就多一顆它自己，Picker 才選得到、不會被換掉
+    static func pickerChoices(current: String?) -> [Choice] {
+        guard let c = current, !choices.contains(where: { $0.stored == c }) else { return choices }
+        return choices + [Choice(stored: c, title: c)]
+    }
+
+    /// 畫面上的名字：「估計抄表」「含補繳」「有扣減」；不認得的原樣
+    static func title(_ k: String) -> String {
+        choices.first(where: { $0.stored == k })?.title ?? k
+    }
+}
+
+/// 表單判斷「這期差很多」要的同一個表的其他期（打開、換類型、換表時算一次；打字不重算）
+struct UtilityBillContext: Equatable {
+    let type: UtilityType
+    /// 同一個表、不含這一期、照繳費日排好（同一天照陣列順序）
+    let rows: [UtilityRow]
+    /// rows 每一期判斷要用的值（UtilityTrendBuild.judgeFacts；跟趨勢同一套）
+    let facts: UtilityJudgeFacts
+    /// 這個表的週期（繳費間隔中位數；去年同期、沒期間的期算夏月用）
+    let cycle: Int
+}
+
+extension UtilityUsageForm {
+    static let billQuestionOutlier = "這期差很多，是補繳或估計的嗎？"
+    static let billQuestionMarked = "這期的帳單"
+    /// 表單裡「這一期」那一列的 key（不會跟 UUID 字串撞）
+    static let editingKey = "editing"
+
+    /// 同一個表（UtilityMeterSlotIndex.meterOf）、同一種、不含這一期的其他期。這期沒指定是哪個表 → nil（不問）
+    static func billContext(estate: RealEstate, editingId: UUID?, type: UtilityType, meterId: String?,
+                            index: UtilityReadingIndex, cal: Calendar) -> UtilityBillContext? {
+        let slots = UtilityMeterSlotIndex(estate.utilityMeterSlots())
+        var probe = UtilityPayment(id: editingId ?? UUID(), type: type, date: Date())
+        probe.meterId = meterId
+        let mine: UtilityMeterAssignment = slots.meterOf(probe, type: type)
+        guard mine.assigned, let mid = mine.id else { return nil }
+        var list: [(row: UtilityRow, order: Int)] = []
+        for (i, p) in estate.utilityPayments.enumerated() where p.id != editingId && p.type == type {
+            let m: UtilityMeterAssignment = slots.meterOf(p, type: type)
+            guard m.assigned, m.id == mid else { continue }
+            let row = UtilityRow(key: p.id.uuidString, type: type, meterId: mid, meterAssigned: true, date: p.date,
+                                 amount: p.amount, paymentId: p.id, expenseId: p.linkedExpenseId, photoCount: 0,
+                                 fromExpenseOnly: false, reading: index.value(for: p))
+            list.append((row: row, order: i))
+        }
+        list.sort { (a: (row: UtilityRow, order: Int), b: (row: UtilityRow, order: Int)) -> Bool in
+            a.row.date != b.row.date ? a.row.date < b.row.date : a.order < b.order
+        }
+        let rows: [UtilityRow] = list.map { $0.row }
+        let cycle: Int = UtilityMath.cycleDays(rows.map(\.date), cal: cal)
+        let facts: UtilityJudgeFacts = UtilityTrendBuild.judgeFacts(rows, cycle: cycle, cal: cal)
+        return UtilityBillContext(type: type, rows: rows, facts: facts, cycle: cycle)
+    }
+
+    /// 帳單標記那一列的問句；nil＝不出現（不常駐）。這期差很多 →「這期差很多，是補繳或估計的嗎？」；
+    /// 不差很多但已經有標記（打開時就有、或剛選了）→「這期的帳單」（照樣顯示可改）
+    static func billQuestion(context: UtilityBillContext?, kind: String?, opened: String?, paidOn: Date,
+                             amountText: String, usageText: String, hasPeriod: Bool, start: Date, end: Date,
+                             cal: Calendar) -> String? {
+        if isBillOutlier(context: context, paidOn: paidOn, amountText: amountText, usageText: usageText,
+                         hasPeriod: hasPeriod, start: start, end: end, cal: cal) {
+            return billQuestionOutlier
+        }
+        return (kind != nil || opened != nil) ? billQuestionMarked : nil
+    }
+
+    /// 照畫面上正在打的金額、度數、期間：這期每天用量或金額是基準的 ≥ 1.6 倍或 ≤ 0.5 倍（UtilityTrendBuild.outlier，跟趨勢同一條）
+    static func isBillOutlier(context: UtilityBillContext?, paidOn: Date, amountText: String, usageText: String,
+                              hasPeriod: Bool, start: Date, end: Date, cal: Calendar) -> Bool {
+        guard let ctx = context, let amount = Double(amountText), amount.isFinite, amount > 0 else { return false }
+        var usage: Double? = nil
+        if case .value(let v) = parseUsage(usageText) { usage = v }
+        var period: UtilityReadingPeriod? = nil
+        if hasPeriod {
+            period = UtilityReadingIndex.validPeriod(start: UtilityDay.key(start), end: UtilityDay.key(end), paidOn: paidOn)
+        }
+        var reading: UtilityReadingValue? = nil
+        if usage != nil || period != nil {
+            reading = UtilityReadingValue(usage: usage, period: period, meterReading: nil, billKind: nil)
+        }
+        let me = UtilityRow(key: editingKey, type: ctx.type, meterId: nil, meterAssigned: true, date: paidOn,
+                            amount: amount, paymentId: nil, expenseId: nil, photoCount: 0, fromExpenseOnly: false,
+                            reading: reading)
+        // 只要這一期以前的（基準只看以前的期）：前面那幾期的值照打開時算好的，只多算這一期自己的
+        let at: Int = ctx.rows.firstIndex(where: { $0.date > paidOn }) ?? ctx.rows.count
+        let rows: [UtilityRow] = Array(ctx.rows.prefix(at)) + [me]
+        let mine: UtilityJudgeFacts = UtilityTrendBuild.judgeFacts([me], cycle: ctx.cycle, cal: cal)
+        let facts: UtilityJudgeFacts = ctx.facts.prefix(at).appending(mine)
+        return UtilityTrendBuild.outlier(at: at, in: rows, facts: facts, cycle: ctx.cycle, cal: cal) != nil
     }
 }
 

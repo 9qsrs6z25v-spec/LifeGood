@@ -9,6 +9,8 @@
 //    圖沿用 UtilityTrendChart（height 200）；這頁不寫任何 store；改一期用自己的 sheet(item:)＋.appStores()。
 //  - [v25.622] v3：選擇列多〔度數｜金額｜每度幾元〕（這一種有 2 期以上填了度數才有，自己一列）；明細多期間小字與灰字；
 //    列表多一格度數（沒填空白）。字與數字一樣全在 Data 算好（UtilityTrendScreen），這裡只畫。
+//  - [v25.623] v4：明細多一行「這期每天用 14.8 度，比去年同期多 4.3 度（+41%）。…」（UTAlertLine：偏高橘字、其他中性色）；
+//    夏月天數、帳單標記、「這期差很多…」都在 detail.notes（灰字）；空心點、夏月底在圖裡。這頁一樣不寫任何 store。
 //
 
 import SwiftUI
@@ -127,7 +129,7 @@ struct UtilityTrendView: View {
                             allRange: $picks.allRange, pickedKey: $pickedKey)
             }
             if let d = s.detail(for: pickedKey) {
-                UTDetailCard(detail: d, canEdit: subscription.isPremium, onOpen: open)
+                UTDetailCard(detail: d, canEdit: subscription.isPremium, pal: pal, onOpen: open)
             }
             if let st = s.stats {
                 UTStatsCard(stats: st)
@@ -317,6 +319,8 @@ fileprivate struct UTChartCard: View {
 fileprivate struct UTDetailCard: View {
     let detail: UtilityTrendDetail
     let canEdit: Bool
+    /// [v25.623] 偏高那句的橘色要用
+    let pal: TripBoardPalette
     let onOpen: (UUID) -> Void
 
     private var lockIcon: String { canEdit ? "square.and.pencil" : "lock.fill" }
@@ -349,6 +353,10 @@ fileprivate struct UTDetailCard: View {
             ForEach(d.facts) { f in
                 UTStatRow(line: f)
             }
+            // [v25.623] 每天用量跟基準比的那一句（偏高橘字、其他中性色）
+            if let a = d.alert {
+                UTAlertLine(alert: a, pal: pal)
+            }
             // [v25.622] 「沒填計費期間，算不出每天平均」「錢多得比用量多：…」（灰字、中性色）
             ForEach(d.notes, id: \.self) { n in
                 Text(n)
@@ -377,6 +385,23 @@ fileprivate struct UTDetailCard: View {
                 .font(.footnote)
                 .foregroundStyle(.secondary)
         }
+    }
+}
+
+/// [v25.623] 明細「這期每天用 14.8 度，比去年同期多 4.3 度（+41%）。…」：high＝橘字（MoneyTone.warn，唯一可以上色的比較），
+/// 其他（「每天比去年同期多 1.0 度（+10%）」）中性色
+fileprivate struct UTAlertLine: View {
+    let alert: UtilityUsageAlert
+    let pal: TripBoardPalette
+
+    private var color: Color { alert.high ? MoneyTone.warn.color(pal) : Color.secondary }
+    private var font: Font { alert.high ? Font.footnote.weight(.semibold) : Font.footnote }
+
+    var body: some View {
+        Text(alert.text)
+            .font(font)
+            .foregroundStyle(color)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
 

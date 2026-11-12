@@ -114,7 +114,7 @@ struct RealEstateDetailView: View {
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.6) { dismiss() }
             return
         }
-        card = HouseCardData.build(re, expense: expenseStore)
+        card = HouseCardData.build(re, expense: expenseStore, vehicles: store.vehicles)
         guard let anchor = startAnchor else { return }
         startAnchor = nil
         // 等各區真的畫出來再捲：只排到下一個 main.async 的話，可能比這次畫面更新還早跑，

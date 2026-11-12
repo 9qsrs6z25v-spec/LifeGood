@@ -1801,7 +1801,7 @@ private struct HCUtilityTrendBody: View {
         if let chart = panel.chart {
             chartStack(chart)
         } else {
-            HCUtilityTrendCaption(text: panel.pending ?? panel.defaultCaption, note: panel.pendingHint,
+            HCUtilityTrendCaption(text: panel.pending ?? panel.defaultCaption, note: panel.pendingHint, alert: nil,
                                   centered: false, pal: pal)
         }
     }
@@ -1813,7 +1813,7 @@ private struct HCUtilityTrendBody: View {
                 UtilityTrendLegend(rows: panel.legend, type: panel.type, pal: pal)
             }
             HCUtilityTrendCaption(text: panel.caption(for: pickedKey), note: panel.captionNote,
-                                  centered: true, pal: pal)
+                                  alert: panel.alert(for: pickedKey), centered: true, pal: pal)
         }
     }
 }
@@ -1889,9 +1889,11 @@ private struct HCUtilityKindChip: View {
 }
 
 /// 說明行：一律中性色（secondary），不用紅、不加箭頭；centered＝圖下面那行（照車子每度電價圖），不然靠左（只有 1 期）
+/// [v25.623] alert：判斷出「這期用得比較多」那一句（唯一可以用橘色 MoneyTone.warn 的比較；只在 App 裡、不發通知）
 private struct HCUtilityTrendCaption: View {
     let text: String
     let note: String?
+    let alert: String?
     let centered: Bool
     let pal: TripBoardPalette
 
@@ -1907,6 +1909,13 @@ private struct HCUtilityTrendCaption: View {
                 .foregroundStyle(.secondary)
                 .multilineTextAlignment(textAlign)
                 .fixedSize(horizontal: false, vertical: true)
+            if let alert {
+                Text(alert)
+                    .font(.caption)
+                    .foregroundStyle(MoneyTone.warn.color(pal))
+                    .multilineTextAlignment(textAlign)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if let note {
                 Text(note)
                     .font(.caption2)

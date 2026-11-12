@@ -8,6 +8,8 @@
 //  - 閃退規則（critic_crash §9）：外殼 UtilityTrendChart 只管手指位置／高度／VoiceOver；Chart 單獨一個
 //    UtilityTrendPlot；每個 mark 一個 @ChartContentBuilder func；點形用 UTDot 的 switch，不用三元。
 //  - 顏色由 type 對照（Data 不放 Color：切深色模式不用重算資料）。
+//  - [v25.623] 電費度數圖的夏月淡灰底：chart.bands 一律 ForEach（沒有就空陣列，不用 if），畫在最底下；
+//    帳單標記的期空心點（UTDot 本來就有 hollow）；圖例多「灰底是夏月（6–9 月）」。
 //
 
 import SwiftUI
@@ -29,6 +31,11 @@ enum UtilityPalette {
     /// 沒指定是哪個表的灰點
     static func neutral(_ pal: TripBoardPalette) -> Color {
         FinanceCardColors.pick(0x9AA3B5, 0x8A93A6, pal)
+    }
+
+    /// [v25.623] 夏月（6–9 月）淡灰底（不是黃：電費線是琥珀色）
+    static func summer(_ pal: TripBoardPalette) -> Color {
+        FinanceCardColors.pick(0xEEF0F4, 0x262A33, pal)
     }
 }
 
@@ -90,6 +97,7 @@ fileprivate struct UtilityTrendPlot: View {
 
     var body: some View {
         Chart {
+            ForEach(chart.bands) { b in band(b) }
             ForEach(chart.lines) { p in line(p) }
             ForEach(chart.points) { p in point(p) }
             if let avg = chart.average { averageRule(avg) }
@@ -115,6 +123,14 @@ fileprivate struct UtilityTrendPlot: View {
             }
         }
         .chartXSelection(value: $raw)
+    }
+
+    /// [v25.623] 夏月淡灰底（最底下一層；x、y 都是 Data 截好的範圍）
+    @ChartContentBuilder
+    private func band(_ b: UtilityTrendBand) -> some ChartContent {
+        RectangleMark(xStart: .value("夏月起", b.start), xEnd: .value("夏月迄", b.end),
+                      yStart: .value("下", b.yLow), yEnd: .value("上", b.yHigh))
+            .foregroundStyle(UtilityPalette.summer(pal))
     }
 
     @ChartContentBuilder
@@ -258,7 +274,19 @@ fileprivate struct UTLegendItem: View {
                 UTDot(shape: .circle, hollow: false, assigned: false, tint: tint, gray: gray, lit: false, visible: true)
                 label
             }
+        case .summer:
+            HStack(spacing: 5) {
+                swatch
+                label
+            }
         }
+    }
+
+    /// [v25.623] 夏月那一項的小方塊（跟圖上的淡灰底同色）
+    private var swatch: some View {
+        RoundedRectangle(cornerRadius: 2, style: .continuous)
+            .fill(UtilityPalette.summer(pal))
+            .frame(width: 12, height: 8)
     }
 
     private var tint: Color { UtilityPalette.line(type, pal: pal) }

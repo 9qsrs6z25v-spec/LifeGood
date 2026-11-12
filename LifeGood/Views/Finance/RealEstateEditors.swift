@@ -183,6 +183,10 @@ struct UtilityPaymentEditor: View {
     @State private var openedBasics: UtilityEditorBasics? = nil
     /// 度數是照哪一種讀的（onAppear 設 type 時那一次 onChange 不清度數）
     @State private var usageType: UtilityType? = nil
+    // [v25.623] 帳單標記（nil＝一般；「估計」「補繳」「扣減」）。存檔只走 recordSave（saving：改了才寫）
+    @State private var billKind: String? = nil
+    /// 同一個表的其他期（判斷「這期差很多」用；onAppear／換類型／換表時算一次，打字不重算）
+    @State private var billContext: UtilityBillContext? = nil
 
     private var bankMilestones: [LifeMilestone] {
         lifeStore.milestones.filter {
@@ -267,6 +271,7 @@ struct UtilityPaymentEditor: View {
             probe?.type = type
             if let p = probe, let v = UtilityReadingStore.shared.index.value(for: p) {
                 openedReading = v
+                billKind = v.billKind
                 usageText = UtilityUsageForm.usageFieldText(v.usage)
                 if let per = v.period, !periodTouched {
                     periodStart = per.start
@@ -275,6 +280,7 @@ struct UtilityPaymentEditor: View {
                 }
             } else {
                 usageText = ""
+                billKind = nil
             }
             refreshUsagePrevious()
         }
@@ -296,6 +302,7 @@ struct UtilityPaymentEditor: View {
             openedReading = UtilityReadingStore.shared.index.value(for: e)
         }
         usageText = UtilityUsageForm.usageFieldText(openedReading?.usage)
+        billKind = openedReading?.billKind
         refreshUsagePrevious()
         if let p = openedReading?.period {
             periodStart = p.start
@@ -310,10 +317,14 @@ struct UtilityPaymentEditor: View {
     private func refreshUsagePrevious() {
         guard let estate = store.realEstates.first(where: { $0.id == estateId }) else {
             usagePrevious = nil
+            billContext = nil
             return
         }
         usagePrevious = UtilityUsageForm.previous(estate: estate, editingId: editing?.id, type: type, meterId: meterId,
                                                   paidOn: date, index: UtilityReadingStore.shared.index)
+        // [v25.623] 同一個表的其他期（「這期差很多」的基準；只讀 index，不寫 store）
+        billContext = UtilityUsageForm.billContext(estate: estate, editingId: editing?.id, type: type, meterId: meterId,
+                                                   index: UtilityReadingStore.shared.index, cal: Calendar.current)
         if !periodTouched && openedReading?.period == nil {
             let d = UtilityUsageForm.defaults(previous: usagePrevious, paidOn: date)
             periodStart = d.start
@@ -323,6 +334,13 @@ struct UtilityPaymentEditor: View {
         if UtilityUsageForm.autoOpens(opened: openedReading, previous: usagePrevious) {
             usageOpen = true
         }
+    }
+
+    /// [v25.623] 帳單標記那一列的問句（nil＝不出現）：這期差很多、或已經有標記才有
+    private var billQuestion: String? {
+        UtilityUsageForm.billQuestion(context: billContext, kind: billKind, opened: openedReading?.billKind, paidOn: date,
+                                      amountText: amountText, usageText: usageText, hasPeriod: hasPeriod,
+                                      start: periodStart, end: periodEnd, cal: Calendar.current)
     }
 
     private func selectBank(_ id: UUID, code: String) {
@@ -390,7 +408,7 @@ struct UtilityPaymentEditor: View {
                 // [v25.622] 度數和計費期間（選填；收起來時只有一行）
                 UtilityUsageSection(type: type, previous: usagePrevious, open: $usageOpen, usageText: $usageText,
                                     hasPeriod: $hasPeriod, periodStart: $periodStart, periodEnd: $periodEnd,
-                                    periodTouched: $periodTouched)
+                                    periodTouched: $periodTouched, billQuestion: billQuestion, billKind: $billKind)
 
                 if hasPaymentTargets {
                     Section {
@@ -534,6 +552,8 @@ struct UtilityPaymentEditor: View {
         // 度數那格還是打開時帶進去的字（沒改過）→ 留原本的值：帶回輸入框時四捨五入到 2 位，
         // 不能因為只改了備註或期間，就把 28.555 改寫成 28.56
         if usageText == UtilityUsageForm.usageFieldText(openedReading?.usage) { editedDraft.usage = openedDraft.usage }
+        // [v25.623] 帳單標記照畫面上選的（跟打開時一樣＝沒改，saving 不碰原本那筆的標記）
+        editedDraft.billKind = billKind
         guard var estate = store.realEstates.first(where: { $0.id == estateId }) else { return }
         // [v25.621] L10：editing 在 store 找不到（別台刪了）→ 不 append、不新建記帳、不重建扣款，跳提示
         if let e = editing, !estate.utilityPayments.contains(where: { $0.id == e.id }) {
@@ -711,6 +731,9 @@ fileprivate struct UtilityUsageSection: View {
     @Binding var periodStart: Date
     @Binding var periodEnd: Date
     @Binding var periodTouched: Bool
+    /// [v25.623] 帳單標記那一列的問句；nil＝不出現（不常駐：這期差很多、或已經有標記才有）
+    let billQuestion: String?
+    @Binding var billKind: String?
 
     private var usagePlaceholder: String { previous?.usagePlaceholder ?? "帳單上的度數" }
     private var usageError: String? { UtilityUsageForm.usageMessage(usageText) }
@@ -743,6 +766,10 @@ fileprivate struct UtilityUsageSection: View {
                 Button("清掉這兩欄", role: .destructive) { clear() }
             } else {
                 Button(UtilityUsageForm.collapsedTitle) { open = true }
+            }
+            // [v25.623] 收起來也照樣出現（只有金額的期也標得了）
+            if let q = billQuestion {
+                UtilityBillKindRow(question: q, kind: $billKind)
             }
         } header: {
             realEstateEditorSectionHeader("度數和計費期間", icon: "chart.line.uptrend.xyaxis", color: .orange)
@@ -801,6 +828,34 @@ fileprivate struct UtilityUsageSection: View {
         usageText = ""
         hasPeriod = false
         periodTouched = false
+    }
+}
+
+/// [v25.623] 「這期差很多，是補繳或估計的嗎？」〔一般〕〔估計抄表〕〔含補繳〕〔有扣減〕（已有標記時「這期的帳單」照樣可改）。
+/// 選了只改 @Binding，存檔才寫（UtilityPaymentEditor.save → recordSave）
+fileprivate struct UtilityBillKindRow: View {
+    let question: String
+    @Binding var kind: String?
+
+    /// 不認得的標記（別版寫的）多一顆它自己，選得到、不會被換掉
+    private var choices: [UtilityBillKind.Choice] { UtilityBillKind.pickerChoices(current: kind) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text(question)
+                .font(.subheadline)
+            Picker("帳單", selection: $kind) {
+                ForEach(choices) { c in
+                    Text(c.title)
+                        .tag(c.stored)
+                }
+            }
+            .pickerStyle(.segmented)
+            Text("標了以後，圖上這期是空心點，不算進平均和最高最低。")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .padding(.vertical, 4)
     }
 }
 
