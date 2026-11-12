@@ -187,6 +187,14 @@ struct UtilityPaymentEditor: View {
     @State private var billKind: String? = nil
     /// 同一個表的其他期（判斷「這期差很多」用；onAppear／換類型／換表時算一次，打字不重算）
     @State private var billContext: UtilityBillContext? = nil
+    // [v25.624] 拍照讀數字：只在〔從照片讀數字〕的按鈕動作裡跑（UtilityBillPhotoReader，背景執行緒）；
+    // 讀到的只進下面這幾個 @State 和表單欄位，存檔照舊是使用者按〔儲存〕→ save → recordSave（不自動存、不寫任何 store）
+    @State private var photoReading = false
+    @State private var photoReadTask: Task<Void, Never>? = nil
+    /// 這一次讀的代號：取消、讀的時候換了類型，回來的舊結果對不上就丟掉（不改畫面）
+    @State private var photoReadRun: UUID? = nil
+    /// 上一次讀完要填的（marks 比對用、按鈕下面的灰字）；沒讀過 nil
+    @State private var photoFill: UtilityPhotoFill? = nil
 
     private var bankMilestones: [LifeMilestone] {
         lifeStore.milestones.filter {
@@ -336,6 +344,69 @@ struct UtilityPaymentEditor: View {
         }
     }
 
+    /// [v25.624] 有照片（PDF 不算）才有〔從照片讀數字〕
+    private var canReadPhoto: Bool { !UtilityBillOCR.readableNames(photoFileNames).isEmpty }
+
+    /// [v25.624] 哪幾欄旁邊標「從照片讀的，請核對」（欄位還是照片讀的那個值才標）
+    private var photoMarks: UtilityPhotoMarks {
+        UtilityBillOCR.marks(fill: photoFill, usageText: usageText, amountText: amountText, hasPeriod: hasPeriod,
+                             start: periodStart, end: periodEnd)
+    }
+
+    /// [v25.624] 〔從照片讀數字〕：背景讀，讀完回主執行緒只改 @State；不寫任何 store、不存檔
+    private func startPhotoRead() {
+        guard !photoReading else { return }
+        let urls: [URL] = UtilityBillPhotoReader.urls(for: photoFileNames)
+        guard !urls.isEmpty else { return }
+        let run = UUID()
+        let paidOn: Date = date
+        let readType: UtilityType = type
+        photoReadRun = run
+        photoReading = true
+        // 上一次讀的 photoFill 留到這次讀完才換：讀的時候按〔取消〕，「請核對」那幾行照舊（取消不改畫面）
+        photoReadTask = Task { @MainActor in
+            let result: UtilityBillReading? = await UtilityBillPhotoReader.read(urls: urls, paidOn: paidOn, type: readType)
+            // 取消了（或又重按）→ 什麼都不改
+            guard !Task.isCancelled, photoReadRun == run else { return }
+            photoReading = false
+            photoReadTask = nil
+            photoReadRun = nil
+            // 讀的時候換了類型 → 照舊類型讀的不填
+            guard type == readType else { return }
+            applyPhotoReading(result)
+        }
+    }
+
+    /// [v25.624] 〔取消〕：停掉、不改任何欄位
+    private func cancelPhotoRead() {
+        photoReadTask?.cancel()
+        photoReadTask = nil
+        photoReadRun = nil
+        photoReading = false
+    }
+
+    /// [v25.624] 只填空的欄（規則在 UtilityBillOCR.fill）；填了度數或期間就打開那一段。
+    /// 期間照帳單的、算點開過（之後換表、換類型不會換回預設的期間）
+    private func applyPhotoReading(_ result: UtilityBillReading?) {
+        // 按過〔清掉這兩欄〕（hasPeriod＝false，存檔不會存期間）也算空：不然會說「跟已經填的不一樣」，畫面上卻是空的
+        let periodEmpty: Bool = !hasPeriod || (!periodTouched && openedReading?.period == nil)
+        let startKey: String? = hasPeriod ? UtilityDay.key(periodStart) : nil
+        let endKey: String? = hasPeriod ? UtilityDay.key(periodEnd) : nil
+        let now = UtilityPhotoFormNow(usageText: usageText, amountText: amountText, periodIsEmpty: periodEmpty,
+                                      startKey: startKey, endKey: endKey)
+        let f: UtilityPhotoFill = UtilityBillOCR.fill(result, now: now)
+        if let u = f.usageText { usageText = u }
+        if let a = f.amountText { amountText = a }
+        if let sk = f.startKey, let ek = f.endKey, let s = UtilityDay.date(sk), let e = UtilityDay.date(ek) {
+            periodStart = s
+            periodEnd = e
+            hasPeriod = true
+            periodTouched = true
+        }
+        if f.opensUsage { usageOpen = true }
+        photoFill = f
+    }
+
     /// [v25.623] 帳單標記那一列的問句（nil＝不出現）：這期差很多、或已經有標記才有
     private var billQuestion: String? {
         UtilityUsageForm.billQuestion(context: billContext, kind: billKind, opened: openedReading?.billKind, paidOn: date,
@@ -397,6 +468,10 @@ struct UtilityPaymentEditor: View {
                         Text("NT$").foregroundStyle(.secondary)
                         TextField("金額", text: $amountText).keyboardType(.decimalPad)
                     }
+                    // [v25.624] 金額是照片讀的 → 下面標「從照片讀的，請核對」
+                    if photoMarks.amount {
+                        UtilityPhotoCheckNote()
+                    }
                 } header: {
                     realEstateEditorSectionHeader("基本資訊", icon: "list.bullet.rectangle.fill", color: .indigo)
                 } footer: {
@@ -408,7 +483,9 @@ struct UtilityPaymentEditor: View {
                 // [v25.622] 度數和計費期間（選填；收起來時只有一行）
                 UtilityUsageSection(type: type, previous: usagePrevious, open: $usageOpen, usageText: $usageText,
                                     hasPeriod: $hasPeriod, periodStart: $periodStart, periodEnd: $periodEnd,
-                                    periodTouched: $periodTouched, billQuestion: billQuestion, billKind: $billKind)
+                                    periodTouched: $periodTouched, billQuestion: billQuestion, billKind: $billKind,
+                                    canReadPhoto: canReadPhoto, photoReading: photoReading, photoMessage: photoFill?.message,
+                                    photoMarks: photoMarks, onReadPhoto: { startPhotoRead() }, onCancelPhoto: { cancelPhotoRead() })
 
                 if hasPaymentTargets {
                     Section {
@@ -483,6 +560,7 @@ struct UtilityPaymentEditor: View {
             .toolbar {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("取消") {
+                        cancelPhotoRead()
                         // 本次 session 新拍/新選的照片已寫入磁碟但未儲存進紀錄，
                         // 取消時清掉避免孤兒檔案（既有照片不動；同型寫法見 RenovationPhotoEditor.cancel）
                         let original = Set(editing?.photoFileNames ?? [])
@@ -493,7 +571,8 @@ struct UtilityPaymentEditor: View {
                     }
                 }
                 ToolbarItem(placement: .topBarTrailing) {
-                    Button("儲存") { save() }.bold().foregroundStyle(.green).disabled(isSaving)
+                    // [v25.624] 讀照片的時候不能存（讀完或按〔取消〕再存）
+                    Button("儲存") { save() }.bold().foregroundStyle(.green).disabled(isSaving || photoReading)
                         // [v25.621] L10：掛在〔儲存〕上、不掛外層那串（外層每加一個修飾器 body 就深一層，110ef9a 是 23 不准變深）
                         .alert("這一期已經在別台刪了", isPresented: $showGone) {
                             Button("好", role: .cancel) { discardAfterGone() }
@@ -734,6 +813,13 @@ fileprivate struct UtilityUsageSection: View {
     /// [v25.623] 帳單標記那一列的問句；nil＝不出現（不常駐：這期差很多、或已經有標記才有）
     let billQuestion: String?
     @Binding var billKind: String?
+    /// [v25.624] 拍照讀數字：有照片才有那顆按鈕；讀的時候轉圈＋〔取消〕；讀完的灰字；哪幾欄標「請核對」
+    let canReadPhoto: Bool
+    let photoReading: Bool
+    let photoMessage: String?
+    let photoMarks: UtilityPhotoMarks
+    let onReadPhoto: () -> Void
+    let onCancelPhoto: () -> Void
 
     private var usagePlaceholder: String { previous?.usagePlaceholder ?? "帳單上的度數" }
     private var usageError: String? { UtilityUsageForm.usageMessage(usageText) }
@@ -748,12 +834,22 @@ fileprivate struct UtilityUsageSection: View {
 
     var body: some View {
         Section {
+            // [v25.624] 收起來也照樣出現（按了讀到度數或期間就打開這一段）
+            if canReadPhoto || photoReading {
+                UtilityPhotoReadRow(reading: photoReading, message: photoMessage, onRead: onReadPhoto, onCancel: onCancelPhoto)
+            }
             if open {
                 usageRow
+                if photoMarks.usage {
+                    UtilityPhotoCheckNote()
+                }
                 if let m = usageError {
                     Text(m).font(.caption).foregroundStyle(.red)
                 }
                 periodRow
+                if photoMarks.period {
+                    UtilityPhotoCheckNote()
+                }
                 if periodTouched {
                     pickers
                 }
@@ -856,6 +952,50 @@ fileprivate struct UtilityBillKindRow: View {
                 .foregroundStyle(.secondary)
         }
         .padding(.vertical, 4)
+    }
+}
+
+/// [v25.624] 〔從照片讀數字〕那一列（judge_utility C20 Q1）：沒在讀 → 按鈕＋灰字（讀完的結果，或「只在這支手機上讀」）；
+/// 讀的時候 → 轉圈＋「正在讀照片…」＋〔取消〕。按了才讀（onRead 只在按鈕動作裡叫），不自動跑、不存檔
+fileprivate struct UtilityPhotoReadRow: View {
+    let reading: Bool
+    let message: String?
+    let onRead: () -> Void
+    let onCancel: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if reading {
+                HStack(spacing: 8) {
+                    ProgressView()
+                    Text(UtilityBillOCR.readingTitle)
+                        .foregroundStyle(.secondary)
+                    Spacer(minLength: 8)
+                    Button(UtilityBillOCR.cancelTitle) { onCancel() }
+                        .buttonStyle(.borderless)
+                }
+            } else {
+                Button {
+                    onRead()
+                } label: {
+                    Label(UtilityBillOCR.buttonTitle, systemImage: "doc.text.viewfinder")
+                }
+                .buttonStyle(.borderless)
+                Text(message ?? UtilityBillOCR.privacyNote)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(.vertical, 2)
+    }
+}
+
+/// [v25.624] 照片讀進來的欄下面那行灰字「從照片讀的，請核對」（欄位改過就不出現）
+fileprivate struct UtilityPhotoCheckNote: View {
+    var body: some View {
+        Text(UtilityBillOCR.checkNote)
+            .font(.caption)
+            .foregroundStyle(.secondary)
     }
 }
 

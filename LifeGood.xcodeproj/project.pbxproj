@@ -277,6 +277,8 @@
 		A01B000001001663 /* UtilityTrendChart.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001663 /* UtilityTrendChart.swift */; };
 		A01B000001001664 /* UtilityTrendView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001664 /* UtilityTrendView.swift */; };
 		A01B000001001665 /* UtilityReadings.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001665 /* UtilityReadings.swift */; };
+		A01B000001001666 /* UtilityBillOCR.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001666 /* UtilityBillOCR.swift */; };
+		A01B000001001667 /* UtilityBillPhotoReader.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001667 /* UtilityBillPhotoReader.swift */; };
 		A01B000001001619 /* OrgMoveCardParts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001619 /* OrgMoveCardParts.swift */; };
 		A01B000001001621 /* OrgMoveWizardRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001621 /* OrgMoveWizardRows.swift */; };
 		A01B000001001623 /* OrgMoveDueViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001623 /* OrgMoveDueViews.swift */; };
@@ -686,6 +688,8 @@
 		A01A000001001663 /* UtilityTrendChart.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UtilityTrendChart.swift; sourceTree = "<group>"; };
 		A01A000001001664 /* UtilityTrendView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UtilityTrendView.swift; sourceTree = "<group>"; };
 		A01A000001001665 /* UtilityReadings.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UtilityReadings.swift; sourceTree = "<group>"; };
+		A01A000001001666 /* UtilityBillOCR.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UtilityBillOCR.swift; sourceTree = "<group>"; };
+		A01A000001001667 /* UtilityBillPhotoReader.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UtilityBillPhotoReader.swift; sourceTree = "<group>"; };
 		A01A000001001619 /* OrgMoveCardParts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveCardParts.swift; sourceTree = "<group>"; };
 		A01A000001001621 /* OrgMoveWizardRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveWizardRows.swift; sourceTree = "<group>"; };
 		A01A000001001623 /* OrgMoveDueViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveDueViews.swift; sourceTree = "<group>"; };
@@ -1090,6 +1094,7 @@
 				A01A000001001659 /* ExpenseKinds.swift */,
 				A01A000001001662 /* UtilityTrendData.swift */,
 				A01A000001001665 /* UtilityReadings.swift */,
+				A01A000001001666 /* UtilityBillOCR.swift */,
 				A01A000001001547 /* WidgetFinanceBuilder.swift */,
 				A01A000001001548 /* TeamDay.swift */,
 				A01A000001001549 /* WidgetLifeExtras.swift */,
@@ -1187,6 +1192,7 @@
 				A01A000001001530 /* HouseCardViews.swift */,
 				A01A000001001663 /* UtilityTrendChart.swift */,
 				A01A000001001664 /* UtilityTrendView.swift */,
+				A01A000001001667 /* UtilityBillPhotoReader.swift */,
 				A01A000001001538 /* VehicleEditors.swift */,
 				A01A000001001537 /* VehicleCardViews.swift */,
 				A01A000001001660 /* ExpenseKindTidySheet.swift */,
@@ -1755,6 +1761,8 @@
 				A01B000001001663 /* UtilityTrendChart.swift in Sources */,
 				A01B000001001664 /* UtilityTrendView.swift in Sources */,
 				A01B000001001665 /* UtilityReadings.swift in Sources */,
+				A01B000001001666 /* UtilityBillOCR.swift in Sources */,
+				A01B000001001667 /* UtilityBillPhotoReader.swift in Sources */,
 				A01B000001001619 /* OrgMoveCardParts.swift in Sources */,
 				A01B000001001621 /* OrgMoveWizardRows.swift in Sources */,
 				A01B000001001623 /* OrgMoveDueViews.swift in Sources */,
