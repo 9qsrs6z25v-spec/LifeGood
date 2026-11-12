@@ -395,6 +395,9 @@ struct RealEstateDetailView: View {
         case .kindTidy(let request):
             // [v25.616] 一鍵整理（外面 withSheets 已經 .appStores()）
             ExpenseKindTidySheet(request: request)
+        // [v25.621] 全頁水電趨勢：直接放 struct、不包 AnyView（外面 withSheets 已經 .appStores()）
+        case .utilityTrend(let r):
+            UtilityTrendView(request: r, source: card?.utilities.trendSource)
         default:
             EmptyView()
         }
@@ -440,6 +443,8 @@ extension RealEstateDetailView {
         a.deleteLedger = { event in deleteLedger(event) }
         a.openExpense = { id in requirePremium { openExpenseRecord(id) } }
         a.openUtility = { payment in requirePremium { presentUtility(payment) } }
+        // [v25.621] 看免費：不包 requirePremium（全頁裡改一期才擋）
+        a.openUtilityTrend = { t in sheet = .utilityTrend(UtilityTrendRequest(initialType: t)) }
         a.openElevator = { record in requirePremium { presentElevator(record) } }
         a.showPhotos = { draft in sheet = .photos(draft) }
         // 「＋ 記一筆」選單在打開前就擋：沒付費時畫面換成普通按鈕，按了跳付費說明
@@ -1945,6 +1950,8 @@ private enum HouseSheet: Identifiable {
     case document(IdentifiableURL)
     /// [v25.616] 一鍵整理（要確認〔看一下〕）
     case kindTidy(ExpenseKindTidyRequest)
+    /// [v25.621] 全頁「水電趨勢」（小圖下面「水電趨勢 ›」；看免費）
+    case utilityTrend(UtilityTrendRequest)
 
     var id: String {
         switch self {
@@ -1962,6 +1969,7 @@ private enum HouseSheet: Identifiable {
         case .photos(let draft): return "photos-" + draft.id.uuidString
         case .document(let wrapper): return "document-" + wrapper.id.uuidString
         case .kindTidy(let request): return "kindTidy-" + request.id
+        case .utilityTrend(let r): return "utilityTrend-" + r.id.uuidString
         }
     }
 }

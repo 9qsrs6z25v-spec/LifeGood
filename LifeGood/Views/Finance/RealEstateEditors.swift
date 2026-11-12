@@ -164,6 +164,8 @@ struct UtilityPaymentEditor: View {
     // 快速連點兩下會在第一次寫入完成前就再次進入 save()，各自建立一筆 Expense、並各自捕捉
     // 自己的 estate 快照非同步寫回，後寫入者會蓋掉前者剛 append 的 UtilityPayment，留下孤兒 Expense。
     @State private var isSaving = false
+    /// [v25.621] L10：編輯的這一期已經在別台被刪了（存檔不把它加回來）
+    @State private var showGone = false
 
     private var bankMilestones: [LifeMilestone] {
         lifeStore.milestones.filter {
@@ -387,6 +389,12 @@ struct UtilityPaymentEditor: View {
                 }
                 ToolbarItem(placement: .topBarTrailing) {
                     Button("儲存") { save() }.bold().foregroundStyle(.green).disabled(isSaving)
+                        // [v25.621] L10：掛在〔儲存〕上、不掛外層那串（外層每加一個修飾器 body 就深一層，110ef9a 是 23 不准變深）
+                        .alert("這一期已經在別台刪了", isPresented: $showGone) {
+                            Button("好", role: .cancel) { discardAfterGone() }
+                        } message: {
+                            Text("另一台裝置已經把這一期刪掉，這次的修改沒有存。")
+                        }
                 }
             }
             .onChange(of: type) { _, _ in typeChanged() }
@@ -415,12 +423,27 @@ struct UtilityPaymentEditor: View {
         }
     }
 
+    /// [v25.621] L10：這一期在別台刪了 → 只清掉這次新拍／新選、原本沒有的照片（同〔取消〕），
+    /// 下一輪才關表單（alert 收起來那一輪不同時關 sheet）；不寫任何 store
+    private func discardAfterGone() {
+        let original = Set(editing?.photoFileNames ?? [])
+        for name in photoFileNames where !original.contains(name) {
+            UtilityPayment.deletePhoto(name)
+        }
+        DispatchQueue.main.async { dismiss() }
+    }
+
     private func save() {
         guard !isSaving else { return }
-        guard let amount = Double(amountText), amount > 0 else {
+        guard let amount = Double(amountText), amount.isFinite, amount > 0 else {
             showError = true; return
         }
         guard var estate = store.realEstates.first(where: { $0.id == estateId }) else { return }
+        // [v25.621] L10：editing 在 store 找不到（別台刪了）→ 不 append、不新建記帳、不重建扣款，跳提示
+        if let e = editing, !estate.utilityPayments.contains(where: { $0.id == e.id }) {
+            showGone = true
+            return
+        }
         isSaving = true
         let recordId = editing?.id ?? UUID()
         let trimmedNote = note.trimmingCharacters(in: .whitespaces)

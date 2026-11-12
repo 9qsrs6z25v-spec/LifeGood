@@ -1040,6 +1040,10 @@ struct HouseUtilitiesData {
     var showAllTitle: String? = nil
     /// [v25.620] 白卡最上面的趨勢小圖；近 2 年一期都沒有（或只有猜不到類型的）時 nil
     var trend: UtilityTrendBoard? = nil
+    /// [v25.621] 全頁「水電趨勢」的來源（HouseCardData.build 算一次，全頁不重跑帳本）；build 一定會給
+    var trendSource: UtilityTrendSource? = nil
+    /// [v25.621] 小圖下面的「水電趨勢 ›」：任一種 ≥ 2 期才出現（看免費）
+    var showsTrendPage: Bool { trendSource?.showsPage ?? false }
     /// 沒有表號也沒有繳費（縮成一行「＋ 記第一筆水電費（表號在「編輯」填）」）
     var isEmpty: Bool { meters.isEmpty && payments.isEmpty }
 }
@@ -1180,6 +1184,7 @@ struct HouseCardData {
         d.info = infoData(c, place: place)
         d.floors = floorsData(c)
         d.utilities = utilitiesData(c, rows: rows)
+        d.utilities.trendSource = utilityTrendSource(c, ledger: ledger, rows: rows, name: name)
         d.elevator = elevatorData(c)
         d.media = mediaData(c)
         return d
@@ -2241,6 +2246,13 @@ extension HouseCardData {
                           slots: UtilityMeterSlotIndex(c.re.utilityMeterSlots()))
     }
 
+    /// [v25.621] 全頁「水電趨勢」的來源：rows（同一批）＋固定支出 S5、M1、賣出後那幾期（本體在 UtilityTrendData.swift）
+    fileprivate static func utilityTrendSource(_ c: HouseBuildContext, ledger: HouseLedger, rows: UtilityRowSet,
+                                               name: String) -> UtilityTrendSource {
+        UtilityTrendSourceBuild.make(estate: c.re, name: name, events: ledger.events, expensesById: c.byId,
+                                     ntd: c.ntd, rows: rows, asOf: c.asOf, cal: c.cal)
+    }
+
     fileprivate static func utilitiesData(_ c: HouseBuildContext, rows: UtilityRowSet) -> HouseUtilitiesData {
         let re = c.re
         let cal = c.cal
@@ -2264,7 +2276,8 @@ extension HouseCardData {
 
         // [v25.560] 每個表一格（一格電號填了兩個號碼的，拆成兩個表）；繳費有指定表（meterId）的掛在那個表，
         // 沒指定的（舊資料、只有一個表）掛在那一種的第一個表。
-        let slotIndex = UtilityMeterSlotIndex(re.utilityMeterSlots())
+        // [v25.621] 跟 rows 同一份（utilityRows 已經建過一次，結果不變）
+        let slotIndex = rows.slots
         let slots = slotIndex.slots
         var order: [UUID: Int] = [:]
         for (i, p) in re.utilityPayments.enumerated() { order[p.id] = i }

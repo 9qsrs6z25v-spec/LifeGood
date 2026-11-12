@@ -31,6 +31,8 @@ struct HouseCardActions {
     var deleteLedger: (HouseLedgerEvent) -> Void = { _ in }
     var openExpense: (UUID) -> Void = { _ in }                    // 保險列、家電
     var openUtility: (UtilityPayment?) -> Void = { _ in }          // nil＝新增
+    /// [v25.621] 打開全頁「水電趨勢」（帶正在看的那一種；看免費，外殼不擋付費）
+    var openUtilityTrend: (UtilityType?) -> Void = { _ in }
     var openElevator: (ElevatorMaintenance?) -> Void = { _ in }    // nil＝新增
     var showPhotos: (CutePhotoDraft) -> Void = { _ in }
     /// [v25.534] 「＋ 記一筆」選單要在打開前就擋付費：沒付費時外殼給 false，選單換成普通按鈕、按了呼叫 askPremium。
@@ -1430,7 +1432,8 @@ struct HouseUtilitiesSection: View {
             emptyCard(pal)
         } else {
             VStack(alignment: .leading, spacing: 0) {
-                HCUtilityTrendBlock(board: u.trend, estateId: estate.id, pal: pal)
+                HCUtilityTrendBlock(board: u.trend, estateId: estate.id, pal: pal,
+                                    showsPage: u.showsTrendPage, onOpen: actions.openUtilityTrend)
                 ForEach(Array(u.meters.enumerated()), id: \.element.id) { i, m in
                     if i > 0 {
                         Divider().padding(.leading, 62)
@@ -1745,15 +1748,22 @@ private struct HCUtilityTrendBlock: View {
     let board: UtilityTrendBoard?
     let estateId: UUID
     let pal: TripBoardPalette
+    /// [v25.621] 任一種 ≥ 2 期才有「水電趨勢 ›」（HouseUtilitiesData.showsTrendPage）
+    let showsPage: Bool
+    /// [v25.621] 打開全頁、帶正在看的那一種（外殼給的全頁入口；點圖本身仍不開東西）
+    let onOpen: (UtilityType?) -> Void
     /// 使用者選的種類；nil＝還沒選過（照 board.defaultKind）。那一種沒了 board.panel(for:) 自己退回預設
     @State private var kind: UtilityType? = nil
     /// 手指點到的那一期（UtilityTrendPoint.key）；放開後留著，換種類清掉
     @State private var pickedKey: String? = nil
 
-    init(board: UtilityTrendBoard?, estateId: UUID, pal: TripBoardPalette) {
+    init(board: UtilityTrendBoard?, estateId: UUID, pal: TripBoardPalette, showsPage: Bool,
+         onOpen: @escaping (UtilityType?) -> Void) {
         self.board = board
         self.estateId = estateId
         self.pal = pal
+        self.showsPage = showsPage
+        self.onOpen = onOpen
         _kind = State(initialValue: UtilityTrendMemory.load(estateId))
     }
 
@@ -1763,6 +1773,9 @@ private struct HCUtilityTrendBlock: View {
                 VStack(alignment: .leading, spacing: 8) {
                     HCUtilityKindChips(kinds: b.kinds, current: panel.type, title: panel.title, pal: pal, onPick: pick)
                     HCUtilityTrendBody(panel: panel, pal: pal, pickedKey: $pickedKey)
+                    if showsPage {
+                        HCUtilityTrendButton(pal: pal) { onOpen(panel.type) }
+                    }
                 }
                 .padding(14)
                 Divider()
@@ -1903,6 +1916,31 @@ private struct HCUtilityTrendCaption: View {
             }
         }
         .frame(maxWidth: .infinity, alignment: frameAlign)
+    }
+}
+
+/// [v25.621] 小圖下面綠底「水電趨勢 ›」（免費；照車子「充電與里程分析 ›」）
+private struct HCUtilityTrendButton: View {
+    let pal: TripBoardPalette
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            HStack(spacing: 6) {
+                Text("水電趨勢")
+                    .font(.subheadline.weight(.bold))
+                Spacer(minLength: 6)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.bold))
+            }
+            .foregroundStyle(MoneyTone.good.color(pal))
+            .padding(.horizontal, 14)
+            .frame(minHeight: 44)
+            .background(Color(tb: 0x1F9D57, 0.12), in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(MoneyPressStyle())
+        .accessibilityHint("點兩下打開水電趨勢：完整的圖、近 12 個月合計、全部繳費")
     }
 }
 
