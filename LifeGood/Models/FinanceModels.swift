@@ -1011,7 +1011,7 @@ struct UtilityPayment: Identifiable, Codable {
     /// 連結到記帳模式變動支出的 ID（雙向同步用）
     var linkedExpenseId: UUID?
     /// [v25.560] 這一期是哪一個表的（同一間房子有兩個電號時用）：HouseUtilitiesData.Meter.id
-    ///（主表「main-電費」、一格填了兩個號碼的「main-電費#<號碼>」、額外的表是 UtilityMeter.id）。
+    ///（主表「main-electricity」「main-water」「main-gas」〔case 名，不是中文〕、一格填了兩個號碼的「main-electricity#<號碼>」、額外的表是 UtilityMeter.id 字串）。
     /// nil＝沒指定（舊資料、只有一個表），算在那一種的第一個表。不進 memberwise init（編輯表單指派）
     var meterId: String?
 

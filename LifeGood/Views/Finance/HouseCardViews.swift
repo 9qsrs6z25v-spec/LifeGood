@@ -47,6 +47,8 @@ fileprivate extension HouseCardActions {
             break
         case .scrollToMortgage:
             scrollTo(.mortgage)
+        case .scrollToUtilities:
+            scrollTo(.utilities)
         case .ledgerFilter(let f):
             setLedgerFilter(f)
             scrollTo(.ledger)
@@ -1420,17 +1422,20 @@ struct HouseUtilitiesSection: View {
         }
     }
 
+    /// [v25.620] 白卡最上面插趨勢小圖（有沒有圖、下面的分隔線都在 HCUtilityTrendBlock 裡判斷）；
+    /// 表那一列、繳費列切成 private struct（v25.619 以前整區型別 32 層，切完 ≤ 20），傳算好的值、列一律 struct（不包型別抹除）
     @ViewBuilder
     private func card(_ u: HouseUtilitiesData, pal: TripBoardPalette) -> some View {
         if u.isEmpty {
             emptyCard(pal)
         } else {
             VStack(alignment: .leading, spacing: 0) {
+                HCUtilityTrendBlock(board: u.trend, estateId: estate.id, pal: pal)
                 ForEach(Array(u.meters.enumerated()), id: \.element.id) { i, m in
                     if i > 0 {
                         Divider().padding(.leading, 62)
                     }
-                    meterRow(m, u: u, pal: pal)
+                    HCUtilityMeterRow(meter: m, pal: pal, actions: actions)
                 }
                 if !u.payments.isEmpty {
                     paymentsBlock(u, pal: pal)
@@ -1459,139 +1464,6 @@ struct HouseUtilitiesSection: View {
         .modifier(FinanceCardChrome())
     }
 
-    // MARK: 表
-
-    private func meterRow(_ m: HouseUtilitiesData.Meter, u: HouseUtilitiesData, pal: TripBoardPalette) -> some View {
-        let hint: String = m.latest == nil ? "點兩下記一筆" : "點兩下打開最近一期"
-        return HStack(spacing: 8) {
-            Button {
-                actions.openUtility(m.latest)
-            } label: {
-                meterLabel(m, pal: pal)
-            }
-            .buttonStyle(MoneyPressStyle())
-            .contextMenu {
-                meterMenu(m)
-            }
-            .accessibilityHint(hint)
-            if let p = m.latest, m.latestPhotoCount > 0 {
-                receiptButton(p, count: m.latestPhotoCount, amountText: latestAmount(p, in: u), pal: pal)
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-    }
-
-    private func meterLabel(_ m: HouseUtilitiesData.Meter, pal: TripBoardPalette) -> some View {
-        let tint = HCColors.utility(m.type, pal: pal)
-        let sub = [m.name, m.owner, m.userNumber].filter { !$0.isEmpty }.joined(separator: "・")
-        return HStack(spacing: 12) {
-            Image(systemName: m.type.icon)
-                .font(.system(size: 15, weight: .bold))
-                .foregroundStyle(tint)
-                .frame(width: 36, height: 36)
-                .background(tint.opacity(0.15), in: Circle())
-                .accessibilityHidden(true)
-            VStack(alignment: .leading, spacing: 2) {
-                meterTitle(m)
-                if !sub.isEmpty {
-                    Text(sub)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .lineLimit(1)
-                }
-            }
-            Spacer(minLength: 6)
-            latestView(m, pal: pal)
-        }
-        .foregroundStyle(Color.primary)
-        .contentShape(Rectangle())
-    }
-
-    /// 「電號」一行、號碼自己一行（等寬字）。
-    /// [v25.560] 以前「電號 21-40-0218-50-1」擠在同一行、右邊又有日期金額，號碼被切成「21-40-0218-5…」；
-    /// 現在號碼獨佔一行，放不下才縮小字（最小 0.6），還放不下才換行
-    private func meterTitle(_ m: HouseUtilitiesData.Meter) -> some View {
-        VStack(alignment: .leading, spacing: 1) {
-            Text(m.title)
-                .font(.subheadline.weight(.semibold))
-                .lineLimit(1)
-            if !m.number.isEmpty {
-                Text(m.number)
-                    .font(.system(.subheadline, design: .monospaced).weight(.semibold))
-                    .lineLimit(2)
-                    .minimumScaleFactor(0.6)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-    }
-
-    /// [v25.560] 日期、金額分兩行，整塊不縮（fixedSize）——以前「10/17・NT$...」擠一行，金額被切掉
-    @ViewBuilder
-    private func latestView(_ m: HouseUtilitiesData.Meter, pal: TripBoardPalette) -> some View {
-        if let amount = m.latestAmount {
-            HStack(spacing: 3) {
-                VStack(alignment: .trailing, spacing: 1) {
-                    if let d = m.latestDate {
-                        Text(d)
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .monospacedDigit()
-                    }
-                    Text(amount)
-                        .font(.subheadline.weight(.heavy))
-                        .monospacedDigit()
-                }
-                .lineLimit(1)
-                .fixedSize()
-                Image(systemName: "chevron.right")
-                    .font(.caption2.weight(.bold))
-                    .foregroundStyle(.tertiary)
-            }
-            .accessibilityElement(children: .ignore)
-            .accessibilityLabel(m.latestText ?? amount)
-        } else if let t = m.latestText {
-            Text(t)
-                .font(.subheadline.weight(.heavy))
-                .monospacedDigit()
-                .lineLimit(1)
-                .minimumScaleFactor(0.7)
-        } else {
-            Text("記一筆")
-                .font(.caption.weight(.bold))
-                .foregroundStyle(pal.hint)
-        }
-    }
-
-    /// 長按表號可以複製
-    @ViewBuilder
-    private func meterMenu(_ m: HouseUtilitiesData.Meter) -> some View {
-        if !m.number.isEmpty {
-            Button {
-                UIPasteboard.general.string = m.number
-            } label: {
-                Label("複製" + m.title, systemImage: "doc.on.doc")
-            }
-        }
-        if m.latest != nil {
-            Button {
-                actions.openUtility(m.latest)
-            } label: {
-                Label("打開最近一期", systemImage: "pencil")
-            }
-        } else {
-            Button {
-                actions.openUtility(nil)
-            } label: {
-                Label("記一筆", systemImage: "plus")
-            }
-        }
-    }
-
-    private func latestAmount(_ p: UtilityPayment, in u: HouseUtilitiesData) -> String {
-        u.payments.first(where: { $0.id == p.id })?.amountText ?? MoneyFormat.short(p.amount)
-    }
-
     // MARK: 全部繳費
 
     private func paymentsBlock(_ u: HouseUtilitiesData, pal: TripBoardPalette) -> some View {
@@ -1600,7 +1472,7 @@ struct HouseUtilitiesSection: View {
             if showAll {
                 ForEach(u.payments, id: \.id) { p in
                     Divider().padding(.leading, 14)
-                    paymentRow(p, pal: pal)
+                    HCUtilityPaymentRow(item: p, pal: pal, actions: actions)
                 }
             }
             Divider().padding(.leading, 14)
@@ -1618,13 +1490,186 @@ struct HouseUtilitiesSection: View {
         }
     }
 
-    private func paymentRow(_ p: HouseUtilitiesData.Payment, pal: TripBoardPalette) -> some View {
-        let payment = p.payment
+    /// 全部收據照片（不再只看第一張）；水電一律看 photoFileNames
+    /// [v25.620] 改 fileprivate：收據按鈕切成 HCUtilityReceiptButton 後從那邊叫
+    fileprivate static func draft(_ p: UtilityPayment, amountText: String) -> CutePhotoDraft {
+        let urls = p.photoFileNames.map { UtilityPayment.photosDirectory.appendingPathComponent($0) }
+        let note = p.note.trimmingCharacters(in: .whitespacesAndNewlines)
+        let parts = [amountText, note].filter { !$0.isEmpty }
+        return CutePhotoDraft(urls: urls, title: p.type.rawValue + " 繳費", note: parts.joined(separator: "・"),
+                              date: p.date, kind: .utility(p.type))
+    }
+}
+
+// MARK: 水電瓦斯：表那一列（[v25.620] 從 HouseUtilitiesSection 切出來，外觀照舊）
+
+/// 一個表一列：左邊圖示＋表名／號碼，右邊最近一期；點＝打開最近一期（沒有就記一筆），長按＝複製號碼、打開最近一期。
+/// 收據圖示是列旁邊的另一顆按鈕（不包在列按鈕裡）
+private struct HCUtilityMeterRow: View {
+    let meter: HouseUtilitiesData.Meter
+    let pal: TripBoardPalette
+    let actions: HouseCardActions
+
+    private var hint: String { meter.latest == nil ? "點兩下記一筆" : "點兩下打開最近一期" }
+
+    /// 收據照片標題下面那行的金額：跟「看全部」那一列同一個字（HouseCardData 都是 MoneyFormat.short(paymentAmount(p))）
+    private var receiptAmount: String {
+        if let a = meter.latestAmount { return a }
+        if let p = meter.latest { return MoneyFormat.short(p.amount) }
+        return ""
+    }
+
+    private var subtitle: String {
+        [meter.name, meter.owner, meter.userNumber].filter { !$0.isEmpty }.joined(separator: "・")
+    }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Button {
+                actions.openUtility(meter.latest)
+            } label: {
+                rowLabel
+            }
+            .buttonStyle(MoneyPressStyle())
+            .contextMenu {
+                menu
+            }
+            .accessibilityHint(hint)
+            if let p = meter.latest, meter.latestPhotoCount > 0 {
+                HCUtilityReceiptButton(payment: p, count: meter.latestPhotoCount, amountText: receiptAmount,
+                                       pal: pal, actions: actions)
+            }
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 10)
+    }
+
+    private var rowLabel: some View {
+        let tint: Color = HCColors.utility(meter.type, pal: pal)
+        let sub: String = subtitle
+        return HStack(spacing: 12) {
+            Image(systemName: meter.type.icon)
+                .font(.system(size: 15, weight: .bold))
+                .foregroundStyle(tint)
+                .frame(width: 36, height: 36)
+                .background(tint.opacity(0.15), in: Circle())
+                .accessibilityHidden(true)
+            VStack(alignment: .leading, spacing: 2) {
+                title
+                if !sub.isEmpty {
+                    Text(sub)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 6)
+            HCUtilityLatest(meter: meter, pal: pal)
+        }
+        .foregroundStyle(Color.primary)
+        .contentShape(Rectangle())
+    }
+
+    /// 「電號」一行、號碼自己一行（等寬字）。
+    /// [v25.560] 以前「電號 21-40-0218-50-1」擠在同一行、右邊又有日期金額，號碼被切成「21-40-0218-5…」；
+    /// 現在號碼獨佔一行，放不下才縮小字（最小 0.6），還放不下才換行
+    private var title: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(meter.title)
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(1)
+            if !meter.number.isEmpty {
+                Text(meter.number)
+                    .font(.system(.subheadline, design: .monospaced).weight(.semibold))
+                    .lineLimit(2)
+                    .minimumScaleFactor(0.6)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    /// 長按表號可以複製
+    @ViewBuilder
+    private var menu: some View {
+        if !meter.number.isEmpty {
+            Button {
+                UIPasteboard.general.string = meter.number
+            } label: {
+                Label("複製" + meter.title, systemImage: "doc.on.doc")
+            }
+        }
+        if meter.latest != nil {
+            Button {
+                actions.openUtility(meter.latest)
+            } label: {
+                Label("打開最近一期", systemImage: "pencil")
+            }
+        } else {
+            Button {
+                actions.openUtility(nil)
+            } label: {
+                Label("記一筆", systemImage: "plus")
+            }
+        }
+    }
+}
+
+/// 表那一列右邊的最近一期。
+/// [v25.560] 日期、金額分兩行，整塊不縮（fixedSize）——以前「10/17・NT$...」擠一行，金額被切掉
+private struct HCUtilityLatest: View {
+    let meter: HouseUtilitiesData.Meter
+    let pal: TripBoardPalette
+
+    var body: some View {
+        if let amount = meter.latestAmount {
+            HStack(spacing: 3) {
+                VStack(alignment: .trailing, spacing: 1) {
+                    if let d = meter.latestDate {
+                        Text(d)
+                            .font(.caption.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .monospacedDigit()
+                    }
+                    Text(amount)
+                        .font(.subheadline.weight(.heavy))
+                        .monospacedDigit()
+                }
+                .lineLimit(1)
+                .fixedSize()
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.tertiary)
+            }
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(meter.latestText ?? amount)
+        } else if let t = meter.latestText {
+            Text(t)
+                .font(.subheadline.weight(.heavy))
+                .monospacedDigit()
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        } else {
+            Text("記一筆")
+                .font(.caption.weight(.bold))
+                .foregroundStyle(pal.hint)
+        }
+    }
+}
+
+// MARK: 水電瓦斯：看全部的一列、收據按鈕（[v25.620] 切出來，外觀照舊）
+
+private struct HCUtilityPaymentRow: View {
+    let item: HouseUtilitiesData.Payment
+    let pal: TripBoardPalette
+    let actions: HouseCardActions
+
+    var body: some View {
+        let payment: UtilityPayment = item.payment
         return HStack(spacing: 8) {
             Button {
                 actions.openUtility(payment)
             } label: {
-                paymentLabel(p, pal: pal)
+                rowLabel
             }
             .buttonStyle(MoneyPressStyle())
             .contextMenu {
@@ -1635,17 +1680,18 @@ struct HouseUtilitiesSection: View {
                 }
             }
             .accessibilityAction(named: "編輯") { actions.openUtility(payment) }
-            if p.photoCount > 0 {
-                receiptButton(payment, count: p.photoCount, amountText: p.amountText, pal: pal)
+            if item.photoCount > 0 {
+                HCUtilityReceiptButton(payment: payment, count: item.photoCount, amountText: item.amountText,
+                                       pal: pal, actions: actions)
             }
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
     }
 
-    private func paymentLabel(_ p: HouseUtilitiesData.Payment, pal: TripBoardPalette) -> some View {
-        let type = p.payment.type
-        let tint = HCColors.utility(type, pal: pal)
+    private var rowLabel: some View {
+        let type: UtilityType = item.payment.type
+        let tint: Color = HCColors.utility(type, pal: pal)
         // 電費的字改用 A65300／FFC14D（白底上的 .yellow 看不清楚）；水、瓦斯用一般的灰字
         let typeInk: Color = type == .electricity ? tint : Color.secondary
         return HStack(spacing: 10) {
@@ -1654,14 +1700,14 @@ struct HouseUtilitiesSection: View {
                 .foregroundStyle(tint)
                 .frame(width: 22)
                 .accessibilityHidden(true)
-            Text(p.dateText)
+            Text(item.dateText)
                 .font(.subheadline.weight(.semibold))
                 .monospacedDigit()
-            Text(p.typeText)
+            Text(item.typeText)
                 .font(.subheadline)
                 .foregroundStyle(typeInk)
             Spacer(minLength: 6)
-            Text(p.amountText)
+            Text(item.amountText)
                 .font(.system(.subheadline, design: .rounded).weight(.heavy))
                 .monospacedDigit()
                 .lineLimit(1)
@@ -1669,24 +1715,194 @@ struct HouseUtilitiesSection: View {
         .foregroundStyle(Color.primary)
         .contentShape(Rectangle())
     }
+}
 
-    private func receiptButton(_ p: UtilityPayment, count: Int, amountText: String, pal: TripBoardPalette) -> some View {
+/// 收據圖示：點了用 CutePhotoViewer 看這一期全部照片
+private struct HCUtilityReceiptButton: View {
+    let payment: UtilityPayment
+    let count: Int
+    let amountText: String
+    let pal: TripBoardPalette
+    let actions: HouseCardActions
+
+    var body: some View {
         Button {
-            actions.showPhotos(Self.draft(p, amountText: amountText))
+            actions.showPhotos(HouseUtilitiesSection.draft(payment, amountText: amountText))
         } label: {
             HCPhotoBadge(count: count, pal: pal)
         }
         .buttonStyle(MoneyPressStyle())
         .accessibilityLabel("看收據照片，\(count) 張")
     }
+}
 
-    /// 全部收據照片（不再只看第一張）；水電一律看 photoFileNames
-    private static func draft(_ p: UtilityPayment, amountText: String) -> CutePhotoDraft {
-        let urls = p.photoFileNames.map { UtilityPayment.photosDirectory.appendingPathComponent($0) }
-        let note = p.note.trimmingCharacters(in: .whitespacesAndNewlines)
-        let parts = [amountText, note].filter { !$0.isEmpty }
-        return CutePhotoDraft(urls: urls, title: p.type.rawValue + " 繳費", note: parts.joined(separator: "・"),
-                              date: p.date, kind: .utility(p.type))
+// MARK: 水電瓦斯：趨勢小圖（[v25.620] judge_utility C9／C10）
+
+/// 白卡最上面：種類膠囊＋右上角「每期多少錢・近 2 年」、圖、圖例、說明行；下面一條分隔線。
+/// 近 2 年一期都沒有（board == nil）整塊不畫。點小圖**不開任何東西**（v1 沒有全頁），手指拖到哪一期只換說明行。
+/// 上次看的種類記在 UserDefaults（UtilityTrendMemory，只是個人方便；只在膠囊按鈕的動作裡寫，body 不寫）
+private struct HCUtilityTrendBlock: View {
+    let board: UtilityTrendBoard?
+    let estateId: UUID
+    let pal: TripBoardPalette
+    /// 使用者選的種類；nil＝還沒選過（照 board.defaultKind）。那一種沒了 board.panel(for:) 自己退回預設
+    @State private var kind: UtilityType? = nil
+    /// 手指點到的那一期（UtilityTrendPoint.key）；放開後留著，換種類清掉
+    @State private var pickedKey: String? = nil
+
+    init(board: UtilityTrendBoard?, estateId: UUID, pal: TripBoardPalette) {
+        self.board = board
+        self.estateId = estateId
+        self.pal = pal
+        _kind = State(initialValue: UtilityTrendMemory.load(estateId))
+    }
+
+    var body: some View {
+        if let b = board, let panel = b.panel(for: kind) {
+            VStack(alignment: .leading, spacing: 0) {
+                VStack(alignment: .leading, spacing: 8) {
+                    HCUtilityKindChips(kinds: b.kinds, current: panel.type, title: panel.title, pal: pal, onPick: pick)
+                    HCUtilityTrendBody(panel: panel, pal: pal, pickedKey: $pickedKey)
+                }
+                .padding(14)
+                Divider()
+            }
+        }
+    }
+
+    /// 只在按鈕動作裡寫 UserDefaults（不在 body／init）
+    private func pick(_ k: UtilityType) {
+        kind = k
+        pickedKey = nil
+        UtilityTrendMemory.save(k, estateId: estateId)
+    }
+}
+
+/// 圖＋圖例＋說明行；不到 2 期（chart == nil）只寫「記了 1 期水費（…），再記 1 期就畫出變化」＋補記提示
+private struct HCUtilityTrendBody: View {
+    let panel: UtilityTrendPanel
+    let pal: TripBoardPalette
+    @Binding var pickedKey: String?
+
+    var body: some View {
+        if let chart = panel.chart {
+            chartStack(chart)
+        } else {
+            HCUtilityTrendCaption(text: panel.pending ?? panel.defaultCaption, note: panel.pendingHint,
+                                  centered: false, pal: pal)
+        }
+    }
+
+    private func chartStack(_ chart: UtilityTrendChartData) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            UtilityTrendChart(chart: chart, pal: pal, height: 150, pickedKey: $pickedKey)
+            if !panel.legend.isEmpty {
+                UtilityTrendLegend(rows: panel.legend, type: panel.type, pal: pal)
+            }
+            HCUtilityTrendCaption(text: panel.caption(for: pickedKey), note: panel.hiddenMeterNote,
+                                  centered: true, pal: pal)
+        }
+    }
+}
+
+/// 種類膠囊〔電費〕〔水費〕〔瓦斯費〕（電 → 水 → 瓦斯）＋右上角小字
+private struct HCUtilityKindChips: View {
+    let kinds: [UtilityType]
+    let current: UtilityType
+    let title: String
+    let pal: TripBoardPalette
+    let onPick: (UtilityType) -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            ForEach(kinds, id: \.self) { k in
+                Button {
+                    onPick(k)
+                } label: {
+                    HCUtilityKindChip(type: k, on: k == current, pal: pal)
+                }
+                .buttonStyle(MoneyPressStyle())
+                .accessibilityAddTraits(traits(k))
+                .accessibilityHint("點兩下看" + k.rawValue + "趨勢")
+            }
+            Spacer(minLength: 6)
+            // 三顆膠囊＋這行在 375pt 寬剛好放得下，字放大時先縮字（最小 0.8）不截成「每期多少…」
+            Text(title)
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+    }
+
+    private func traits(_ k: UtilityType) -> AccessibilityTraits {
+        k == current ? .isSelected : []
+    }
+}
+
+/// 一顆膠囊：選中＝字與框用那一種的色、淡底；沒選＝一般字色、細框
+private struct HCUtilityKindChip: View {
+    let type: UtilityType
+    let on: Bool
+    let pal: TripBoardPalette
+
+    private var tint: Color { UtilityPalette.line(type, pal: pal) }
+    private var ink: Color { on ? tint : pal.label }
+    private var fillColor: Color { on ? tint.opacity(0.15) : Color.clear }
+    private var strokeColor: Color { on ? tint.opacity(0.5) : pal.label.opacity(0.25) }
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Image(systemName: type.icon)
+                .font(.caption2.weight(.bold))
+                .accessibilityHidden(true)
+            Text(type.rawValue)
+                .font(.caption.weight(.bold))
+                .lineLimit(1)
+        }
+        .foregroundStyle(ink)
+        .padding(EdgeInsets(top: 6, leading: 10, bottom: 6, trailing: 10))
+        .frame(minHeight: 32)
+        .background(chrome)
+        .contentShape(Capsule())
+    }
+
+    /// 底＋框疊成一個背景（少一層 ModifiedContent，depth 規則 10）
+    private var chrome: some View {
+        Capsule()
+            .fill(fillColor)
+            .overlay(Capsule().strokeBorder(strokeColor, lineWidth: 1))
+    }
+}
+
+/// 說明行：一律中性色（secondary），不用紅、不加箭頭；centered＝圖下面那行（照車子每度電價圖），不然靠左（只有 1 期）
+private struct HCUtilityTrendCaption: View {
+    let text: String
+    let note: String?
+    let centered: Bool
+    let pal: TripBoardPalette
+
+    private var stackAlign: HorizontalAlignment { centered ? .center : .leading }
+    private var textAlign: TextAlignment { centered ? .center : .leading }
+    private var frameAlign: Alignment { centered ? .center : .leading }
+    private var mainFont: Font { centered ? Font.caption.weight(.semibold) : Font.footnote }
+
+    var body: some View {
+        VStack(alignment: stackAlign, spacing: 3) {
+            Text(text)
+                .font(mainFont)
+                .foregroundStyle(.secondary)
+                .multilineTextAlignment(textAlign)
+                .fixedSize(horizontal: false, vertical: true)
+            if let note {
+                Text(note)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+                    .multilineTextAlignment(textAlign)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: frameAlign)
     }
 }
 
@@ -1901,6 +2117,7 @@ private enum HCText {
         switch tap {
         case .none: return ""
         case .scrollToMortgage: return "點兩下捲到房貸"
+        case .scrollToUtilities: return "點兩下捲到水電瓦斯"
         case .ledgerFilter(let f): return "點兩下在帳本只看「" + f.title + "」"
         case .edit: return "點兩下打開編輯頁"
         }
@@ -1954,13 +2171,8 @@ private enum HCColors {
     }
 
     /// 水藍、電琥珀（字也用這個：A65300／FFC14D）、瓦斯橘
-    static func utility(_ t: UtilityType, pal: TripBoardPalette) -> Color {
-        switch t {
-        case .water: return pick(0x2F7FE8, 0x7DB2FF, pal)
-        case .electricity: return pick(0xA65300, 0xFFC14D, pal)
-        case .gas: return pick(0xE07A2E, 0xFFA366, pal)
-        }
-    }
+    /// [v25.620] 色碼搬到 UtilityTrendChart.swift 的 UtilityPalette（趨勢小圖、v2 全頁共用），這裡轉呼叫
+    static func utility(_ t: UtilityType, pal: TripBoardPalette) -> Color { UtilityPalette.line(t, pal: pal) }
 
     /// 階梯圖：已繳實心藍紫、未繳淡色（深色的淡色也要對卡片底 3:1，所以不能只調透明度）
     static func stairPaid(_ pal: TripBoardPalette) -> Color { pick(0x6B4BE0, 0xB79CFF, pal) }

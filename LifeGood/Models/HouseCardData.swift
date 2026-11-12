@@ -211,6 +211,8 @@ enum HouseTap: Equatable {
     case none
     /// 捲到「房貸」區（actions.scrollTo(.mortgage)）
     case scrollToMortgage
+    /// [v25.620] 捲到「水電瓦斯」區（actions.scrollTo(.utilities)）
+    case scrollToUtilities
     /// 捲到「我的帳本」並把篩選切過去（actions.setLedgerFilter＋scrollTo(.ledger)）
     case ledgerFilter(HouseLedgerFilter)
     /// 打開編輯頁並捲到那一欄（actions.edit）
@@ -1028,7 +1030,7 @@ struct HouseUtilitiesData {
 
     /// 區塊標題右邊「近 12 個月 NT$2.7萬」；這段期間沒有繳費 nil
     var trailing: String? = nil
-    /// 近 12 個月合計（跟帳本「持有」裡的水電同一批）
+    /// 近 12 個月合計（[v25.620] 跟「每個月住這裡」的水電、小圖同一批：帳本裡的水電列，UtilityRows.build）
     var total12m: Double = 0
     /// 每個表一列：主表（水、電、瓦斯）在前，額外的表接在後面
     var meters: [Meter] = []
@@ -1036,6 +1038,8 @@ struct HouseUtilitiesData {
     var payments: [Payment] = []
     /// 「看全部 5 筆」；沒有繳費 nil
     var showAllTitle: String? = nil
+    /// [v25.620] 白卡最上面的趨勢小圖；近 2 年一期都沒有（或只有猜不到類型的）時 nil
+    var trend: UtilityTrendBoard? = nil
     /// 沒有表號也沒有繳費（縮成一行「＋ 記第一筆水電費（表號在「編輯」填）」）
     var isEmpty: Bool { meters.isEmpty && payments.isEmpty }
 }
@@ -1149,6 +1153,7 @@ struct HouseCardData {
         let trimmed = re.name.trimmingCharacters(in: .whitespacesAndNewlines)
         let name = trimmed.isEmpty ? "未命名房屋" : trimmed
         let ledger = HouseLedger.build(c)
+        let rows = utilityRows(c, ledger: ledger)
         let checks = HouseCheck.build(c, ledger: ledger)
         let scene = sceneModel(c, name: name)
 
@@ -1162,7 +1167,7 @@ struct HouseCardData {
         d.isBlank = !facts.hasMortgage && ledger.isEmpty
         d.checksTrailing = checks.isEmpty ? nil : "\(checks.count) 件"
         d.mortgage = mortgageData(c)
-        d.living = livingData(c, ledger: ledger)
+        d.living = livingData(c, ledger: ledger, rows: rows)
         let livingTotal = d.living?.total ?? 0
         d.rental = rentalData(c, livingTotal: livingTotal)
         let place = HousePlace.make(re)
@@ -1174,7 +1179,7 @@ struct HouseCardData {
         d.chips = chipsData(c, ledger: ledger, livingTotal: livingTotal)
         d.info = infoData(c, place: place)
         d.floors = floorsData(c)
-        d.utilities = utilitiesData(c)
+        d.utilities = utilitiesData(c, rows: rows)
         d.elevator = elevatorData(c)
         d.media = mediaData(c)
         return d
@@ -1823,7 +1828,7 @@ extension HouseCardData {
 // MARK: - 每個月住這裡、出租
 
 extension HouseCardData {
-    fileprivate static func livingData(_ c: HouseBuildContext, ledger: HouseLedger) -> HouseLivingData? {
+    fileprivate static func livingData(_ c: HouseBuildContext, ledger: HouseLedger, rows: UtilityRowSet) -> HouseLivingData? {
         let re = c.re
         let f = c.facts
         guard !re.isSold else { return nil }
@@ -1842,10 +1847,13 @@ extension HouseCardData {
         var upkeep = 0.0
         for e in ledger.events where e.bucket == .holding && !e.isYearRow && cal.startOfDay(for: e.date) >= startDay {
             switch e.mark {
-            case .utility: utility += e.amount
+            case .utility: break   // [v25.620] 水電改讀 rows（跟水電區「近 12 個月」、小圖同一批），這裡不加
             case .tax, .insurance: taxIns += e.amount
             default: upkeep += e.amount
             }
+        }
+        for r in rows.rows where cal.startOfDay(for: r.date) >= startDay {
+            utility += r.amount
         }
         // 稅費、保險一年繳一次，一律 ÷ 12；其他 ÷ 期間月數
         let utilityM = utility / Double(months)
@@ -1888,7 +1896,7 @@ extension HouseCardData {
             raw.append((kind: .mortgage, label: "房貸", value: mortgage, tap: .scrollToMortgage))
         }
         raw.append((kind: .fixed, label: "管理費等固定費用", value: fixed, tap: .ledgerFilter(.holding)))
-        raw.append((kind: .utility, label: "水電瓦斯", value: utilityM, tap: .ledgerFilter(.holding)))
+        raw.append((kind: .utility, label: "水電瓦斯", value: utilityM, tap: .scrollToUtilities))
         raw.append((kind: .taxInsurance, label: "稅費・保險", value: taxInsM + fixedTax, tap: .ledgerFilter(.holding)))
         raw.append((kind: .upkeep, label: "維修・清潔・其他", value: upkeepM, tap: .ledgerFilter(.holding)))
         raw = raw.filter { $0.value > 0.5 }
@@ -2226,7 +2234,14 @@ extension HouseCardData {
         }
     }
 
-    fileprivate static func utilitiesData(_ c: HouseBuildContext) -> HouseUtilitiesData {
+    /// [v25.620] 水電列（judge C7）：帳本裡 mark == .utility 的非年列，build 算一次，給水電區、每個月住這裡、小圖。
+    /// 本體在 UtilityTrendData.swift（HouseBuildContext 是 private，那邊吃公開的輸入），擁有權規則只有 HouseLedger.build 一份
+    fileprivate static func utilityRows(_ c: HouseBuildContext, ledger: HouseLedger) -> UtilityRowSet {
+        UtilityRows.build(estate: c.re, events: ledger.events, expensesById: c.byId,
+                          slots: UtilityMeterSlotIndex(c.re.utilityMeterSlots()))
+    }
+
+    fileprivate static func utilitiesData(_ c: HouseBuildContext, rows: UtilityRowSet) -> HouseUtilitiesData {
         let re = c.re
         let cal = c.cal
         var u = HouseUtilitiesData()
@@ -2249,8 +2264,8 @@ extension HouseCardData {
 
         // [v25.560] 每個表一格（一格電號填了兩個號碼的，拆成兩個表）；繳費有指定表（meterId）的掛在那個表，
         // 沒指定的（舊資料、只有一個表）掛在那一種的第一個表。
-        let slots = re.utilityMeterSlots()
-        let slotIds = Set(slots.map(\.id))
+        let slotIndex = UtilityMeterSlotIndex(re.utilityMeterSlots())
+        let slots = slotIndex.slots
         var order: [UUID: Int] = [:]
         for (i, p) in re.utilityPayments.enumerated() { order[p.id] = i }
         /// 比較新：日期大的；同一天取陣列裡後面那筆（只有這一份實作）
@@ -2263,7 +2278,7 @@ extension HouseCardData {
         var anyPayment = Set<UtilityType>()
         for p in re.utilityPayments {
             anyPayment.insert(p.type)
-            if let mid = p.meterId, slotIds.contains(mid) {
+            if let mid = p.meterId, slotIndex.contains(mid) {
                 if let cur = latestByMeter[mid], !newer(p, than: cur) { continue }
                 latestByMeter[mid] = p
             } else {
@@ -2277,8 +2292,7 @@ extension HouseCardData {
         for slot in slots {
             // 沒填表號的主表：有繳費、又沒有別的同種表時，還是列一列「電費（沒填電號）」
             if slot.number.isEmpty && slot.isMain {
-                let hasOther = slots.contains { $0.type == slot.type && $0.id != slot.id }
-                guard anyPayment.contains(slot.type) && !hasOther else { continue }
+                guard anyPayment.contains(slot.type) && !UtilityMeterSlotIndex.hidesMain(slot, in: slots) else { continue }
             }
             var mine: UtilityPayment? = latestByMeter[slot.id]
             if !claimed.contains(slot.type) {
@@ -2314,14 +2328,11 @@ extension HouseCardData {
         }
         if !u.payments.isEmpty { u.showAllTitle = "看全部 \(u.payments.count) 筆" }
 
-        // 近 12 個月＝asOf 往前 12 個月內
-        let back = cal.startOfDay(for: cal.date(byAdding: .month, value: -12, to: c.asOf) ?? c.asOf)
-        var total = 0.0
-        for p in re.utilityPayments where cal.startOfDay(for: p.date) >= back && c.onOrBeforeAsOf(p.date) {
-            total += paymentAmount(p)
-        }
+        // 近 12 個月＝asOf 往前 12 個月內（[v25.620] 讀 rows：跟「每個月住這裡」的水電、小圖同一批）
+        let total = rows.total12m(asOf: c.asOf, cal: cal)
         u.total12m = total
         if total > 0 { u.trailing = "近 12 個月 " + MoneyFormat.short(total) }
+        u.trend = UtilityTrendBuild.board(rows, slots: slotIndex, asOf: c.asOf, cal: cal)
         return u
     }
 

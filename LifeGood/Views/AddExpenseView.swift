@@ -5295,32 +5295,9 @@ struct AddExpensePreset {
 /// 以前只看標題有沒有「水」字，房子叫「水岸花園」，電費也被當成水費。
 /// 所以先把房子名稱、自動標題裡的「水電瓦斯」字樣拿掉（標題和備註都拿），再照「瓦斯 → 電 → 水」的順序找；
 /// 標題找不到才看備註；都沒有就用原本的預設（電費）。
+/// [v25.620] 本體搬到 Models/UtilityTrendData.swift 的 guessUtilityTypeIfAny（趨勢圖要「猜不到」）；這裡只轉呼叫，行為不變。
 func guessUtilityType(title: String, note: String = "", estateName: String) -> UtilityType {
-    func match(_ text: String) -> UtilityType? {
-        let lower = text.lowercased()
-        let gasWords = ["瓦斯", "天然氣", "gas"]
-        let electricWords = ["電", "台電", "electric"]
-        let waterWords = ["水費", "自來水", "台水", "水", "water"]
-        if gasWords.contains(where: { lower.contains($0) }) { return .gas }
-        if electricWords.contains(where: { lower.contains($0) }) { return .electricity }
-        if waterWords.contains(where: { lower.contains($0) }) { return .water }
-        return nil
-    }
-    var cleaned = title
-    let name = estateName.trimmingCharacters(in: .whitespaces)
-    // 新增物件沒填名稱時，房子名稱就是拿標題當的；整段拿掉就什麼都不剩，這時不拿
-    if !name.isEmpty && name != title.trimmingCharacters(in: .whitespaces) {
-        cleaned = cleaned.replacingOccurrences(of: name, with: " ")
-    }
-    cleaned = cleaned.replacingOccurrences(of: RealEstateExpenseCategory.utility.rawValue, with: " ")
-    // 選既有物件時標題是自動的，備註才是真的資訊，常會打房子名稱（「水岸花園 9月」），所以備註也一樣清；
-    // 備註不會被拿去當房子名稱，不需要上面那個例外
-    var cleanedNote = note
-    if !name.isEmpty {
-        cleanedNote = cleanedNote.replacingOccurrences(of: name, with: " ")
-    }
-    cleanedNote = cleanedNote.replacingOccurrences(of: RealEstateExpenseCategory.utility.rawValue, with: " ")
-    return match(cleaned) ?? match(cleanedNote) ?? .electricity
+    guessUtilityTypeIfAny(title: title, note: note, estateName: estateName) ?? .electricity
 }
 
 // MARK: - [v25.563] 改金額問「從哪時候起」（D9；記帳表單的固定支出、收入表單共用）
