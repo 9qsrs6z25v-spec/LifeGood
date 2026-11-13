@@ -72,43 +72,155 @@ struct PlaceDistanceBadge: View {
     }
 }
 
+// MARK: - 一次「在地圖上選位置」的進度（v25.627）
+
+/// [v25.627] 一次「在地圖上選位置」的進度：鏡頭、搜尋字、點到的點。
+///
+/// 由〔在地圖上選位置〕那一列在按下去那一刻建立、交給 sheet（sheet(item:) 的 item 就是它）。
+/// sheet 的畫面就算被系統重建，也從這裡接著來：不會回到打開時的位置，打到一半的字也不會不見。
+/// 以前這些都是 sheet 自己的 @State，畫面一重建就全部回到初值（地圖跳回打開時的中心）。
+///
+/// 不標 @MainActor（跟 LocationProvider、RestaurantSearchCompleter 一樣）：只在主執行緒上被碰到，
+/// 標了反而在 Swift 5 模式下讓 Identifiable 出隔離警告。
+/// 判斷用的都是 static 純函式，畫面只負責把結果套上去（sim_mappicker.py 一個函式一個函式對照）。
+final class MapPickerSession: ObservableObject, Identifiable {
+    let id = UUID()
+    /// 打開時要停的地方（已有座標＞使用者位置＞台北車站）
+    let start: CLLocationCoordinate2D
+    /// 打開時就帶著座標（在微調）；false＝在找地方
+    let startedWithCoordinate: Bool
+    /// 地圖鏡頭（Map(position:) 綁這個）。使用者挪過之後會被寫成「現在這個鏡頭」，見 shouldWriteBack
+    @Published var position: MapCameraPosition
+    /// 地圖現在的中心（準心指的那一點）
+    @Published var center: CLLocationCoordinate2D
+    /// 搜尋列打的字
+    @Published var query: String = ""
+    /// 在地圖上點到的那一點（或搜尋選中的那一筆）。有值時就用它，不看準心
+    @Published var tapped: MapPlacePickerSheet.TappedPoint? = nil
+    /// 畫面上下大約涵蓋幾公尺（點擊容許誤差用；不必觸發重繪）
+    var visibleMeters: Double = 1_000
+    /// 使用者正在打字（焦點在搜尋列）。只有我們自己的動作會把它關掉：
+    /// 選了搜尋建議、按鍵盤的搜尋、打字中點地圖、〔取消〕
+    var searchActive = false
+    /// 畫面重建後把焦點還回去的次數（最多 maxFocusRestores 次，防止「鍵盤 → 重建 → 鍵盤」打轉）
+    var focusRestores = 0
+
+    /// 沒有任何線索時的起點：台北車站。總比落在大西洋上好。
+    static let fallbackCenter = CLLocationCoordinate2D(latitude: 25.0478, longitude: 121.5170)
+    /// 綁定裡記的位置跟地圖現在停的位置差超過這麼多公尺，就算綁定過時
+    static let staleMeters: CLLocationDistance = 3
+    /// 重建後最多把焦點還回去幾次
+    static let maxFocusRestores = 2
+    /// 使用者位置超過這麼多秒才重新要一次
+    static let locationMaxAge: TimeInterval = 120
+    /// 點地圖時，離搜尋層底線、定位鈕這麼近（pt）也不算點地圖
+    static let tapMargin: CGFloat = 4
+
+    init(initialCoordinate: CLLocationCoordinate2D?) {
+        let start = initialCoordinate
+            ?? LocationProvider.shared.lastLocation?.coordinate
+            ?? Self.fallbackCenter
+        self.start = start
+        self.startedWithCoordinate = initialCoordinate != nil
+        self.center = start
+        // 已經有座標就貼近一點（在微調），沒有就拉遠一點（在找地方）
+        let span = initialCoordinate == nil ? 0.05 : 0.004
+        self.position = .region(MKCoordinateRegion(
+            center: start,
+            span: MKCoordinateSpan(latitudeDelta: span, longitudeDelta: span)))
+    }
+
+    /// 地圖停下來（onMapCameraChange .onEnd）時，要不要把「現在這個鏡頭」寫回 position。
+    ///
+    /// 使用者挪過（MapKit 回寫的是不帶位置的 positionedByUser），或綁定裡還是舊位置（差超過 3 公尺），
+    /// 就寫。畫面若被重建，新的地圖就從這裡開，不會跳回打開時的位置。
+    /// 寫進去的就是現在的鏡頭，下一次 onEnd 比對相同就不會再寫，不會打轉。
+    /// 按定位鈕之後的 .userLocation 沒有座標、也不是 positionedByUser：不寫，保留「跟著我」。
+    static func shouldWriteBack(_ p: MapCameraPosition,
+                                cameraCenter c: CLLocationCoordinate2D) -> Bool {
+        p.positionedByUser || isStale(p, comparedTo: c)
+    }
+
+    /// 綁定裡記的位置跟地圖現在停的位置差超過 3 公尺（＝綁定已經過時）。
+    /// 綁定是「跟著使用者位置」或「使用者挪過」這種沒有座標的，就不算過時。
+    static func isStale(_ p: MapCameraPosition, comparedTo c: CLLocationCoordinate2D) -> Bool {
+        guard let s = p.region?.center ?? p.camera?.centerCoordinate else { return false }
+        let a = CLLocation(latitude: s.latitude, longitude: s.longitude)
+        let b = CLLocation(latitude: c.latitude, longitude: c.longitude)
+        return a.distance(from: b) > staleMeters
+    }
+
+    /// 畫面（重新）出現時要不要把焦點還給搜尋列。會記次數，所以每次呼叫只問一次。
+    /// 第一次打開時 searchActive 是 false，不會自動跳鍵盤。
+    func takeFocusRestore() -> Bool {
+        guard searchActive, focusRestores < Self.maxFocusRestores else { return false }
+        focusRestores += 1
+        return true
+    }
+
+    /// 點了地圖要做什麼
+    enum TapAction: Equatable {
+        /// 正在打字：只收鍵盤，不算選點（第一下是「不打了」）
+        case dismissKeyboard
+        /// 落在搜尋列、建議清單、定位鈕那一塊：不算點地圖
+        case ignore
+        /// 選這一點（就近找地標）
+        case pick
+    }
+
+    /// 點地圖的判斷。p、searchBottom、controlsFrame 都是同一個座標（地圖的左上角＝原點）。
+    /// controlsFrame 是 .zero（空的）＝定位鈕收起來了。
+    static func tapAction(at p: CGPoint, searchFocused: Bool,
+                          searchBottom: CGFloat, controlsFrame: CGRect) -> TapAction {
+        if searchFocused { return .dismissKeyboard }
+        if p.y <= searchBottom + tapMargin { return .ignore }
+        if !controlsFrame.isEmpty,
+           controlsFrame.insetBy(dx: -tapMargin, dy: -tapMargin).contains(p) { return .ignore }
+        return .pick
+    }
+
+    /// 打開地圖時要不要重新要一次使用者位置：沒有位置、或位置超過 2 分鐘才要。
+    /// 以前每次打開都要一次，1–2 秒後位置發布，連帶把底下的記帳表單叫醒重繪。
+    static func needsLocationRefresh(_ last: CLLocation?, now: Date = Date()) -> Bool {
+        guard let last else { return true }
+        return now.timeIntervalSince(last.timestamp) > locationMaxAge
+    }
+}
+
 struct MapPlacePickerSheet: View {
     @Environment(\.dismiss) private var dismiss
 
-    /// 打開時要停在哪裡（這一站已有的座標、或上一站的、或使用者位置）
-    let initialCoordinate: CLLocationCoordinate2D?
+    /// [v25.627] 這一次選位置的進度（鏡頭、搜尋字、點到的點）。由〔在地圖上選位置〕那一列建立，
+    /// 畫面被重建時從這裡接著來（以前是這個畫面自己的 @State，一重建就回到打開時的位置）
+    @ObservedObject private var session: MapPickerSession
     /// 回傳挑到的地點（名稱、地址、座標、電話）
     let onPick: (PickedPlace) -> Void
     /// 主色。各畫面各有自己的色系（旅遊紫、飲食橘…），預設沿用旅遊的
     var accent: Color = TripDayPalette.color(0)
 
-    @StateObject private var locationProvider = LocationProvider.shared
-
-    @State private var position: MapCameraPosition
-    @State private var center: CLLocationCoordinate2D
     @State private var address = ""
     @State private var suggestedName: String?
     @State private var isResolving = false
-    /// 在地圖上點到的那一點。有值時就用它，不看畫面中央的準心。
-    ///
-    /// ⚠️ 不用 Map(selection:) 那套：MapSelection 是 iOS 18 才有的，這個 App
-    ///    最低支援 iOS 17（送審時整包編不過就是卡在這裡）。改成自己接點擊：
-    ///    MapReader 把畫面座標換成經緯度，再就近找一筆地標，效果一樣而且 iOS 17 可用。
-    @State private var tapped: TappedPoint?
     /// 正在找手指按到的是哪個地標
     @State private var isPickingPOI = false
-    /// 畫面上下大約涵蓋幾公尺（用來換算點擊的容許誤差）
-    @State private var visibleMeters: Double = 1_000
 
     /// [v25.431] 搜尋地名／店名，選中就把地圖飛過去。
     ///
     /// 沒有它的時候，要選一個遠方的地點只能一路拖、一路縮——
     /// 規劃國外行程時尤其難用（從台灣拖到福岡）。
     @StateObject private var searchCompleter = RestaurantSearchCompleter()
-    @State private var query = ""
     @State private var searchDebounce: Task<Void, Never>?
     @State private var isJumping = false
     @FocusState private var searchFocused: Bool
+
+    /// [v25.627] 定位鈕、指北針跟地圖用同一個 scope（照 RunTrackingView），才能排在搜尋列下面
+    @Namespace private var mapScope
+    /// [v25.627] 搜尋列＋建議清單的底（canvas 座標＝地圖的座標）。點地圖落在這條線以上不算選點
+    @State private var searchBottom: CGFloat = 64
+    /// [v25.627] 定位鈕＋指北針那一塊（canvas 座標）。收起來時是 .zero
+    @State private var controlsFrame: CGRect = .zero
+    /// 地圖、資訊卡、搜尋層共用的座標空間。Map 的左上角就是它的原點（Map 只往下延伸）
+    private static let canvasSpace = "mapPickerCanvas"
 
     struct TappedPoint: Equatable {
         let coordinate: CLLocationCoordinate2D
@@ -125,25 +237,25 @@ struct MapPlacePickerSheet: View {
         }
     }
 
-    /// 沒有任何線索時的起點：台北車站。總比落在大西洋上好。
-    private static let fallbackCenter = CLLocationCoordinate2D(latitude: 25.0478,
-                                                              longitude: 121.5170)
-
-    init(initialCoordinate: CLLocationCoordinate2D?,
+    init(session: MapPickerSession,
          accent: Color = TripDayPalette.color(0),
          onPick: @escaping (PickedPlace) -> Void) {
-        self.initialCoordinate = initialCoordinate
+        _session = ObservedObject(wrappedValue: session)
         self.accent = accent
         self.onPick = onPick
-        let start = initialCoordinate
-            ?? LocationProvider.shared.lastLocation?.coordinate
-            ?? Self.fallbackCenter
-        _center = State(initialValue: start)
-        // 已經有座標就貼近一點（在微調），沒有就拉遠一點（在找地方）
-        let span = initialCoordinate == nil ? 0.05 : 0.004
-        _position = State(initialValue: .region(MKCoordinateRegion(
-            center: start,
-            span: MKCoordinateSpan(latitudeDelta: span, longitudeDelta: span))))
+    }
+
+    // [v25.627] 轉接：狀態搬進 session，原本讀這些名字的地方不用改
+    private var center: CLLocationCoordinate2D { session.center }
+    private var query: String { session.query }
+    /// 在地圖上點到的那一點。有值時就用它，不看畫面中央的準心。
+    ///
+    /// ⚠️ 不用 Map(selection:) 那套：MapSelection 是 iOS 18 才有的，這個 App
+    ///    最低支援 iOS 17（送審時整包編不過就是卡在這裡）。改成自己接點擊：
+    ///    MapReader 把畫面座標換成經緯度，再就近找一筆地標，效果一樣而且 iOS 17 可用。
+    private var tapped: TappedPoint? {
+        get { session.tapped }
+        nonmutating set { session.tapped = newValue }
     }
 
     var body: some View {
@@ -153,28 +265,52 @@ struct MapPlacePickerSheet: View {
                 infoCard
             }
             .overlay(alignment: .top) { searchOverlay }
+            // [v25.627] 地圖、搜尋層同一個座標空間（點地圖時判斷是不是點在搜尋列那一塊）、
+            // 同一個 mapScope（定位鈕、指北針排在搜尋列下面，見 mapControlsColumn）
+            .coordinateSpace(.named(Self.canvasSpace))
+            .mapScope(mapScope)
             .navigationTitle("在地圖上選位置")
             .navigationBarTitleDisplayMode(.inline)
             .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("取消") { dismiss() } }
+                ToolbarItem(placement: .topBarLeading) {
+                    Button("取消") {
+                        session.searchActive = false
+                        dismiss()
+                    }
+                }
             }
-            .onAppear {
-                locationProvider.requestIfNeeded()
-                // 這個畫面要能打地名與地址，不只是店名——預設的 POI-only
-                // 會讓「大名 115-30」這種查不到東西
-                searchCompleter.setResultTypes([.pointOfInterest, .address])
-                // 距離從**地圖現在看的地方**量，不是從使用者身上量。
-                // 在台北規劃福岡的行程時，每一筆都是「1200 公里」，
-                // 那個數字沒有幫任何人挑到任何東西。
-                searchCompleter.setReference(CLLocation(latitude: center.latitude,
-                                                        longitude: center.longitude))
-                searchCompleter.setRegion(MKCoordinateRegion(
-                    center: center,
-                    span: MKCoordinateSpan(latitudeDelta: 0.5, longitudeDelta: 0.5)))
-            }
+            .onAppear { appear() }
             .onDisappear { searchDebounce?.cancel() }
             // 點到別的地標、或挪動地圖之後，都要重查一次地址
             .task(id: resolveKey) { await resolve(pickedCoordinate) }
+        }
+    }
+
+    private func appear() {
+        // [v25.627] 不再每次打開都重新定位（C7）：沒有位置、或位置超過 2 分鐘才要一次。
+        // 以前每次都要，1–2 秒後位置發布，連帶把底下的記帳表單叫醒重繪
+        let lp = LocationProvider.shared
+        if MapPickerSession.needsLocationRefresh(lp.lastLocation) { lp.requestIfNeeded() }
+        // 這個畫面要能打地名與地址，不只是店名——預設的 POI-only
+        // 會讓「大名 115-30」這種查不到東西
+        searchCompleter.setResultTypes([.pointOfInterest, .address])
+        // 距離從**地圖現在看的地方**量，不是從使用者身上量。
+        // 在台北規劃福岡的行程時，每一筆都是「1200 公里」，
+        // 那個數字沒有幫任何人挑到任何東西。
+        searchCompleter.setReference(CLLocation(latitude: center.latitude,
+                                                longitude: center.longitude))
+        searchCompleter.setRegion(MKCoordinateRegion(
+            center: center,
+            span: MKCoordinateSpan(latitudeDelta: 0.5, longitudeDelta: 0.5)))
+        // [v25.627] 畫面被重建時：打到一半的字接著查、焦點還回去（最多 2 次，防止打轉）
+        if !session.query.isEmpty, searchCompleter.results.isEmpty {
+            scheduleSearch(session.query)
+        }
+        if session.takeFocusRestore() {
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 350_000_000)
+                searchFocused = true
+            }
         }
     }
 
@@ -182,7 +318,7 @@ struct MapPlacePickerSheet: View {
         // MapReader 才拿得到「畫面上的點 → 經緯度」的換算（iOS 17 就有）
         MapReader { proxy in
             ZStack {
-                Map(position: $position) {
+                Map(position: $session.position, scope: mapScope) {
                     UserAnnotation()
                     if let tapped {
                         Annotation(tapped.name ?? "選取的位置", coordinate: tapped.coordinate) {
@@ -192,35 +328,59 @@ struct MapPlacePickerSheet: View {
                 }
                 // POI 這裡要開著：使用者是靠地標認位置的，全部關掉就只剩一片空白底圖
                 .mapStyle(.standard(pointsOfInterest: .all))
-                .mapControls {
-                    MapUserLocationButton()
-                    MapCompass()
-                }
-                .onMapCameraChange(frequency: .onEnd) { context in
-                    center = context.region.center
-                    // 記下目前看到多大範圍，決定「點下去算是點到哪個地標」的容許距離
-                    visibleMeters = context.region.span.latitudeDelta * 111_000
-                    // 搜尋建議以目前看到的範圍為優先：在福岡看地圖時打「7-11」
-                    // 該先給福岡的，不是台北的
-                    searchCompleter.setRegion(context.region)
-                    // 距離也跟著重新量：地圖挪到哪，「多遠」就是從那裡算起。
-                    // 移動不到 200 公尺不會重算（見 setReference）。
-                    searchCompleter.setReference(
-                        CLLocation(latitude: context.region.center.latitude,
-                                   longitude: context.region.center.longitude))
-                }
+                // [v25.627] 不放系統的控制項：系統的定位鈕在右上角，被搜尋列疊住一半，
+                // 點搜尋列右邊會按到它（地圖被拉回藍點、也打不了字）。改排在搜尋列下面，見 mapControlsColumn
+                .mapControls { }
+                .onMapCameraChange(frequency: .onEnd) { context in cameraEnded(context) }
                 // 拖曳與縮放是拖／捏的手勢，單點不會被地圖吃掉，所以可以直接接
-                .onTapGesture { screenPoint in
-                    // 點地圖就是不想再打字了，鍵盤先收起來
-                    searchFocused = false
-                    guard let coordinate = proxy.convert(screenPoint, from: .local) else { return }
-                    Task { await pickPOI(at: coordinate) }
-                }
-                .ignoresSafeArea(edges: .bottom)
+                .onTapGesture { screenPoint in mapTapped(at: screenPoint, proxy: proxy) }
 
                 // 已經點過地圖就不要再畫準心——兩個「我選的是這裡」會互相打架
                 if tapped == nil { crosshair }
             }
+            // [v25.627] 從 Map 搬到這裡：地圖和準心用同一塊範圍置中，準心指的就是會被記下來的那一點；
+            // 鍵盤出來時兩個都不跟著縮（以前只有 Map 忽略，準心會往上跑半個鍵盤高）
+            .ignoresSafeArea(edges: .bottom)
+        }
+    }
+
+    private func cameraEnded(_ context: MapCameraUpdateContext) {
+        session.center = context.region.center
+        // 記下目前看到多大範圍，決定「點下去算是點到哪個地標」的容許距離
+        session.visibleMeters = context.region.span.latitudeDelta * 111_000
+        // [v25.627] 鏡頭跟著手指：使用者挪過、或綁定裡還是舊位置，就把「現在這個鏡頭」寫回去。
+        // 用 .camera 不用 .region：.region 會把使用者轉過的方向轉回正北
+        if MapPickerSession.shouldWriteBack(session.position,
+                                            cameraCenter: context.camera.centerCoordinate) {
+            session.position = .camera(context.camera)
+        }
+        // 搜尋建議以目前看到的範圍為優先：在福岡看地圖時打「7-11」
+        // 該先給福岡的，不是台北的
+        searchCompleter.setRegion(context.region)
+        // 距離也跟著重新量：地圖挪到哪，「多遠」就是從那裡算起。
+        // 移動不到 200 公尺不會重算（見 setReference）。
+        searchCompleter.setReference(
+            CLLocation(latitude: context.region.center.latitude,
+                       longitude: context.region.center.longitude))
+    }
+
+    /// 點了地圖。點的位置是地圖自己的座標（.local），它的原點就是 canvas 的原點，
+    /// 所以可以直接跟 searchBottom、controlsFrame 比。
+    private func mapTapped(at screenPoint: CGPoint, proxy: MapProxy) {
+        let action = MapPickerSession.tapAction(at: screenPoint, searchFocused: searchFocused,
+                                                searchBottom: searchBottom,
+                                                controlsFrame: controlsFrame)
+        switch action {
+        case .dismissKeyboard:
+            // 正在打字時點地圖：只收鍵盤，不算選點（第一下是「不打了」）
+            searchFocused = false
+            session.searchActive = false
+        case .ignore:
+            // 落在搜尋列、建議清單、定位鈕那一塊的點擊不算點地圖
+            break
+        case .pick:
+            guard let coordinate = proxy.convert(screenPoint, from: .local) else { return }
+            Task { await pickPOI(at: coordinate) }
         }
     }
 
@@ -230,21 +390,72 @@ struct MapPlacePickerSheet: View {
     /// 地圖看得越大越好找，而搜尋列多數時候只是待在那裡不動。
     private var searchOverlay: some View {
         VStack(spacing: 6) {
+            VStack(spacing: 6) {
+                searchField
+                if !searchCompleter.results.isEmpty { suggestionList }
+            }
+            // [v25.627] 量出搜尋列＋建議清單的底：點地圖落在這條線以上不算選點
+            .onGeometryChange(for: CGFloat.self) { proxy in
+                proxy.frame(in: .named(Self.canvasSpace)).maxY
+            } action: { y in
+                searchBottom = y
+            }
+            if showMapControls { mapControlsColumn }
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, 8)
+    }
+
+    /// [v25.627] 打字中、有建議清單時先把定位鈕收起來，免得又疊到
+    private var showMapControls: Bool {
+        !searchFocused && searchCompleter.results.isEmpty
+    }
+
+    /// [v25.627] 定位鈕、指北針排在搜尋列下面靠右。以前是系統預設的右上角，
+    /// 被搜尋列疊住一半，點搜尋列右邊會按到定位鈕，地圖被拉回藍點、也打不了字。
+    /// Spacer 那一塊是透明的，不吃點擊，地圖照樣拖得動、點得到。
+    private var mapControlsColumn: some View {
+        HStack {
+            Spacer(minLength: 0)
+            VStack(spacing: 8) {
+                MapUserLocationButton(scope: mapScope)
+                MapCompass(scope: mapScope)
+            }
+            .onGeometryChange(for: CGRect.self) { proxy in
+                proxy.frame(in: .named(Self.canvasSpace))
+            } action: { r in
+                controlsFrame = r
+            }
+            .onDisappear { controlsFrame = .zero }
+        }
+        .padding(.top, 2)
+    }
+
+    private var searchField: some View {
             HStack(spacing: 8) {
                 Image(systemName: "magnifyingglass")
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(.secondary)
-                TextField("搜尋地名、店名或地址", text: $query)
+                    // [v25.627] 點放大鏡也算點搜尋列：讓點擊穿到背景那層
+                    .allowsHitTesting(false)
+                TextField("搜尋地名、店名或地址", text: $session.query)
                     .autocorrectionDisabled()
                     .submitLabel(.search)
                     .focused($searchFocused)
-                    .onChange(of: query) { _, newValue in scheduleSearch(newValue) }
-                    .onSubmit { jumpToFirstResult() }
+                    .onChange(of: session.query) { _, newValue in scheduleSearch(newValue) }
+                    .onChange(of: searchFocused) { _, focused in
+                        // 只記「開始打字」；false 不在這裡清（重建時舊畫面可能先送一個 false）
+                        if focused { session.searchActive = true }
+                    }
+                    .onSubmit {
+                        session.searchActive = false
+                        jumpToFirstResult()
+                    }
                 if isJumping {
                     ProgressView().scaleEffect(0.6)
                 } else if !query.isEmpty {
                     Button {
-                        query = ""
+                        session.query = ""
                         searchCompleter.clear()
                     } label: {
                         Image(systemName: "xmark.circle.fill")
@@ -254,13 +465,18 @@ struct MapPlacePickerSheet: View {
                 }
             }
             .padding(.horizontal, 12).padding(.vertical, 9)
-            .background(.ultraThinMaterial)
-            .clipShape(RoundedRectangle(cornerRadius: 12))
+            .background {
+                RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial)
+                    // [v25.627] 點到放大鏡、左右留白也算點搜尋列。手勢掛在背景上，
+                    // 不是 TextField 的上層，不會跟 TextField 自己的點擊打架
+                    .onTapGesture { searchFocused = true }
+            }
             .overlay(RoundedRectangle(cornerRadius: 12)
                 .stroke(Color(.separator).opacity(0.18), lineWidth: 0.75))
             .shadow(color: .black.opacity(0.10), radius: 5, y: 2)
+    }
 
-            if !searchCompleter.results.isEmpty {
+    private var suggestionList: some View {
                 VStack(spacing: 0) {
                     ForEach(Array(searchCompleter.results.prefix(6).enumerated()),
                             id: \.offset) { index, r in
@@ -268,25 +484,9 @@ struct MapPlacePickerSheet: View {
                             Divider().padding(.leading, 12)
                         }
                         Button { jump(to: r) } label: {
-                            HStack(spacing: 8) {
-                                Image(systemName: "mappin.circle")
-                                    .font(.system(size: 12)).foregroundStyle(accent)
-                                VStack(alignment: .leading, spacing: 1) {
-                                    MarqueeText(r.title)
-                                        .font(.subheadline).foregroundStyle(.primary)
-                                    if !r.subtitle.isEmpty {
-                                        Text(r.subtitle)
-                                            .font(.caption2).foregroundStyle(.secondary)
-                                            .lineLimit(1)
-                                    }
-                                }
-                                Spacer(minLength: 0)
-                                PlaceDistanceBadge(
-                                    meters: searchCompleter.distance(for: r),
-                                    icon: "scope")
-                            }
-                            .padding(.horizontal, 12).padding(.vertical, 9)
-                            .contentShape(Rectangle())
+                            MapPickerSuggestionLabel(title: r.title, subtitle: r.subtitle,
+                                                     meters: searchCompleter.distance(for: r),
+                                                     accent: accent)
                         }
                         .buttonStyle(.plain)
                     }
@@ -296,10 +496,6 @@ struct MapPlacePickerSheet: View {
                 .overlay(RoundedRectangle(cornerRadius: 12)
                     .stroke(Color(.separator).opacity(0.18), lineWidth: 0.75))
                 .shadow(color: .black.opacity(0.12), radius: 6, y: 2)
-            }
-        }
-        .padding(.horizontal, 12)
-        .padding(.top, 8)
     }
 
     private func scheduleSearch(_ q: String) {
@@ -326,6 +522,7 @@ struct MapPlacePickerSheet: View {
     /// 飛過去之後還要再點一次才算數的話，等於只做了一半。
     private func jump(to completion: MKLocalSearchCompletion) {
         searchFocused = false
+        session.searchActive = false
         isJumping = true
         searchDebounce?.cancel()
         Task { @MainActor in
@@ -337,17 +534,17 @@ struct MapPlacePickerSheet: View {
             isJumping = false
             guard let item else { return }
             let coordinate = item.placemark.coordinate
-            center = coordinate
+            session.center = coordinate
             let name = item.name?.trimmingCharacters(in: .whitespaces)
             tapped = TappedPoint(coordinate: coordinate,
                                  name: (name?.isEmpty ?? true) ? nil : name,
                                  phone: item.phoneNumber)
             withAnimation(.easeInOut(duration: 0.35)) {
-                position = .region(MKCoordinateRegion(
+                session.position = .region(MKCoordinateRegion(
                     center: coordinate,
                     span: MKCoordinateSpan(latitudeDelta: 0.004, longitudeDelta: 0.004)))
             }
-            query = ""
+            session.query = ""
             searchCompleter.clear()
         }
     }
@@ -376,7 +573,7 @@ struct MapPlacePickerSheet: View {
 
         // 容許誤差跟著縮放走：地圖拉遠時一個手指頭就蓋掉好幾百公尺，
         // 固定 60 公尺會變成怎麼點都點不到；拉近時又不該把隔壁店家吸過來。
-        let tolerance = min(400, max(30, visibleMeters * 0.03))
+        let tolerance = min(400, max(30, session.visibleMeters * 0.03))
         let request = MKLocalPointsOfInterestRequest(center: coordinate, radius: tolerance)
         guard let response = try? await MKLocalSearch(request: request).start() else { return }
         let origin = CLLocation(latitude: coordinate.latitude, longitude: coordinate.longitude)
@@ -588,6 +785,35 @@ struct MapPlacePickerSheet: View {
                           p.locality, p.subLocality].compactMap { $0 }
         guard !adminNames.contains(area) else { return nil }
         return area
+    }
+}
+
+/// [v25.627] 搜尋建議的一列（從 MapPlacePickerSheet.suggestionList 切出來，內容、字、間距都沒變）。
+/// 切成 struct 是為了讓 MapPlacePickerSheet 的型別巢狀不變深（depth.py 舊帳 33）。
+private struct MapPickerSuggestionLabel: View {
+    let title: String
+    let subtitle: String
+    let meters: CLLocationDistance?
+    let accent: Color
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "mappin.circle")
+                .font(.system(size: 12)).foregroundStyle(accent)
+            VStack(alignment: .leading, spacing: 1) {
+                MarqueeText(title)
+                    .font(.subheadline).foregroundStyle(.primary)
+                if !subtitle.isEmpty {
+                    Text(subtitle)
+                        .font(.caption2).foregroundStyle(.secondary)
+                        .lineLimit(1)
+                }
+            }
+            Spacer(minLength: 0)
+            PlaceDistanceBadge(meters: meters, icon: "scope")
+        }
+        .padding(.horizontal, 12).padding(.vertical, 9)
+        .contentShape(Rectangle())
     }
 }
 
@@ -811,12 +1037,15 @@ struct MapPlacePickerButton: View {
     /// 按「清除」；nil＝不提供清除
     var onClear: (() -> Void)?
 
-    @State private var showPicker = false
+    /// [v25.627] 這一次選位置的進度。有值＝sheet 開著；sheet 重建時從它接著來
+    @State private var session: MapPickerSession? = nil
+    /// 按下去到下一輪真的打開之間（連點兩下只開一張）
+    @State private var opening = false
 
     var body: some View {
         Group {
             Button {
-                showPicker = true
+                open()
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "map.fill")
@@ -833,6 +1062,15 @@ struct MapPlacePickerButton: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
+            // [v25.627] sheet 只掛在這顆按鈕上：以前掛在 Group 上，Group 會把它套到每個子 view，
+            // 有座標時（兩列）就變成兩個呈現者綁同一個開關。item 是同一個 session 物件，
+            // 父畫面重繪、sheet 被重新呈現都還是同一個，不會回到打開時的位置
+            .sheet(item: $session) { s in
+                MapPlacePickerSheet(session: s, accent: accent) { picked in
+                    onPick(picked)
+                }
+                .appStores()
+            }
 
             if hasCoordinate {
                 HStack {
@@ -846,11 +1084,20 @@ struct MapPlacePickerButton: View {
                 }
             }
         }
-        .sheet(isPresented: $showPicker) {
-            MapPlacePickerSheet(initialCoordinate: startCoordinate, accent: accent) { picked in
-                onPick(picked)
-            }
-            .appStores()
+    }
+
+    /// [v25.627] 先把別的輸入框的鍵盤收掉，下一輪才開地圖（跟 v25.612／614 同一個寫法）：
+    /// 父畫面收鍵盤、候選清單收起來的那次重排，在地圖出來之前就做完，
+    /// 不會跟地圖自己的搜尋列搶鍵盤。
+    private func open() {
+        guard session == nil, !opening else { return }   // 連點兩下只開一次
+        opening = true
+        _ = UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
+                                            to: nil, from: nil, for: nil)
+        let s = MapPickerSession(initialCoordinate: startCoordinate)
+        DispatchQueue.main.async {
+            opening = false
+            session = s
         }
     }
 }
