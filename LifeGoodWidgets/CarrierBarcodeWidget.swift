@@ -12,7 +12,8 @@ import AppIntents
 //   CarrierBarcodeEntry、CarrierBarcodeProvider、CarrierBarcodeMediumView、CarrierBarcodeLockView
 //
 // • 中型、鎖定畫面共用 CarrierBarcodeProvider：一筆 entry、policy .never（值只在 App 連結／拿掉手機條碼、啟動補寫時變，
-//   那時 CarrierBarcodeShared.syncWidgets 只重畫這兩個 kind）。
+//   那時 CarrierBarcodeShared.syncWidgets 只重畫這兩個 kind；啟動那一次值沒變也重畫）。讀不到時 30 分鐘後再讀
+//   （開機後還沒解鎖過，App Group 讀不到，不能一直空著）。
 // • 顏色照 CarrierBarcodeShared.swift 檔頭「顏色規則」：fullColor 白底黑條；其他模式只畫白的部分（亮底暗條，不反白）。
 // • 鎖定畫面（使用者自己選的例外）只有條碼與號碼；沒連結只有 barcode 圖示，一個字都沒有。
 // • 控制項照 StartRunControl：LifeGoodOpenIntent（openAppWhenRun → WidgetOpenAppHandoff → WidgetLink.apply）。
@@ -44,7 +45,9 @@ struct CarrierBarcodeProvider: TimelineProvider {
 
     func getTimeline(in context: Context, completion: @escaping (Timeline<CarrierBarcodeEntry>) -> Void) {
         let entry = CarrierBarcodeEntry(date: Date(), text: CarrierBarcodeShared.stored)
-        completion(Timeline(entries: [entry], policy: .never))
+        // 讀不到（還沒連結，或開機後還沒解鎖、App Group 讀不到）：30 分鐘後再讀一次；讀到了值只在 App 那邊變，.never
+        let policy: TimelineReloadPolicy = entry.text == nil ? .after(Date().addingTimeInterval(30 * 60)) : .never
+        completion(Timeline(entries: [entry], policy: policy))
     }
 }
 

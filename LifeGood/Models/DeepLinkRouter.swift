@@ -619,6 +619,16 @@ extension WidgetLink {
         guard let route = parse(url) else { return false }
         let router = DeepLinkRouter.shared
         if route.fromWidget { router.markWidgetLaunch() }
+        // [手機條碼 v25.628 審查修] 條碼視窗回主畫面後還留著（回來還要給店員掃）；這時從別的小工具、控制項、通知要去別的地方，
+        // 先收掉（還原亮度、交還 key），不然要去的那一頁、記一筆的表單都被蓋在條碼底下。呼叫點都在主執行緒
+        // （onOpenURL、WidgetOpenAppHandoff、通知的 Task { @MainActor }）：同一輪就收，表單與鍵盤才出在主視窗
+        if route.destination != .carrierBarcode {
+            if Thread.isMainThread {
+                MainActor.assumeIsolated { CarrierBarcodePresenter.shared.hide() }
+            } else {
+                Task { @MainActor in CarrierBarcodePresenter.shared.hide() }
+            }
+        }
         // [v3] 說一句不關設定頁（主控定案 5）：只有它不換 routeToken
         // [v4] 設定 › 自訂幣別匯率也不換：換了 MainTabView 會先把設定頁關掉
         // [手機條碼 v25.628] 全螢幕條碼也不換：蓋在最上面，〔完成〕後回到原本那一頁

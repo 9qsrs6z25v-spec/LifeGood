@@ -59,9 +59,10 @@ enum CarrierBarcodeShared {
         return true
     }
 
-    /// App 連結、拿掉手機條碼、啟動時呼叫：寫進 App Group，有改才重畫中型與鎖定畫面兩個（控制項沒有值，不用重畫）
-    static func syncWidgets(cardNo: String?) {
-        if store(cardNo) {
+    /// App 連結、拿掉手機條碼、啟動時呼叫：寫進 App Group，有改才重畫中型與鎖定畫面兩個（控制項沒有值，不用重畫）。
+    /// forceReload：啟動那一次值沒變也重畫一次（開機後還沒解鎖時小工具讀不到 App Group、畫成空的，值沒變不會再叫它重畫）
+    static func syncWidgets(cardNo: String?, forceReload: Bool = false) {
+        if store(cardNo) || forceReload {
             WidgetRefresh.reload(WidgetKind.carrierBarcodeKinds)
         }
     }

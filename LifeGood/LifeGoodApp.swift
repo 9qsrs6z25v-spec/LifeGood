@@ -191,8 +191,9 @@ struct LifeGoodApp: App {
                     // [v25.545] 桌面小工具的快照：掛好監聽、馬上寫一次（放在任何 await 之前，
                     // 開場動畫期間就寫好；第二次呼叫什麼都不做）。[v2] 多收 finance（車子卡、接下來要繳）
                     WidgetSnapshotWriter.shared.start(expense: expenseStore, finance: financeStore, life: lifeStore)
-                    // [手機條碼 v25.628] 已經連結的舊使用者：手機條碼補寫進 App Group 一次（值一樣就不寫、不重畫；驗證碼不碰）
-                    CarrierBarcodeShared.syncWidgets(cardNo: einvoiceSync.carrier?.cardNo)
+                    // [手機條碼 v25.628] 已經連結的舊使用者：手機條碼補寫進 App Group 一次（值一樣就不寫；驗證碼不碰）。
+                    // 值一樣也重畫一次：開機後還沒解鎖時小工具讀不到 App Group、畫成空的（審查修）
+                    CarrierBarcodeShared.syncWidgets(cardNo: einvoiceSync.carrier?.cardNo, forceReload: true)
                     // [手錶 v6] 手錶的打卡：記住 LifeStore（之後手錶打卡馬上寫進行程）、把 iPhone 沒開時排著的
                     // 照按下去的時間套進行程。要在寫手 start 之後：套完才寫得出新的手錶包
                     WatchActionApplier.shared.start(life: lifeStore)
