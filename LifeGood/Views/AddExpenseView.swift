@@ -778,12 +778,15 @@ struct AddExpenseView: View {
     /// [v25.629] 座標是在房地產底下選的（地點那一列），或現在要用房地產的範圍——兩邊只有一邊是，就是「進出房地產」。
     /// 進出房地產時地點換了一個欄位（名稱欄 ↔ 地點列），座標不沿用。
     /// 汽車 ↔ 房地產不算：兩邊都是同一個地點列（placeName），字還在，座標跟著字。
+    /// 但汽車 → 房地產時地點列是空的就算：那是飲食等分類經汽車轉一手的座標（字在名稱欄），
+    /// 不帶進房地產，章留在汽車，點回飲食才接得回去（c4be207 原樣）。
     private var placeScopeCrossesRealEstate: Bool {
         let fromRealEstate = placeScopeStamp.hasPrefix("realEstate|")
         let toRealEstate = placeScopeKey.hasPrefix("realEstate|")
         guard fromRealEstate != toRealEstate else { return false }
         let otherSide = fromRealEstate ? placeScopeKey : placeScopeStamp
-        return !otherSide.hasPrefix("vehicle|")
+        guard otherSide.hasPrefix("vehicle|") else { return true }
+        return toRealEstate && placeName.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
     /// [v25.479] 換分類不丟地點（座標跟著蓋到新分類）；[v25.629] 進出房地產除外（placeScopeCrossesRealEstate）。
