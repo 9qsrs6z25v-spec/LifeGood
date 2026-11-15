@@ -36,6 +36,12 @@ import WidgetKit
 // LifeGoodOpenIntent(url: WidgetLink.healthRun)），放 LifeGoodLockAndControlBundle（8 → 9）。
 // 這一層 10 個、LifeGoodLockAndControlBundle 9 個、LifeGoodFinanceBundle 5 個、LifeGoodLifeBundle 3 個，都在 10 個以內。
 // 名字是 build/v7b/brief.md §5 定死的。
+//
+// [v25.628 手機條碼] 加入：主畫面中型（CarrierBarcodeWidget）、鎖定畫面長方形（CarrierBarcodeLockWidget）、
+// 控制中心「手機條碼」（CarrierBarcodeControl），都在 CarrierBarcodeWidget.swift，放新的子 bundle LifeGoodBarcodeBundle，
+// 掛進 LifeGoodLifeBundle（3 → 4；這一層已經 10 個）。這一層 10 個、LifeGoodLockAndControlBundle 9 個、
+// LifeGoodFinanceBundle 5 個、LifeGoodLifeBundle 4 個、LifeGoodBarcodeBundle 3 個，都在 10 個以內。
+// 名字是 build/barcodewidget/brief.md G2 定死的。
 
 @main
 struct LifeGoodWidgetsBundle: WidgetBundle {
@@ -96,5 +102,7 @@ struct LifeGoodLifeBundle: WidgetBundle {
         TeamWidget()
         // [健康 v6] 跑步：鎖定畫面「晨跑・跑步中　3.42 公里｜21:05｜6'20"」＋暫停鈕、靈動島「跑者 3.42 ── 21:05」
         RunLiveActivityWidget()
+        // [手機條碼 v25.628] 主畫面中型、鎖定畫面、控制中心「手機條碼」（子 bundle，這一層 3 → 4）
+        LifeGoodBarcodeBundle().body
     }
 }

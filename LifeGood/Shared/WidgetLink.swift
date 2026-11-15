@@ -44,6 +44,8 @@ import Foundation
 //   [財富 v4] lifegood://life/wealth?src=widget                        → 人生「財富」
 //   [財富 v4] lifegood://life/wealth?id=<帳戶或卡 UUID>&src=widget      → 人生「財富」、打開那張卡／那個帳戶的卡片頁
 //                                                                       （小工具「接下來要繳」的卡費、交割列；找不到就停在財富頁）
+//   [手機條碼 v25.628] lifegood://expense/barcode?src=widget            → 不切頁，蓋一層全螢幕手機條碼、螢幕調到最亮
+//                                                                       （主畫面中型、鎖定畫面、控制中心「手機條碼」三個都是這一條）
 //
 // 分類、車子分類的值是 App 寫進快照的 rawValue（VariableCategory／VehicleVariableCategory），
 // 小工具原樣帶回；URLComponents 會自己做百分比編碼，中文沒問題。
@@ -91,6 +93,8 @@ enum WidgetDestination: Equatable {
     case health(sessionId: UUID?)
     /// [財富 v4] 人生「財富」；帶 id 就打開那張卡／那個帳戶的卡片頁（WealthCardPage）
     case wealth(id: UUID?)
+    /// [手機條碼 v25.628] 全螢幕手機條碼（不切頁；App 側 CarrierBarcodePresenter 蓋一層視窗、調亮）
+    case carrierBarcode
 }
 
 /// 解析結果：去哪＋是不是從小工具點進來的
@@ -145,6 +149,8 @@ enum WidgetLink {
     private static let healthPath = "/health"
     // [財富 v4]
     private static let wealthPath = "/wealth"
+    // [手機條碼 v25.628]
+    private static let barcodePath = "/barcode"
 
     /// 組不出網址時的退路（不會發生：全部是固定的 ASCII 字）
     private static let fallback = URL(string: "lifegood://today")!
@@ -240,6 +246,9 @@ enum WidgetLink {
             comps.host = lifeHost
             comps.path = wealthPath
             appendId(id, to: &items)
+        case .carrierBarcode:
+            comps.host = expenseHost
+            comps.path = barcodePath
         }
         if fromWidget {
             items.append(URLQueryItem(name: sourceKey, value: sourceWidget))
@@ -327,6 +336,9 @@ enum WidgetLink {
     /// [財富 v4] 財富頁：lifegood://life/wealth?src=widget；帶 id＝打開那張卡／那個帳戶（…?id=<UUID>&src=widget）
     static func wealth(_ id: UUID?) -> URL { url(for: .wealth(id: id)) }
 
+    /// [手機條碼 v25.628] 全螢幕手機條碼：lifegood://expense/barcode?src=widget（中型、鎖定畫面的 widgetURL、控制項）
+    static var carrierBarcode: URL { url(for: .carrierBarcode) }
+
     // MARK: 解析
 
     /// 認得的網址回 WidgetRoute；別的（不是 lifegood://、不認得的頁）回 nil。
@@ -352,6 +364,7 @@ enum WidgetLink {
         case expenseHost:
             if path == overviewPath || path.isEmpty || path == "/" { return .expenseOverview }
             if path == fixedPath { return .fixedExpense(id: uuidValue(idKey, in: items)) }
+            if path == barcodePath { return .carrierBarcode }
             return nil
         case addHost:
             if path == incomePath { return .addIncome }

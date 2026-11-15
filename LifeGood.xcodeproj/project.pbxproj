@@ -282,6 +282,12 @@
 		A01B000001001668 /* UtilityHighNotice.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001668 /* UtilityHighNotice.swift */; };
 		A01B000001001669 /* UtilityHighNoticeCenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001669 /* UtilityHighNoticeCenter.swift */; };
 		A01B000001001670 /* UtilityNoticeSettingsRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001670 /* UtilityNoticeSettingsRows.swift */; };
+		A01B000001001671 /* CarrierBarcodeShared.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001671 /* CarrierBarcodeShared.swift */; };
+		A01B000001001672 /* CarrierBarcodeShared.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001671 /* CarrierBarcodeShared.swift */; };
+		A01B000001001673 /* Code39.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000027 /* Code39.swift */; };
+		A01B000001001674 /* Code39.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000027 /* Code39.swift */; };
+		A01B000001001675 /* CarrierBarcodeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001675 /* CarrierBarcodeView.swift */; };
+		A01B000001001676 /* CarrierBarcodeWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001676 /* CarrierBarcodeWidget.swift */; };
 		A01B000001001619 /* OrgMoveCardParts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001619 /* OrgMoveCardParts.swift */; };
 		A01B000001001621 /* OrgMoveWizardRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001621 /* OrgMoveWizardRows.swift */; };
 		A01B000001001623 /* OrgMoveDueViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001623 /* OrgMoveDueViews.swift */; };
@@ -696,6 +702,9 @@
 		A01A000001001668 /* UtilityHighNotice.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UtilityHighNotice.swift; sourceTree = "<group>"; };
 		A01A000001001669 /* UtilityHighNoticeCenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UtilityHighNoticeCenter.swift; sourceTree = "<group>"; };
 		A01A000001001670 /* UtilityNoticeSettingsRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = UtilityNoticeSettingsRows.swift; sourceTree = "<group>"; };
+		A01A000001001671 /* CarrierBarcodeShared.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarrierBarcodeShared.swift; sourceTree = "<group>"; };
+		A01A000001001675 /* CarrierBarcodeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarrierBarcodeView.swift; sourceTree = "<group>"; };
+		A01A000001001676 /* CarrierBarcodeWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarrierBarcodeWidget.swift; sourceTree = "<group>"; };
 		A01A000001001619 /* OrgMoveCardParts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveCardParts.swift; sourceTree = "<group>"; };
 		A01A000001001621 /* OrgMoveWizardRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveWizardRows.swift; sourceTree = "<group>"; };
 		A01A000001001623 /* OrgMoveDueViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveDueViews.swift; sourceTree = "<group>"; };
@@ -947,6 +956,7 @@
 				A01A000002000088 /* WidgetQuoteStore.swift */,
 				A01A000002000090 /* TeamWidget.swift */,
 				A01A000002000096 /* RunLiveActivity.swift */,
+				A01A000001001676 /* CarrierBarcodeWidget.swift */,
 				A01A000002000006 /* Info.plist */,
 				A01A000002000050 /* LifeGoodWidgets.entitlements */,
 			);
@@ -978,6 +988,7 @@
 				A01A000002000115 /* WatchRelevance.swift */,
 				A01A000002000116 /* WatchOpenIntent.swift */,
 				A01A000002000117 /* WatchVoice.swift */,
+				A01A000001001671 /* CarrierBarcodeShared.swift */,
 			);
 			path = Shared;
 			sourceTree = "<group>";
@@ -1131,6 +1142,7 @@
 			children = (
 				A01A000001000004 /* MainTabView.swift */,
 				A01A000001001546 /* AIQuickVoice.swift */,
+				A01A000001001675 /* CarrierBarcodeView.swift */,
 				A01A000001000005 /* OverviewView.swift */,
 				A01A000001000006 /* VariableExpenseView.swift */,
 				A01A000001000007 /* FixedExpenseView.swift */,
@@ -1603,6 +1615,9 @@
 				A01B000002000094 /* RunActivityAttributes.swift in Sources */,
 				A01B000002000095 /* RunPauseIntent.swift in Sources */,
 				A01B000002000096 /* RunLiveActivity.swift in Sources */,
+				A01B000001001672 /* CarrierBarcodeShared.swift in Sources */,
+				A01B000001001674 /* Code39.swift in Sources */,
+				A01B000001001676 /* CarrierBarcodeWidget.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1911,6 +1926,9 @@
 				A01B000001001200 /* HealthKitManager.swift in Sources */,
 				A01B000001001100 /* WorkoutEditorView.swift in Sources */,
 				A01B000001001000 /* HealthView.swift in Sources */,
+				A01B000001001671 /* CarrierBarcodeShared.swift in Sources */,
+				A01B000001001673 /* Code39.swift in Sources */,
+				A01B000001001675 /* CarrierBarcodeView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

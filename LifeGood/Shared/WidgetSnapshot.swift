@@ -61,6 +61,11 @@ enum WidgetShared {
     /// [v2] App Group 共用的 UserDefaults（隱藏金額開關、控制項交給 App 的網址）。
     /// entitlements 沒生效時是 nil：讀一律當「沒設定」，寫什麼都不做。
     static var defaults: UserDefaults? { UserDefaults(suiteName: appGroupID) }
+
+    /// [手機條碼 v25.628] 手機條碼（「/ABC1234」這 8 個字，App 驗過格式才寫；CarrierBarcodeShared.store）。
+    /// 只有條碼本身：**發票驗證碼永遠不放這裡**（驗證碼只在 App 的鑰匙圈）。App 連結、拿掉手機條碼時寫／刪，
+    /// 啟動時補寫一次；小工具（主畫面中型、鎖定畫面）只讀。不進 iCloud、不進備份
+    static let carrierBarcodeKey = "widget_carrier_barcode"
 }
 
 /// WidgetKit 的 kind。小工具的 StaticConfiguration 與 App 的 reloadTimelines(ofKind:) 都用這裡的值，
@@ -140,6 +145,17 @@ enum WidgetKind {
     /// 控制項「開始跑步」（ControlWidgetButton → LifeGoodOpenIntent(url: WidgetLink.healthRun)；控制中心、鎖定畫面、動作按鈕）。
     /// 不讀快照、沒有值，不用重畫
     static let controlStartRun = "com.lifegood.app.control.startRun"
+
+    // MARK: [手機條碼 v25.628]
+
+    /// 手機條碼（systemMedium）：白底黑條＋號碼，點了打開 App 的全螢幕條碼。讀 App Group 的 WidgetShared.carrierBarcodeKey
+    static let carrierBarcode = "LifeGoodCarrierBarcode"
+    /// 鎖定畫面手機條碼（accessoryRectangular）：只有條碼和號碼
+    static let carrierBarcodeLock = "LifeGoodCarrierBarcodeLock"
+    /// 控制項「手機條碼」（ControlWidgetButton → LifeGoodOpenIntent(url: WidgetLink.carrierBarcode)）。沒有值，不用重畫
+    static let controlCarrierBarcode = "com.lifegood.app.control.carrierBarcode"
+    /// 手機條碼換了（連結、拿掉、啟動補寫值不一樣）要重畫的
+    static let carrierBarcodeKinds = [carrierBarcode, carrierBarcodeLock]
 
     /// money_v1.json 變了要重畫的（App 的寫手、一按就記的按鈕都用這一組）
     static let moneyKinds = [moneyLeft, ledgerDesk, quickRecord, lockSpent]

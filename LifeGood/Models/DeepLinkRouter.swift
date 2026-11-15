@@ -612,6 +612,8 @@ extension WidgetLink {
     ///           （[健康 v7b] 控制項「開始跑步」也是這個網址）
     /// [健康 v7b] - lifegood://life/health?id=…：切到人生 › 健康；帶 id 就請健康頁打開那一趟的成果頁（找不到就停在健康頁）
     /// [財富 v4] - lifegood://life/wealth?id=…：切到人生 › 財富；帶 id 就請財富頁打開那張卡／那個帳戶（找不到就停在財富頁）
+    /// [手機條碼 v25.628] - lifegood://expense/barcode…：**不切頁、不換 routeToken**（不關設定頁、不關開著的表單），
+    ///           CarrierBarcodePresenter 蓋一層自己的視窗（全螢幕白底條碼、螢幕調到最亮；同說一句的做法）
     @discardableResult
     static func apply(_ url: URL, store: LifeStore) -> Bool {
         guard let route = parse(url) else { return false }
@@ -619,7 +621,9 @@ extension WidgetLink {
         if route.fromWidget { router.markWidgetLaunch() }
         // [v3] 說一句不關設定頁（主控定案 5）：只有它不換 routeToken
         // [v4] 設定 › 自訂幣別匯率也不換：換了 MainTabView 會先把設定頁關掉
-        if route.destination != .voiceRecord && route.destination != .settingsCurrency { router.markRoute() }
+        // [手機條碼 v25.628] 全螢幕條碼也不換：蓋在最上面，〔完成〕後回到原本那一頁
+        if route.destination != .voiceRecord && route.destination != .settingsCurrency
+            && route.destination != .carrierBarcode { router.markRoute() }
         switch route.destination {
         case .today:
             return DayTimelineLink.apply(url, store: store)
@@ -695,6 +699,12 @@ extension WidgetLink {
         case .wealth(let id):
             AppNavigation.goToWealth()
             if let id { router.requestItem(.wealthAccount(id)) }
+            return true
+        case .carrierBarcode:
+            // [手機條碼 v25.628] 冷啟動時視窗場景還沒好：show() 自己等到前景（最多 3 秒）
+            Task { @MainActor in
+                CarrierBarcodePresenter.shared.show()
+            }
             return true
         }
     }
