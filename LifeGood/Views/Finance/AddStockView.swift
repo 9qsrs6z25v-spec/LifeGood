@@ -1194,7 +1194,11 @@ struct AddStockView: View {
     private var soldLedgerHint: String? {
         guard let e = editing, !e.transactions.isEmpty else { return nil }
         let plan = StockSoldFix.formPlan(editing: e, isSold: isSold, price: Double(soldPriceText) ?? 0, date: soldDate)
-        return StockSoldFix.formHint(plan, editing: e, now: Date())
+        // [v25.630 驗] 照表單上選的帳戶：交割寫不進帳戶（沒有選交割銀行／證券戶）就不寫「入帳」
+        let settles = StockSoldFix.formSettles(editing: e, bankId: selectedBankMilestoneId,
+                                               securitiesId: selectedSecuritiesMilestoneId, soldDate: soldDate,
+                                               book: lifeStore.wealthBook, milestones: lifeStore.milestones)
+        return StockSoldFix.formHint(plan, editing: e, settles: settles, now: Date())
     }
 
     private var soldAccountId: UUID? {

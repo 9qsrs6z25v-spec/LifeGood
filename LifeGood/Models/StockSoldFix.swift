@@ -127,10 +127,34 @@ enum StockSoldFix {
     /// 〔補記賣出〕：照 mismatch 補那一筆（closeOut）、兩個連結清掉。記帳那兩筆由呼叫端 removeSwitchRecords 刪，
     /// 接著 store.update＋rewriteStockSettlements。沒有 mismatch＝nil
     static func fixed(_ stock: Stock) -> Stock? {
-        guard let m = mismatch(stock), var s = appendingCloseOutSell(stock, price: m.price, date: m.date) else { return nil }
+        fixedSell(stock)?.stock
+    }
+
+    /// 同 fixed，再加補的那一筆（「補記好了」那張要認得它：刪掉、改掉了就不再顯示）
+    static func fixedSell(_ stock: Stock) -> (stock: Stock, tx: StockTransaction)? {
+        guard let m = mismatch(stock), let r = closeOut(stock, price: m.price, date: m.date) else { return nil }
+        var s = r.stock
         s.linkedExpenseId = nil
         s.linkedIncomeId = nil
-        return s
+        return (s, r.tx)
+    }
+
+    /// [v25.630 驗] 這檔 day 那天的交割真的寫得進帳戶（同 rewriteStockSettlements 的 add：照 WealthStockSettle.account 找、
+    /// 那個帳戶還在）。沒有選交割銀行／證券戶、選的已經刪掉＝false：字不能寫「入帳」
+    static func settles(_ stock: Stock, on day: Date, book: WealthBook, milestones: [LifeMilestone]) -> Bool {
+        guard let acc = WealthStockSettle.account(for: stock, on: day, book: book) else { return false }
+        return milestones.contains { $0.id == acc }
+    }
+
+    /// 編輯股票表單：照表單上選的帳戶算 settles（存檔時 syncAccountTransactions 交割銀行換了會清掉 linkFrom，這裡照做一份）
+    static func formSettles(editing e: Stock, bankId: UUID?, securitiesId: UUID?, soldDate: Date,
+                            book: WealthBook, milestones: [LifeMilestone]) -> Bool {
+        var s = e
+        var b = book
+        if e.linkedBankMilestoneId != bankId { b.setLinks(nil, for: e.id) }
+        s.linkedBankMilestoneId = bankId
+        s.linkedSecuritiesMilestoneId = securitiesId
+        return settles(s, on: StockTransaction.taiwanSettlementDate(from: soldDate), book: b, milestones: milestones)
     }
 
     /// 刪掉開關記的「賣出 X（虧損）／（獲利）」：同 AddStockView 關掉〔已賣出〕的刪法（支出走 delete，連照片一起刪；收入 removeAll）
@@ -291,15 +315,21 @@ enum StockSoldFix {
     static let doneTitle = "補記好了"
 
     /// 提示卡那一段：「這檔標了已賣出（11/17・103.5），但帳本沒有賣出紀錄，所以戶頭沒有入帳、已實現損益是 0。」
-    static func cardMessage(_ m: Mismatch, isUS: Bool, now: Date,
+    /// settles＝false（沒有可以入帳的帳戶）：補了也不會入帳，不拿「沒入帳」當原因
+    static func cardMessage(_ m: Mismatch, isUS: Bool, settles: Bool, now: Date,
                             calendar: Calendar = Calendar(identifier: .gregorian)) -> String {
         let when = dayText(m.date, now: now, calendar: calendar) + "・" + priceText(m.price)
         if !m.ledgerHasSell {
+            guard settles else { return "這檔標了已賣出（\(when)），但帳本沒有賣出紀錄，所以已實現損益是 0。" }
             return "這檔標了已賣出（\(when)），但帳本沒有賣出紀錄，所以戶頭沒有入帳、已實現損益是 0。"
         }
         let q = quantityText(m.heldShares, isUS: isUS)
+        guard settles else { return "這檔標了已賣出（\(when)），但帳本還有 \(q)沒有賣出紀錄，已實現損益沒有算到這 \(q)。" }
         return "這檔標了已賣出（\(when)），但帳本還有 \(q)沒有賣出紀錄，所以這 \(q)賣的錢沒有入帳。"
     }
+
+    /// 沒有可以入帳的帳戶時，確認框、補完卡、表單灰字接的那一句
+    static let noAccountText = "這檔沒有可以入帳的交割銀行或證券戶，賣的錢不會入帳；在〔編輯〕選好就會入帳。"
 
     /// 〔補記賣出 2 張 × 103.5〕
     static func buttonTitle(_ m: Mismatch, isUS: Bool) -> String {
@@ -312,14 +342,15 @@ enum StockSoldFix {
     }
 
     /// 按下去之前問一次的那幾行（confirmationDialog 的 message）
-    static func confirmMessage(_ m: Mismatch, isUS: Bool, switchRecord: String?, now: Date,
+    static func confirmMessage(_ m: Mismatch, isUS: Bool, switchRecord: String?, settles: Bool, now: Date,
                                calendar: Calendar = Calendar(identifier: .gregorian)) -> String {
         let trade = dayText(m.date, now: now, calendar: calendar)
         let settle = dayText(m.settleDate, now: now, calendar: calendar)
         let q = quantityText(m.heldShares, isUS: isUS)
         let p = priceText(m.price)
         let money = moneyText(m.heldShares * m.price, isUS: isUS)
-        var s = "帳本加一筆 \(trade) 賣出 \(q) × \(p)，\(settle) 交割，\(money) 入帳到交割銀行。"
+        var s = settles ? "帳本加一筆 \(trade) 賣出 \(q) × \(p)，\(settle) 交割，\(money) 入帳到交割銀行。"
+                        : "帳本加一筆 \(trade) 賣出 \(q) × \(p)。\n" + noAccountText
         if let r = switchRecord { s += "\n" + r }
         return s
     }
@@ -331,23 +362,36 @@ enum StockSoldFix {
         let price: Double
         let tradeDate: Date
         let settleDate: Date
-        /// 補好之後的已實現損益（台幣；moneyRealizedProfit）
-        let realized: Double
+        /// 補好之後的已實現損益（台幣；moneyRealizedProfit；顯示時 current 換成現在的）
+        var realized: Double
         let isUS: Bool
+        /// 補的那一筆（帳本刪掉、改掉了，這張就不再顯示）
+        let sell: StockTransaction
     }
 
-    static func done(from m: Mismatch, fixed: Stock) -> Done {
+    static func done(from m: Mismatch, fixed: Stock, sell: StockTransaction) -> Done {
         Done(stockId: fixed.id, shares: m.heldShares, price: m.price, tradeDate: m.date,
-             settleDate: m.settleDate, realized: fixed.moneyRealizedProfit, isUS: fixed.isUSStock)
+             settleDate: m.settleDate, realized: fixed.moneyRealizedProfit, isUS: fixed.isUSStock, sell: sell)
+    }
+
+    /// [v25.630 驗] 「補記好了」還能顯示嗎：同一檔、補的那一筆原封還在帳本（刪掉、關開關、改價改日＝nil）；
+    /// 已實現損益換成現在的（之後改了買進）
+    static func current(_ d: Done, in stock: Stock) -> Done? {
+        guard stock.id == d.stockId, stock.transactions.contains(d.sell) else { return nil }
+        var c = d
+        c.realized = stock.moneyRealizedProfit
+        return c
     }
 
     /// 「已補記賣出 2 張 × 103.5，已實現損益 -NT$136,000。」＋交割那一句（交割日還沒到：先在銀行頁「接下來 30 天」，
     /// 那天起在存摺明細；同 WealthFacts 存摺明細只列到今天、以後的在「接下來」）
-    static func doneMessage(_ d: Done, now: Date, calendar: Calendar = Calendar(identifier: .gregorian)) -> String {
+    static func doneMessage(_ d: Done, settles: Bool, now: Date,
+                            calendar: Calendar = Calendar(identifier: .gregorian)) -> String {
         let q = quantityText(d.shares, isUS: d.isUS)
         let p = priceText(d.price)
         let r = realizedText(d.realized)
         let head = "已補記賣出 \(q) × \(p)，已實現損益 \(r)。"
+        guard settles else { return head + "\n" + noAccountText }
         let day = dayText(d.settleDate, now: now, calendar: calendar)
         if calendar.startOfDay(for: d.settleDate) > calendar.startOfDay(for: now) {
             return head + "\n\(day) 交割入帳：今天還沒到，先在銀行頁「接下來 30 天」看得到，\(day) 起在存摺明細。"
@@ -356,7 +400,8 @@ enum StockSoldFix {
     }
 
     /// 編輯股票〔已賣出〕底下那一行灰字（有帳本的股票才有；沒有要說的＝nil）
-    static func formHint(_ plan: FormPlan, editing: Stock?, now: Date,
+    /// settles＝照表單上選的帳戶，賣出那天的交割寫得進去（formSettles）
+    static func formHint(_ plan: FormPlan, editing: Stock?, settles: Bool, now: Date,
                          calendar: Calendar = Calendar(identifier: .gregorian)) -> String? {
         let isUS = editing?.isUSStock ?? false
         func line(_ tx: StockTransaction) -> String {
@@ -368,6 +413,9 @@ enum StockSoldFix {
         switch plan {
         case .closeOut(_, let tx):
             let settle = dayText(tx.settlementDate, now: now, calendar: calendar)
+            guard settles else {
+                return "這檔有帳本：存檔會在帳本補一筆 \(line(tx))（剩下的全部）；不會另外記「賣出（虧損／獲利）」。\n" + noAccountText
+            }
             return "這檔有帳本：存檔會在帳本補一筆 \(line(tx))（剩下的全部），\(settle) 交割入帳；不會另外記「賣出（虧損／獲利）」。"
         case .reopen(_, let tx):
             return "存檔會刪掉帳本裡開關補的那筆賣出（\(line(tx))）。"
@@ -377,6 +425,7 @@ enum StockSoldFix {
             return why
         case .keep:
             guard let e = editing, mismatch(e) != nil else { return nil }
+            guard settles else { return "這檔標了已賣出，但帳本沒有賣光；到股票卡按〔補記賣出〕補上，已實現損益才算得對。" }
             return "這檔標了已賣出，但帳本沒有賣光；到股票卡按〔補記賣出〕補上，戶頭才會入帳。"
         case .legacy, .clear:
             return nil

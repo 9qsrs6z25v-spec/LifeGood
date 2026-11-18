@@ -150,8 +150,20 @@ struct StockDetailView: View {
     /// [v25.630] 最上面那張提示卡：標了已賣出、帳本沒賣光（mismatch）優先；剛補完的那一檔換成「補記好了」
     private var soldFixMode: StockSoldFixCard.Mode? {
         if let m = StockSoldFix.mismatch(stock) { return .needsFix(m) }
-        if let d = soldFixDone, d.stockId == stockId { return .done(d) }
+        // [v25.630 驗] 補的那一筆刪掉、關開關、改價改日之後不再顯示（StockSoldFix.current）
+        if let d = soldFixDone, d.stockId == stockId, let c = StockSoldFix.current(d, in: stock) { return .done(c) }
         return nil
+    }
+
+    /// [v25.630 驗] 那一天的交割寫得進帳戶嗎（沒有選交割銀行／證券戶＝false：提示卡、確認框、補完卡不寫「入帳」）
+    private var soldFixSettles: Bool {
+        let day: Date
+        switch soldFixMode {
+        case .needsFix(let m)?: day = m.settleDate
+        case .done(let d)?: day = d.settleDate
+        case nil: return false
+        }
+        return StockSoldFix.settles(stock, on: day, book: lifeStore.wealthBook, milestones: lifeStore.milestones)
     }
 
     /// 開關以前記的那一筆（提示卡、確認框寫「也會刪掉…」）；找不到（自己刪了）＝nil
@@ -214,7 +226,7 @@ struct StockDetailView: View {
                 VStack(spacing: 22) {
                     if let mode = soldFixMode {
                         StockSoldFixCard(mode: mode, isUS: stock.isUSStock, switchRecord: soldSwitchRecordLine,
-                                         canAct: subscription.isPremium,
+                                         settles: soldFixSettles, canAct: subscription.isPremium,
                                          onLocked: { showPremiumAlert = true },
                                          onApply: { applySoldFix() },
                                          onClose: { soldFixDone = nil })
@@ -368,12 +380,13 @@ struct StockDetailView: View {
         DispatchQueue.main.async {
             guard let current = store.stocks.first(where: { $0.id == stockId }),
                   let m = StockSoldFix.mismatch(current),
-                  let fixed = StockSoldFix.fixed(current) else { return }
+                  let r = StockSoldFix.fixedSell(current) else { return }
+            let fixed = r.stock
             StockSoldFix.removeSwitchRecords(expenseId: current.linkedExpenseId, incomeId: current.linkedIncomeId,
                                              in: expenseStore)
             store.update(fixed)
             lifeStore.rewriteStockSettlements(fixed, rates: FinanceRates(expenseStore))
-            soldFixDone = StockSoldFix.done(from: m, fixed: fixed)
+            soldFixDone = StockSoldFix.done(from: m, fixed: fixed, sell: r.tx)
         }
     }
 
@@ -626,6 +639,7 @@ fileprivate struct StockSoldFixCard: View {
     let mode: Mode
     let isUS: Bool
     let switchRecord: String?
+    let settles: Bool
     let canAct: Bool
     let onLocked: () -> Void
     let onApply: () -> Void
@@ -662,7 +676,7 @@ fileprivate struct StockSoldFixCard: View {
             Label(StockSoldFix.cardTitle, systemImage: "exclamationmark.triangle.fill")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.orange)
-            Text(StockSoldFix.cardMessage(m, isUS: isUS, now: Date()))
+            Text(StockSoldFix.cardMessage(m, isUS: isUS, settles: settles, now: Date()))
                 .font(.caption)
                 .foregroundStyle(.secondary)
             if let r = switchRecord {
@@ -681,7 +695,7 @@ fileprivate struct StockSoldFixCard: View {
             Button("補記賣出") { onApply() }
             Button("取消", role: .cancel) {}
         } message: {
-            Text(StockSoldFix.confirmMessage(m, isUS: isUS, switchRecord: switchRecord, now: Date()))
+            Text(StockSoldFix.confirmMessage(m, isUS: isUS, switchRecord: switchRecord, settles: settles, now: Date()))
         }
     }
 
@@ -690,7 +704,7 @@ fileprivate struct StockSoldFixCard: View {
             Label(StockSoldFix.doneTitle, systemImage: "checkmark.circle.fill")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.green)
-            Text(StockSoldFix.doneMessage(d, now: Date()))
+            Text(StockSoldFix.doneMessage(d, settles: settles, now: Date()))
                 .font(.caption)
                 .foregroundStyle(.secondary)
             Button("知道了") { onClose() }
