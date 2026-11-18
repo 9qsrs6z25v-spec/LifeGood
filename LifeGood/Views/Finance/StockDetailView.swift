@@ -125,6 +125,8 @@ struct StockDetailView: View {
     @State private var soldNowPrices: [UUID: Double] = [:]
     /// [v25.528] 換股列上每一檔的今日漲跌
     @State private var siblingRates: [UUID: Double] = [:]
+    /// [v25.630] 〔補記賣出〕按完那一張（換一檔、按〔知道了〕就收；不存檔）
+    @State private var soldFixDone: StockSoldFix.Done?
 
     init(stock: Stock) {
         _stockId = State(initialValue: stock.id)
@@ -143,6 +145,25 @@ struct StockDetailView: View {
     /// 這一張卡的數字（看板、帳本、股利、資料都從這裡拿）
     private var cardData: StockCardData {
         StockCardData.build(stock, all: store.stocks, points: dailyPoints, soldNowPrice: soldNowPrices[stockId])
+    }
+
+    /// [v25.630] 最上面那張提示卡：標了已賣出、帳本沒賣光（mismatch）優先；剛補完的那一檔換成「補記好了」
+    private var soldFixMode: StockSoldFixCard.Mode? {
+        if let m = StockSoldFix.mismatch(stock) { return .needsFix(m) }
+        if let d = soldFixDone, d.stockId == stockId { return .done(d) }
+        return nil
+    }
+
+    /// 開關以前記的那一筆（提示卡、確認框寫「也會刪掉…」）；找不到（自己刪了）＝nil
+    private var soldSwitchRecordLine: String? {
+        let s = stock
+        if let eid = s.linkedExpenseId, let e = expenseStore.expenses.first(where: { $0.id == eid }) {
+            return StockSoldFix.switchRecordLine(title: e.title, amount: e.amount)
+        }
+        if let iid = s.linkedIncomeId, let i = expenseStore.incomes.first(where: { $0.id == iid }) {
+            return StockSoldFix.switchRecordLine(title: i.title, amount: i.amount)
+        }
+        return nil
     }
 
     /// 切到上一檔（-1）／下一檔（+1）。端點不環繞——滑到底沒反應比
@@ -166,6 +187,8 @@ struct StockDetailView: View {
     /// 換到某一檔。日線、籌碼先清掉，由 task(id:) 重載（不然會短暫看到上一檔的 K 線）
     private func jump(to id: UUID, direction: Int) {
         guard id != stockId else { return }
+        // [v25.630] 換一檔：「補記好了」那張收起來（換回來不再出現）
+        soldFixDone = nil
         slideDirection = direction
         withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
             stockId = id
@@ -189,6 +212,13 @@ struct StockDetailView: View {
         NavigationStack {
             ScrollView {
                 VStack(spacing: 22) {
+                    if let mode = soldFixMode {
+                        StockSoldFixCard(mode: mode, isUS: stock.isUSStock, switchRecord: soldSwitchRecordLine,
+                                         canAct: subscription.isPremium,
+                                         onLocked: { showPremiumAlert = true },
+                                         onApply: { applySoldFix() },
+                                         onClose: { soldFixDone = nil })
+                    }
                     StockCardBoard(data: card)
                     if !candles.isEmpty {
                         trendSection(candles)
@@ -331,6 +361,21 @@ struct StockDetailView: View {
     }
 
     // MARK: - 帳本
+
+    /// [v25.630] 〔補記賣出〕：確認框收起後下一輪才寫（dismiss 後寫 store 放下一個 runloop）。
+    /// 同帳本〔賣出〕：補一筆（StockSoldFix.fixed）→ 刪開關記的那筆 → store.update → rewriteStockSettlements
+    private func applySoldFix() {
+        DispatchQueue.main.async {
+            guard let current = store.stocks.first(where: { $0.id == stockId }),
+                  let m = StockSoldFix.mismatch(current),
+                  let fixed = StockSoldFix.fixed(current) else { return }
+            StockSoldFix.removeSwitchRecords(expenseId: current.linkedExpenseId, incomeId: current.linkedIncomeId,
+                                             in: expenseStore)
+            store.update(fixed)
+            lifeStore.rewriteStockSettlements(fixed, rates: FinanceRates(expenseStore))
+            soldFixDone = StockSoldFix.done(from: m, fixed: fixed)
+        }
+    }
 
     /// 帳本的「＋」選單（新增要 Premium，跟原本的 ＋ 按鈕一樣）
     private func addLedgerEntry(_ kind: StockLedgerAdd) {
@@ -566,6 +611,91 @@ struct StockDetailView: View {
         guard let id = stock.linkedSecuritiesMilestoneId,
               let ms = lifeStore.milestones.first(where: { $0.id == id }) else { return nil }
         return ms.title
+    }
+}
+
+// MARK: - [v25.630] 提示卡：標了已賣出、帳本沒有賣出（judge_stocksold C2）
+
+/// 股票卡最上面那一張：「帳本沒有這次賣出」〔補記賣出 2 張 × 103.5〕→ 確認 →「補記好了」。字全在 StockSoldFix（sim 逐字驗）
+fileprivate struct StockSoldFixCard: View {
+    enum Mode: Equatable {
+        case needsFix(StockSoldFix.Mismatch)
+        case done(StockSoldFix.Done)
+    }
+
+    let mode: Mode
+    let isUS: Bool
+    let switchRecord: String?
+    let canAct: Bool
+    let onLocked: () -> Void
+    let onApply: () -> Void
+    let onClose: () -> Void
+    @State private var askConfirm = false
+
+    private var tint: Color {
+        if case .done = mode { return .green }
+        return .orange
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            content
+        }
+        .padding(14)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color(.secondarySystemGroupedBackground), in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(tint.opacity(0.35), lineWidth: 0.75))
+    }
+
+    @ViewBuilder
+    private var content: some View {
+        switch mode {
+        case .needsFix(let m):
+            needsFix(m)
+        case .done(let d):
+            done(d)
+        }
+    }
+
+    private func needsFix(_ m: StockSoldFix.Mismatch) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(StockSoldFix.cardTitle, systemImage: "exclamationmark.triangle.fill")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.orange)
+            Text(StockSoldFix.cardMessage(m, isUS: isUS, now: Date()))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            if let r = switchRecord {
+                Text(r)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+            Button(StockSoldFix.buttonTitle(m, isUS: isUS)) {
+                if canAct { askConfirm = true } else { onLocked() }
+            }
+            .buttonStyle(.borderedProminent)
+            .tint(.orange)
+        }
+        .confirmationDialog(StockSoldFix.buttonTitle(m, isUS: isUS) + "？", isPresented: $askConfirm,
+                            titleVisibility: .visible) {
+            Button("補記賣出") { onApply() }
+            Button("取消", role: .cancel) {}
+        } message: {
+            Text(StockSoldFix.confirmMessage(m, isUS: isUS, switchRecord: switchRecord, now: Date()))
+        }
+    }
+
+    private func done(_ d: StockSoldFix.Done) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Label(StockSoldFix.doneTitle, systemImage: "checkmark.circle.fill")
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.green)
+            Text(StockSoldFix.doneMessage(d, now: Date()))
+                .font(.caption)
+                .foregroundStyle(.secondary)
+            Button("知道了") { onClose() }
+                .font(.caption.weight(.semibold))
+        }
     }
 }
 
@@ -952,9 +1082,8 @@ struct StockTransactionEditor: View {
 
     private func save() {
         guard !isSaving else { return }
-        guard var s = store.stocks.first(where: { $0.id == stockId }) else { dismiss(); return }
+        guard let current = store.stocks.first(where: { $0.id == stockId }) else { dismiss(); return }
         isSaving = true
-        s.seedTransactionsFromLegacyIfNeeded()
         // 畫面上輸入的是「股」（美股）或「張」（台股），存檔一律換回 lots。
         // 存檔格式刻意不動，見 Stock.displayQuantity 的說明。
         let lots = (Double(lotsText) ?? 0) * sharesPerUnit / 1000
@@ -966,13 +1095,8 @@ struct StockTransactionEditor: View {
             lots: lots,
             price: price
         )
-        if let idx = s.transactions.firstIndex(where: { $0.id == tx.id }) {
-            s.transactions[idx] = tx
-        } else {
-            s.transactions.append(tx)
-        }
-        s.transactions.sort { $0.date < $1.date }
-        s.recomputeFromTransactions()
+        // [v25.630] 補種、換掉／加、照日期排、重算改叫 StockSoldFix.upserting（編輯股票〔已賣出〕、提示卡〔補記賣出〕同一支）
+        let s = StockSoldFix.upserting(tx, into: current)
         store.update(s)
         syncBankDepositsForTransactions(s)
         dismiss()

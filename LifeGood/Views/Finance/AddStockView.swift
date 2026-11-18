@@ -188,6 +188,9 @@ struct AddStockView: View {
                     if isSold {
                         DatePicker("賣出日期", selection: $soldDate, in: purchaseDate..., displayedComponents: .date)
                     }
+                    if let hint = soldLedgerHint {
+                        Text(hint).font(.caption).foregroundStyle(.secondary)
+                    }
                 } header: {
                     sectionHeader("股票資訊", icon: "chart.line.uptrend.xyaxis")
                 }
@@ -1093,7 +1096,7 @@ struct AddStockView: View {
     private func save() {
         guard !isSaving else { return }
         guard !name.trimmingCharacters(in: .whitespaces).isEmpty,
-              let lots = Double(lotsText), lots > 0,
+              let lots = Double(lotsText), StockSoldFix.lotsAllowed(lots, editing: editing),
               let price = Double(purchasePriceText), price > 0 else {
             errorText = "請輸入股票名稱、\(unit)數和買入價格"
             showError = true; return
@@ -1102,6 +1105,13 @@ struct AddStockView: View {
         // 存出「賣出價 0、100% 虧損」的錯誤記錄且不提示使用者，這裡改成擋下並要求補填。
         if isSold, (Double(soldPriceText) ?? 0) <= 0 {
             errorText = "已標記為賣出，請輸入賣出價格"
+            showError = true; return
+        }
+        // [v25.630] 有帳本交易的股票：〔已賣出〕改成在帳本補一筆賣出（StockSoldFix.formPlan；沒有帳本的舊式股票＝.legacy，下面照 22bab81）
+        let ledgerPlan = StockSoldFix.formPlan(editing: editing, isSold: isSold,
+                                               price: Double(soldPriceText) ?? 0, date: soldDate)
+        if case .blocked(let why) = ledgerPlan {
+            errorText = why
             showError = true; return
         }
         showError = false
@@ -1115,7 +1125,14 @@ struct AddStockView: View {
         var expId = editing?.linkedExpenseId
         var incId = editing?.linkedIncomeId
 
-        if isSold && sp > 0 {
+        if !ledgerPlan.usesSwitchRecords {
+            // 有帳本：不記「賣出 X（虧損）／（獲利）」；帳本改了（補一筆／刪開關補的／改價改日）＝開關以前記的那筆刪掉（帳本會算已實現，留著會重複算）
+            if ledgerPlan.ledgerStock != nil {
+                StockSoldFix.removeSwitchRecords(expenseId: expId, incomeId: incId, in: expenseStore)
+                expId = nil
+                incId = nil
+            }
+        } else if isSold && sp > 0 {
             let pl = shares * (sp - price)
             if pl >= 0 {
                 incId = syncSoldIncome(stockId: stockId, name: trimmedName, profit: pl, date: soldDate, note: trimmedNote, existingId: incId)
@@ -1136,7 +1153,7 @@ struct AddStockView: View {
             if let iid = incId { expenseStore.incomes.removeAll { $0.id == iid }; incId = nil }
         }
 
-        let item = Stock(
+        let formItem = Stock(
             id: stockId,
             name: trimmedName,
             symbol: symbol.trimmingCharacters(in: .whitespaces).uppercased(),
@@ -1155,6 +1172,7 @@ struct AddStockView: View {
             transactions: editing?.transactions ?? [],
             dividends: editing?.dividends ?? []
         )
+        let item = StockSoldFix.applying(ledgerPlan, to: formItem, editing: editing)
         if editing != nil { financeStore.update(item) } else { financeStore.add(item) }
         syncAccountTransactions(for: item, previous: editing)
         dismiss()
@@ -1170,6 +1188,13 @@ struct AddStockView: View {
             lifeStore.updateWealthBook { $0.setLinks(nil, for: stock.id) }
         }
         lifeStore.rewriteStockSettlements(stock, rates: FinanceRates(expenseStore))
+    }
+
+    /// [v25.630] 有帳本的股票：〔已賣出〕底下那一行（存檔會在帳本補一筆／刪掉補的那一筆／擋下來的原因）
+    private var soldLedgerHint: String? {
+        guard let e = editing, !e.transactions.isEmpty else { return nil }
+        let plan = StockSoldFix.formPlan(editing: e, isSold: isSold, price: Double(soldPriceText) ?? 0, date: soldDate)
+        return StockSoldFix.formHint(plan, editing: e, now: Date())
     }
 
     private var soldAccountId: UUID? {
