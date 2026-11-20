@@ -752,7 +752,7 @@ private struct BillsLargeModel {
         }
         let amount: String = locked ? "" : (hidden ? WidgetHideAmounts.mask : bill.amountText)
         let income: Bool = bill.isIncome && !hidden && !locked
-        return BillsLargeRow(id: bill.id, title: title, showsStar: bill.isIncome, lead: lead, rest: rest,
+        return BillsLargeRow(id: bill.id, title: title, showsStar: bill.isIncome && !locked, lead: lead, rest: rest,
                              amount: amount, incomeStyle: income,
                              tint: bill.tint, tintDark: bill.tintDark, url: bill.url, bucket: bucket)
     }
