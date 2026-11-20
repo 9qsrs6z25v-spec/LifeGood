@@ -1,0 +1,204 @@
+import Foundation
+import Combine
+
+/// 完整備份匯出進度（給底部導覽顯示細進度條用）。
+final class ExportProgressModel: ObservableObject {
+    static let shared = ExportProgressModel()
+    @Published var isExporting = false
+    @Published var fraction: Double = 0   // 0...1
+    private init() {}
+
+    @MainActor func start() { fraction = 0; isExporting = true }
+    @MainActor func update(_ f: Double) { fraction = min(1, max(0, f)) }
+    @MainActor func finish() { fraction = 1; isExporting = false }
+}
+
+/// 完整備份單一檔格式（.lifegood）：零依賴、可重新匯入、串流寫入不爆記憶體。
+///
+/// 檔案結構：
+///   [magic 8B "LGBKP001"]
+///   [manifestLength UInt64 little-endian, 8B]
+///   [manifest JSON]
+///   [附件1 bytes][附件2 bytes]…  ← 順序與 manifest.attachments 對應，各取 size 位元組
+///
+/// manifest 內含完整的結構化資料（UnifiedExport）+ 附件清單（資料夾 / 檔名 / 大小）。
+
+struct BackupAttachment: Codable {
+    var directory: String
+    var fileName: String
+    var size: Int
+}
+
+struct BackupManifest: Codable {
+    var formatVersion: Int
+    var createdAt: Date
+    var unified: UnifiedExport
+    var attachments: [BackupAttachment]
+}
+
+enum FullBackup {
+    static let fileExtension = "lifegood"
+    private static let magic = "LGBKP001"   // 8 bytes (ASCII)
+    private static let magicData: Data = Data(magic.utf8)  // UTF-8 encoding of ASCII never fails; stored once
+
+    enum BackupError: Error { case badFormat, writeFailed }
+
+    /// 是否為完整備份檔（用前 8 bytes 的 magic 判斷，不讀整檔）
+    static func isBackupFile(url: URL) -> Bool {
+        guard let fh = try? FileHandle(forReadingFrom: url) else { return false }
+        defer { try? fh.close() }
+        let head = (try? fh.read(upToCount: 8)) ?? Data()
+        return head == magicData
+    }
+
+    // MARK: - 匯出（打包）
+
+    /// 產生完整備份檔，回傳暫存檔 URL（給分享）。串流寫入：每個附件單獨讀寫，不整包進記憶體。
+    /// unified 由呼叫端在主執行緒先用 UnifiedExport.build 準備好傳入，本函式只做檔案 I/O，可在背景執行。
+    static func export(unified: UnifiedExport, photoRange: ClosedRange<Date>? = nil,
+                       progress: ((Double) -> Void)? = nil) throws -> URL {
+        let fm = FileManager.default
+        progress?(0)
+
+        // 收集附件檔（依時間範圍篩選；size 在 contentsOfDirectory 時一次取得，避免 N 次 attributesOfItem）
+        let files = gatherAttachmentFiles(in: photoRange)
+        let manifestAtts: [BackupAttachment] = files.map {
+            BackupAttachment(directory: $0.dir, fileName: $0.name, size: $0.size)
+        }
+
+        let manifest = BackupManifest(formatVersion: 1, createdAt: Date(),
+                                      unified: unified, attachments: manifestAtts)
+        let enc = JSONEncoder()
+        enc.dateEncodingStrategy = .iso8601
+        let manifestData = try enc.encode(manifest)
+
+        let outURL = fm.temporaryDirectory
+            .appendingPathComponent("LifeGood_完整備份_\(stamp()).\(fileExtension)")
+        try? fm.removeItem(at: outURL)
+        guard fm.createFile(atPath: outURL.path, contents: nil) else { throw BackupError.writeFailed }
+        let fh = try FileHandle(forWritingTo: outURL)
+        defer { try? fh.close() }
+
+        try fh.write(contentsOf: magicData)
+        try fh.write(contentsOf: uint64LE(UInt64(manifestData.count)))
+        try fh.write(contentsOf: manifestData)
+        // 逐檔附加（單檔讀寫，記憶體只佔一張）；以整數百分比節流回報進度
+        let total = files.count
+        var lastPct = -1
+        for (i, f) in files.enumerated() {
+            // 讀取失敗應 throw 而非靜默略過：若略過會造成後續附件的位元組偏移量錯誤，
+            // 使還原時每筆附件的二進位讀取位置全部錯位，導致整份備份損壞。
+            let data = try Data(contentsOf: f.url, options: .mappedIfSafe)
+            // manifest 已預先寫入的 size 若與實際讀到的 bytes 數不符（例如匯出期間
+            // 該檔案被 CloudKit 背景同步覆寫），還原時會用舊 size 切出錯誤的位元組範圍，
+            // 造成該附件及其後所有附件全部損壞；與其靜默寫入不一致資料，直接中止匯出。
+            guard data.count == f.size else { throw BackupError.writeFailed }
+            try fh.write(contentsOf: data)
+            if total > 0 {
+                let pct = Int(Double(i + 1) / Double(total) * 100)
+                if pct != lastPct { lastPct = pct; progress?(Double(i + 1) / Double(total)) }
+            }
+        }
+        progress?(1)
+        return outURL
+    }
+
+    // MARK: - 匯入（還原）
+
+    /// 從備份檔還原：先重用 UnifiedImporter 還原結構化資料，再把附件寫回各資料夾。串流讀取。
+    static func restore(from url: URL, mode: UnifiedImporter.Mode,
+                        expense: ExpenseStore, finance: FinanceStore, life: LifeStore) throws -> String {
+        let fm = FileManager.default
+        let fh = try FileHandle(forReadingFrom: url)
+        defer { try? fh.close() }
+
+        guard let head = try fh.read(upToCount: 8), head == magicData else { throw BackupError.badFormat }
+        guard let lenData = try fh.read(upToCount: 8), lenData.count == 8 else { throw BackupError.badFormat }
+        let manifestLen = Int(readUInt64LE(lenData))
+        // 50 MB 上限：manifest 是純 JSON 中繼資料，正常情況遠低於此；
+        // 損壞或惡意備份檔若寫入超大 manifestLen 會造成 OOM，在此截斷。
+        guard manifestLen > 0, manifestLen <= 50_000_000,
+              let manifestData = try fh.read(upToCount: manifestLen),
+              manifestData.count == manifestLen else { throw BackupError.badFormat }
+
+        let dec = JSONDecoder()
+        dec.dateDecodingStrategy = .iso8601
+        let manifest = try dec.decode(BackupManifest.self, from: manifestData)
+
+        // 1) 結構化資料 → 重用 UnifiedImporter（合併 / 取代）
+        let enc = JSONEncoder()
+        enc.dateEncodingStrategy = .iso8601
+        let unifiedData = try enc.encode(manifest.unified)
+        let result = UnifiedImporter.importData(data: unifiedData, mode: mode,
+                                                expense: expense, finance: finance, life: life)
+
+        // 2) 附件寫回各資料夾（依序，依 size 取位元組）
+        // 每個附件最大 100 MB，防止備份檔損壞或惡意內容造成 OOM
+        let maxAttachmentSize = 100_000_000
+        var written = 0
+        if let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first {
+            for att in manifest.attachments {
+                // 附件之間無分隔符，全靠 manifest 的 size 依序切割位元組；一旦某筆
+                // size 校驗失敗（檔案截斷／manifest 損壞），讀取游標即與檔案內容錯位。
+                // 過去用 continue 想「跳過壞的一筆、繼續救後面的」，但錯位後 fh.read
+                // 仍會從錯誤位置讀到「等長」的其他附件資料，bytes.count == att.size
+                // 多半仍會通過（只有讀到檔尾才會失敗），於是後續每一筆都被寫入來源
+                // 錯誤的位元組內容、卻頂著正確的檔名寫進磁碟——不是漏還原，而是把
+                // 其他附件的內容悄悄覆蓋成別筆照片／文件，屬於靜默資料損毀，比整批
+                // 略過更嚴重。錯位後已無法復原正確邊界，改為直接停止還原附件迴圈，
+                // 並如實回報 written 筆數，不再假裝繼續救援。
+                guard att.size >= 0, att.size <= maxAttachmentSize,
+                      let bytes = try fh.read(upToCount: att.size),
+                      bytes.count == att.size else { break }
+                let dirURL = docs.appendingPathComponent(att.directory, isDirectory: true)
+                try? fm.createDirectory(at: dirURL, withIntermediateDirectories: true)
+                let dest = dirURL.appendingPathComponent(att.fileName)
+                try? bytes.write(to: dest)
+                written += 1
+            }
+        }
+        return "\(result.summary)；照片 / 文件 \(written) 個"
+    }
+
+    // MARK: - Helpers
+
+    private static func gatherAttachmentFiles(in range: ClosedRange<Date>?) -> [(dir: String, name: String, url: URL, size: Int)] {
+        let fm = FileManager.default
+        guard let docs = fm.urls(for: .documentDirectory, in: .userDomainMask).first else { return [] }
+        var out: [(String, String, URL, Int)] = []
+        for dir in CloudKitManager.photoDirectories {
+            let dirURL = docs.appendingPathComponent(dir, isDirectory: true)
+            guard let urls = try? fm.contentsOfDirectory(
+                at: dirURL,
+                includingPropertiesForKeys: [.fileSizeKey, .contentModificationDateKey],
+                options: .skipsHiddenFiles
+            ) else { continue }
+            for url in urls {
+                let rv = try? url.resourceValues(forKeys: [.fileSizeKey, .contentModificationDateKey])
+                // 依檔案修改時間篩選；取不到時間就保留（寧可多備不漏）
+                if let range, let mod = rv?.contentModificationDate, !range.contains(mod) { continue }
+                let size = rv?.fileSize ?? 0
+                out.append((dir, url.lastPathComponent, url, size))
+            }
+        }
+        return out
+    }
+
+    private static func uint64LE(_ x: UInt64) -> Data {
+        var d = Data(count: 8)
+        for i in 0..<8 { d[i] = UInt8((x >> (8 * UInt64(i))) & 0xFF) }
+        return d
+    }
+
+    private static func readUInt64LE(_ d: Data) -> UInt64 {
+        var v: UInt64 = 0
+        for i in 0..<8 { v |= UInt64(d[d.startIndex + i]) << (8 * UInt64(i)) }
+        return v
+    }
+
+    private static func stamp() -> String {
+        let f = DateFormatter()
+        f.dateFormat = "yyyyMMdd_HHmmss"
+        return f.string(from: Date())
+    }
+}

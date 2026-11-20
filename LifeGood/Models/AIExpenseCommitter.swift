@@ -1,0 +1,402 @@
+import Foundation
+import MapKit
+
+// MARK: - AI 記帳存檔（小工具 v3：從 MainTabView 抽出來，浮動麥克風與「說一句」共用一份）
+//
+// 只屬於「LifeGood」target。由 G1 實作，規格見 scratchpad/widgets/v3/brief.md 的 G1-1。
+//
+// 一句話（語音辨識的字）→ AIExpenseParserService 解析 → 建 Expense、存檔、同步銀行扣款與房地產章節 →
+// 回傳要顯示的提示（成功「已記一筆：午餐」／失敗「AI 解析失敗」「找不到金額」）。
+// 內容是 v3 之前 MainTabView 的 aiFinishRecording（aiBusy = true 之後那一段）＋aiCommitExpense 與它的
+// 輔助函式，**逐字搬過來、行為不變**；MainTabView 的按住講、放開停改呼叫這裡。
+//
+// 型別：AIExpenseOutcome、AIExpenseCommitter（@MainActor enum）；檔內小零件 private。
+//
+// 搬家時只改了三件事（其餘一個字都沒動）：
+//   • lifeStore／financeStore／expenseStore → 參數 life／finance／expense
+//   • aiShowToast(…) → return AIExpenseOutcome(…)（同樣的字，由呼叫的人決定怎麼顯示）
+//   • 函式去掉 ai 前綴、變成 private static；兩個 struct 收進這個 enum 裡當 private 型別
+//
+// [v25.577] 定期轉帳 v1b：AI 認得「轉到自己的帳戶」（ParsedAIExpense.ownTransfer）→ commit 第一行就回
+// 「這是轉帳，沒有記成支出」，不建 Expense、不扣帳戶（轉給家人、房東照舊記支出）。
+//
+// [手錶 v7a] v25.585（watch/judge.md §4.1「說一句」、§8 v7a；watch/build/v7a/brief.md §2）：手錶說一句也走這一支——
+//   • record 多三個選填參數（都有預設值，iPhone 浮動麥克風、說一句的呼叫一行不改、行為不變）：
+//     id（那筆支出的編號＝手錶那一句的編號：兩條路都到、手錶重送只記一次）、date（講完那一刻，不是 iPhone 解析的時間）、
+//     trip（旅途中：記到哪一趟哪一站；外幣照 v6——AI 聽到的數字是那一國的錢，台幣用手錶上的匯率換，WatchVoiceRule.recorded）
+//   • 三種沒記成的提示字收成常數（ownTransferTitle、noAmountTitle、failedTitle；字一個都沒改）：手錶那邊照這幾個分是哪一種
+//   • 記好了的 AIExpenseOutcome 多帶 spokenAmount（AI 聽到的數字；旅途中外幣是原幣）：回手錶的「₩18,000 ≈ NT$412」用
+
+/// AI 記帳的結果提示（浮動麥克風的 toast、說一句的結果卡都用這一份字）
+struct AIExpenseOutcome: Equatable {
+    let title: String
+    let detail: String
+    let isError: Bool
+    /// [手錶 v7a] 記好了才有：AI 聽到的數字（旅途中外幣是原幣「18000」；國內＝存的金額）。iPhone 的提示不用它
+    var spokenAmount: Double? = nil
+}
+
+/// [手錶 v7a] 手錶說一句在旅途中：記到哪一趟、哪一站；外幣（照 v6 記一筆：台幣用手錶上的匯率換、入帳不重算）
+struct AIExpenseTripLink: Equatable {
+    var planId: UUID
+    /// nil＝記在整趟上
+    var stopId: UUID?
+    /// 那一國的幣別寫法（＝支出存的 currencyCode，例「韓元」）；nil＝台幣
+    var currencyCode: String?
+    /// 1 單位外幣＝幾台幣（手錶上那個匯率）
+    var rateToTWD: Double?
+}
+
+@MainActor
+enum AIExpenseCommitter {
+
+    /// [手錶 v7a] 沒記成的提示字（手錶 WatchVoiceSaidBuilder.outcome 照這幾個分是哪一種；字跟以前一模一樣）
+    static let ownTransferTitle = "這是轉帳，沒有記成支出"
+    static let noAmountTitle = "找不到金額"
+    static let failedTitle = "AI 解析失敗"
+
+    /// 一句話 → AI 解析 → 存檔（含銀行扣款、房地產章節同步、美食地圖查詢）→ 要顯示的提示。
+    /// text 由呼叫的人去頭尾空白、確定不是空的（空的提示字兩邊不一樣，各自處理）。
+    /// [手錶 v7a] id、date、trip 只有手錶說一句（WatchVoiceApplier）會給：支出編號＝那一句的編號、時間＝講完那一刻、
+    /// 旅途中記到那一站（外幣照 v6）。iPhone 的呼叫不給＝新編號、現在、台幣、不連旅遊（跟以前一樣）
+    static func record(text: String, expense: ExpenseStore, life: LifeStore,
+                       finance: FinanceStore, id: UUID? = nil, date: Date? = nil,
+                       trip: AIExpenseTripLink? = nil) async -> AIExpenseOutcome {
+        do {
+            // 把家庭成員姓名與本人名字一起送給 AI，讓它從固定清單選同行者
+            // 優先用中文姓名，沒填才用英文姓名
+            func memberName(_ chinese: String, _ english: String) -> String {
+                let c = chinese.trimmingCharacters(in: .whitespaces)
+                if !c.isEmpty { return c }
+                return english.trimmingCharacters(in: .whitespaces)
+            }
+            var familyNames: [String] = life.familyMembers
+                .map { memberName($0.chineseName, $0.englishName) }
+                .filter { !$0.isEmpty }
+            let myName = speakerName(life: life)
+            if !myName.isEmpty { familyNames.insert(myName, at: 0) }
+
+            // 蒐集信用卡 / 銀行帳戶 / 房地產顯示名稱，讓 AI 從清單挑選關聯
+            let cardDisplayNames = creditCardOptions(life: life)
+            let bankDisplayNames = bankOptions(life: life)
+            let realEstateDisplayNames = realEstateOptions(finance: finance)
+
+            let parsed = try await AIExpenseParserService.shared.parse(
+                text,
+                availableMembers: familyNames,
+                availableCreditCards: cardDisplayNames.map(\.display),
+                availableBankAccounts: bankDisplayNames.map(\.display),
+                availableRealEstates: realEstateDisplayNames.map(\.display)
+            )
+            // 呼叫的人（浮動麥克風的 aiBusy、說一句的 .working）要保護到這裡回來為止：commit 含
+            // Apple Maps 地點查詢與 expense／life／finance 寫入，兩筆交錯執行提示順序會錯亂。
+            return await commit(
+                parsed: parsed,
+                expense: expense,
+                life: life,
+                finance: finance,
+                cards: cardDisplayNames,
+                banks: bankDisplayNames,
+                estates: realEstateDisplayNames,
+                id: id,
+                date: date,
+                trip: trip
+            )
+        } catch {
+            return AIExpenseOutcome(title: failedTitle, detail: error.localizedDescription, isError: true)
+        }
+    }
+
+    // MARK: - 給 AI 挑的清單
+
+    private struct AccountOption {
+        let id: UUID
+        let display: String
+        /// 信用卡專用：底下連結的銀行帳戶 id
+        let linkedBankId: UUID?
+    }
+
+    /// 信用卡清單：排除停用卡，顯示名稱包含品牌名 + 末四碼
+    private static func creditCardOptions(life: LifeStore) -> [AccountOption] {
+        life.milestones.compactMap { ms in
+            guard ms.category == .achievement,
+                  ms.financeSubCategory == .creditCard,
+                  ms.isDisabled != true else { return nil }
+            let name = (ms.cardName?.isEmpty == false ? ms.cardName ?? ms.title : ms.title)
+            var display = name
+            if let last4 = ms.cardLastFour, !last4.isEmpty {
+                display += " 末\(last4)"
+            }
+            return AccountOption(id: ms.id, display: display, linkedBankId: ms.linkedBankMilestoneId)
+        }
+    }
+
+    /// 銀行帳戶清單：顯示名稱使用 bankName 或 title
+    private static func bankOptions(life: LifeStore) -> [AccountOption] {
+        life.milestones.compactMap { ms in
+            guard ms.category == .achievement,
+                  ms.financeSubCategory == .bank else { return nil }
+            let name = (ms.bankName?.isEmpty == false ? ms.bankName ?? ms.title : ms.title)
+            return AccountOption(id: ms.id, display: name, linkedBankId: nil)
+        }
+    }
+
+    private struct RealEstateOption {
+        let id: UUID
+        let display: String
+    }
+
+    /// 房地產清單（排除已售出）：顯示名稱使用 RealEstate.name
+    private static func realEstateOptions(finance: FinanceStore) -> [RealEstateOption] {
+        finance.realEstates.compactMap { re in
+            guard re.soldDate == nil else { return nil }
+            let name = re.name.trimmingCharacters(in: .whitespaces)
+            guard !name.isEmpty else { return nil }
+            return RealEstateOption(id: re.id, display: name)
+        }
+    }
+
+    // MARK: - 存檔
+
+    private static func commit(
+        parsed: ParsedAIExpense,
+        expense: ExpenseStore,
+        life: LifeStore,
+        finance: FinanceStore,
+        cards cardDisplayNames: [AccountOption],
+        banks bankDisplayNames: [AccountOption],
+        estates realEstateDisplayNames: [RealEstateOption],
+        id recordId: UUID?,
+        date recordDate: Date?,
+        trip: AIExpenseTripLink?
+    ) async -> AIExpenseOutcome {
+        // [v25.577] 跟 AI 說轉到自己的帳戶（定期轉帳 v1b，judge §5）：自己帳戶之間搬錢不是花費——不建 Expense、不扣帳戶，只提示。
+        // 不幫你建單次轉帳或規則：AI 認錯帳戶時不會偷偷寫一筆轉帳；「每月轉兩萬」也不是單次（真的幫你建留在以後）
+        if parsed.ownTransfer {
+            return AIExpenseOutcome(title: ownTransferTitle,
+                                    detail: "自己帳戶之間搬錢不算花費。到財富頁按〔＋〕記〔轉帳〕；每個月都轉的記〔定期轉帳〕。",
+                                    isError: false)
+        }
+        let spoken = parsed.amount ?? 0
+        guard spoken > 0 else {
+            return AIExpenseOutcome(title: noAmountTitle, detail: parsed.originalText ?? "AI 沒辨識出金額", isError: true)
+        }
+        // [手錶 v7a] 旅途中外幣（手錶說一句）：AI 聽到的是那一國的錢，台幣用手錶上的匯率換、幣別存那一國；
+        // 沒有 trip（iPhone 自己的說一句、浮動麥克風）＝原樣、"NT$"（跟以前一樣）
+        let money = WatchVoiceRule.recorded(spoken: spoken, code: trip?.currencyCode, rate: trip?.rateToTWD)
+        let amount: Double = money.amount
+        let category = AIVariableCategoryMapper.map(parsed.categoryRaw) ?? .other
+        let title: String = {
+            if let t = parsed.title, !t.isEmpty { return t }
+            return category.rawValue
+        }()
+        // 飲食 / 娛樂 / 購物 / 日用品 / 醫療類支出做 Apple Maps 查詢，
+        // 抓到座標後寫入 placeLatitude / Longitude / Address，讓美食地圖能標到
+        let placeCategories: Set<VariableCategory> = [
+            .food, .entertainment, .shopping, .dailyNecessities, .medical
+        ]
+        var placeAddress: String? = nil
+        var placeLat: Double? = nil
+        var placeLon: Double? = nil
+        if placeCategories.contains(category), !title.isEmpty {
+            if let mapItem = await lookupPlace(query: title) {
+                placeAddress = mapItem.formattedAddress
+                placeLat = mapItem.placemark.coordinate.latitude
+                placeLon = mapItem.placemark.coordinate.longitude
+            }
+        }
+        // AI 辨識到的扣款帳戶：對回 LifeMilestone（信用卡優先；無對應再找銀行）
+        var linkedBankId: UUID? = nil
+        var linkedCardId: UUID? = nil
+        var matchedAccountDisplay: String? = nil
+        if let acc = parsed.paymentAccount?.trimmingCharacters(in: .whitespaces),
+           !acc.isEmpty {
+            if let card = cardDisplayNames.first(where: { $0.display == acc }) {
+                linkedCardId = card.id
+                linkedBankId = card.linkedBankId
+                matchedAccountDisplay = card.display
+            } else if let bank = bankDisplayNames.first(where: { $0.display == acc }) {
+                linkedBankId = bank.id
+                matchedAccountDisplay = bank.display
+            }
+        }
+        // 把本人也加進同行者：AI 通常只抽出對方（「我跟老婆」會抽出老婆），
+        // 但用「我跟」「和」「陪」「帶」等措辭時，本人也在場
+        let resolvedDiningMember = appendSpeakerIfNeeded(parsed.diningMember, life: life)
+        // 對回房地產 UUID 與子分類；若 AI 配到房地產，分類強制為 .realEstate
+        var linkedRealEstateId: UUID? = nil
+        var realEstateSubCat: RealEstateExpenseCategory? = nil
+        var matchedRealEstateDisplay: String? = nil
+        if let re = parsed.realEstate?.trimmingCharacters(in: .whitespaces),
+           !re.isEmpty,
+           let match = realEstateDisplayNames.first(where: { $0.display == re }) {
+            linkedRealEstateId = match.id
+            matchedRealEstateDisplay = match.display
+            realEstateSubCat = RealEstateExpenseCategory(rawValue:
+                parsed.realEstateSubCategory?.trimmingCharacters(in: .whitespaces) ?? ""
+            ) ?? .other
+        }
+        let finalCategory: VariableCategory = (linkedRealEstateId != nil) ? .realEstate : category
+        var exp = Expense(
+            id: recordId ?? UUID(),
+            title: title,
+            amount: amount,
+            date: recordDate ?? Date(),
+            expenseType: .variable,
+            variableCategory: finalCategory,
+            linkedRealEstateId: linkedRealEstateId,
+            realEstateExpenseCategory: realEstateSubCat,
+            note: parsed.note ?? "",
+            currencyCode: money.currencyCode,
+            diningMember: resolvedDiningMember,
+            linkedBankMilestoneId: linkedBankId,
+            // [v25.563] 預設幣別跟記帳選單同一支（WealthFacts.currencies，D20／C2）；刷卡的照記帳表單寫台幣
+            linkedBankCurrency: linkedBankId.map { id in
+                linkedCardId != nil ? "NT$" : bankCurrency(for: id, life: life, expense: expense, finance: finance)
+            },
+            linkedCreditCardMilestoneId: linkedCardId,
+            placeAddress: placeAddress,
+            placeLatitude: placeLat,
+            placeLongitude: placeLon
+        )
+        // [手錶 v7a] 旅途中記到那一趟、那一站（不在 memberwise init，照 AddExpenseView 存檔端、QuickRecordImporter.tripLink 指派）
+        let link = tripLink(trip, plans: life.tripPlans)
+        exp.linkedTripPlanId = link.planId
+        exp.linkedTripStopId = link.stopId
+        expense.add(exp)
+        // AI 語音記帳原本只寫入 Expense 就結束，沒有比照 AddExpenseView.save() 呼叫
+        // syncBankWithdrawal／syncRealEstateVariableExpense，導致銀行帳戶餘額、房地產支出
+        // 章節帳實不符（AI 標了扣款帳戶／房地產，但對應清單與總額完全看不到這筆錢）；
+        // 這裡補上對等的同步邏輯，供 AI 記帳流程使用。
+        // [v25.562] 扣外幣子帳戶要換匯（跟記帳頁同一支 FinanceRates.bankAmount）；expense 是 ExpenseStore、exp 是這筆支出
+        syncBankWithdrawal(for: exp, life: life, rates: FinanceRates(expense), ntd: expense.ntdValue(of: exp))
+        syncRealEstateExpense(for: exp, finance: finance)
+        // 成功 toast
+        // [美化] 金額改用全 App 共用的萬/億智慧量級（ntdWanString），對齊其餘頁面金額顯示規格，
+        // 取代原本高額時會顯示成長串裸整數（如 NT$ 1200000）的寫法；純顯示調整，未變動實際存入的 exp.amount。
+        var detailParts: [String] = ["\(finalCategory.rawValue)・\(amount.ntdWanString)"]
+        if let m = resolvedDiningMember, !m.isEmpty { detailParts.append(m) }
+        if let acc = matchedAccountDisplay { detailParts.append(acc) }
+        if let re = matchedRealEstateDisplay {
+            let subText = realEstateSubCat.map { "（\($0.rawValue)）" } ?? ""
+            detailParts.append("\(re)\(subText)")
+        }
+        if placeLat != nil { detailParts.append("已標 美食地圖") }
+        return AIExpenseOutcome(title: "已記一筆：\(title)", detail: detailParts.joined(separator: "・"), isError: false,
+                                spokenAmount: spoken)
+    }
+
+    /// [手錶 v7a] 連到哪一趟、哪一站（同 QuickRecordImporter.tripLink）：那一趟還在才連；站要還在那一趟裡，不在＝算整趟。
+    /// 沒有 trip（iPhone 的呼叫）＝兩個都 nil（跟以前一樣不連）
+    private static func tripLink(_ trip: AIExpenseTripLink?, plans: [TripPlan]) -> (planId: UUID?, stopId: UUID?) {
+        guard let trip, let plan = plans.first(where: { $0.id == trip.planId }) else {
+            return (planId: nil, stopId: nil)
+        }
+        let sid: UUID? = plan.stops.first(where: { $0.id == trip.stopId })?.id
+        return (planId: trip.planId, stopId: sid)
+    }
+
+    /// AI 記帳扣款帳戶預設幣別：而非寫死 "NT$"，避免外幣帳戶被記到錯誤幣別的桶子。
+    /// [v25.563] 跟記帳、收入、股票、房屋水電選單同一支 WealthFacts.currencies（台幣在前；存提款紀錄兩個方向、
+    /// 入這裡的收入、扣這裡的記帳、交割在這裡的股票都算，D20）；以前只看第一筆存款紀錄。
+    /// 玉山只有美金 → 「玉山 · 美金」（扣款金額照 v1 換匯）；有台幣 → 台幣。expense 是 ExpenseStore（不是這筆支出）
+    private static func bankCurrency(for bankId: UUID, life: LifeStore, expense: ExpenseStore,
+                                     finance: FinanceStore) -> String {
+        guard let ms = life.milestones.first(where: { $0.id == bankId }) else { return "NT$" }
+        let codes = WealthFacts.currencies(forAccount: ms, expenses: expense.expenses, incomes: expense.incomes,
+                                           stocks: finance.stocks)
+        return codes.first ?? "NT$"
+    }
+
+    /// AI 記帳同步：寫入銀行扣款紀錄，比照 AddExpenseView.syncBankWithdrawal(for:previous:)（新記錄、無需移除舊連結）。
+    /// [v25.562] 金額、幣別走 FinanceRates.bankAmount：記帳金額是台幣，扣「玉山・美金」以前直接寫成「美金 320」，
+    /// 現在換成美金 10.00；查不到匯率寫進這個帳戶的台幣那一格。ntd 由呼叫端用 ExpenseStore.ntdValue(of:) 算好。
+    private static func syncBankWithdrawal(for expense: Expense, life: LifeStore, rates: FinanceRates, ntd: Double) {
+        guard expense.linkedCreditCardMilestoneId == nil,
+              let bankId = expense.linkedBankMilestoneId,
+              var ms = life.milestones.first(where: { $0.id == bankId }) else { return }
+        let withdrawal = rates.bankAmount(of: expense, ntd: ntd)
+        var list = ms.bankDeposits ?? []
+        list.append(BankDeposit(
+            id: UUID(), date: expense.date, amount: withdrawal.amount,
+            currencyCode: withdrawal.code,
+            isWithdrawal: true, linkedExpenseId: expense.id
+        ))
+        ms.bankDeposits = list
+        life.update(ms)
+    }
+
+    /// AI 記帳同步：寫入房地產已支出／水電瓦斯／變動支出章節，比照 AddExpenseView.syncRealEstateVariableExpense(realEstateId:expenseId:amount:)。
+    private static func syncRealEstateExpense(for expense: Expense, finance: FinanceStore) {
+        guard let reId = expense.linkedRealEstateId,
+              var re = finance.realEstates.first(where: { $0.id == reId }) else { return }
+        let category = expense.realEstateExpenseCategory ?? .other
+        switch category {
+        case .housePayment:
+            re.paidItems.append(RealEstatePaidItem(
+                id: UUID(), title: expense.title, amount: expense.amount,
+                date: expense.date, linkedExpenseId: expense.id
+            ))
+        case .utility:
+            // [v25.530] 跟記帳頁共用同一套判斷（先拿掉房子名稱，「水岸花園 電費」才不會被當成水費）
+            let inferredType = guessUtilityType(title: expense.title, note: expense.note, estateName: re.name)
+            re.utilityPayments.append(UtilityPayment(
+                type: inferredType, date: expense.date, amount: expense.amount,
+                note: expense.note, linkedExpenseId: expense.id
+            ))
+        default:
+            re.variableExpenses.append(RealEstateVariableExpense(
+                id: UUID(), category: category, name: expense.note,
+                amount: expense.amount, date: expense.date, linkedExpenseId: expense.id
+            ))
+        }
+        finance.update(re)
+    }
+
+    // MARK: - 同行者
+
+    /// 取得本人姓名（中文優先，否則英文；都空 → 回空字串）
+    private static func speakerName(life: LifeStore) -> String {
+        let c = life.profile.chineseName.trimmingCharacters(in: .whitespaces)
+        if !c.isEmpty { return c }
+        return life.profile.englishName.trimmingCharacters(in: .whitespaces)
+    }
+
+    /// 若 AI 抽出的 diningMember 沒包含本人，幫忙補進去（最前面）
+    private static func appendSpeakerIfNeeded(_ raw: String?, life: LifeStore) -> String? {
+        let speaker = speakerName(life: life)
+        // guard 失敗時以 trimmed 後的值判斷：原始 raw 可能是純空白字串，
+        // 直接回傳未 trim 的值會讓 diningMember 存到無效空白內容。
+        let trimmedRaw = raw?.trimmingCharacters(in: .whitespaces)
+        guard !speaker.isEmpty,
+              let trimmedRaw = trimmedRaw,
+              !trimmedRaw.isEmpty
+        else { return trimmedRaw?.isEmpty == true ? nil : trimmedRaw }
+        let separators = CharacterSet(charactersIn: "、,，;； ")
+        let existing = trimmedRaw
+            .components(separatedBy: separators)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
+        if existing.contains(speaker) { return trimmedRaw }
+        return "\(speaker)、\(trimmedRaw)"
+    }
+
+    // MARK: - 美食地圖
+
+    /// 用 MKLocalSearch 查 AI 給出的店家名稱，帶當前位置偏向
+    private static func lookupPlace(query: String) async -> MKMapItem? {
+        let request = MKLocalSearch.Request()
+        request.naturalLanguageQuery = query
+        if let region = LocationProvider.shared.searchRegion {
+            request.region = region
+        }
+        request.resultTypes = .pointOfInterest
+        let search = MKLocalSearch(request: request)
+        return await withCheckedContinuation { cont in
+            search.start { [search] resp, _ in
+                _ = search  // 防止 ARC 在回調完成前提前釋放 search，導致 continuation 永不 resume
+                cont.resume(returning: resp?.mapItems.first)
+            }
+        }
+    }
+}

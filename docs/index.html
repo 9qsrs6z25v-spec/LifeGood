@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>美好人生・部屬看板</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌱</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- 登入／設定畫面 -->
+<section id="gate" class="gate">
+  <div class="gate-card">
+    <div class="gate-logo">🌱</div>
+    <h1>美好人生・部屬看板</h1>
+    <p class="muted">桌面唯讀版。用 Apple ID 登入後直接讀取你 iCloud 裡的部屬與部門資料，不會寫入任何東西。</p>
+
+    <div id="gate-token" class="gate-step">
+      <label for="token-input">CloudKit API Token</label>
+      <input id="token-input" type="text" spellcheck="false" autocomplete="off"
+             placeholder="貼上在 CloudKit Dashboard 產生的 token">
+      <p class="hint">Token 只存在這台瀏覽器的 localStorage，不會上傳、也不在程式碼裡。</p>
+      <div class="row">
+        <button id="token-save" class="btn primary">儲存並登入</button>
+        <button id="demo-btn" class="btn ghost">先用示範資料看看</button>
+      </div>
+    </div>
+
+    <div id="gate-signin" class="gate-step" hidden>
+      <p>Token 已設定。請用擁有這份資料的 Apple ID 登入：</p>
+      <div id="apple-sign-in-button"></div>
+      <div class="row">
+        <button id="token-reset" class="btn ghost small">更換 Token</button>
+        <button id="demo-btn-2" class="btn ghost small">先用示範資料看看</button>
+      </div>
+    </div>
+
+    <p id="gate-status" class="status" hidden></p>
+  </div>
+</section>
+
+<!-- 主畫面 -->
+<div id="app" class="app" hidden>
+  <aside class="sidebar">
+    <div class="brand">
+      <span class="brand-icon">🌱</span>
+      <div>
+        <div class="brand-name">美好人生</div>
+        <div class="brand-sub">部屬看板・唯讀</div>
+      </div>
+    </div>
+    <nav class="nav">
+      <div class="nav-group"><div class="nav-title">收支</div>
+        <a href="#/expense/overview" data-route="expense/overview"><span class="ico">🏠</span>總覽</a>
+        <a href="#/expense/income" data-route="expense/income"><span class="ico">💵</span>收入</a>
+        <a href="#/expense/variable" data-route="expense/variable"><span class="ico">🔁</span>變動支出</a>
+        <a href="#/expense/fixed" data-route="expense/fixed"><span class="ico">📌</span>固定支出</a>
+        <a href="#/expense/chart" data-route="expense/chart"><span class="ico">📈</span>圖表</a>
+      </div>
+      <div class="nav-group"><div class="nav-title">理財</div>
+        <a href="#/finance/overview" data-route="finance/overview"><span class="ico">🏠</span>總覽</a>
+        <a href="#/finance/insurance" data-route="finance/insurance"><span class="ico">🛡️</span>儲蓄險</a>
+        <a href="#/finance/stock" data-route="finance/stock"><span class="ico">📊</span>股票</a>
+        <a href="#/finance/vehicle" data-route="finance/vehicle"><span class="ico">🚗</span>載具</a>
+        <a href="#/finance/realestate" data-route="finance/realestate"><span class="ico">🏢</span>房地產</a>
+        <a href="#/finance/chart" data-route="finance/chart"><span class="ico">🥧</span>圖表</a>
+      </div>
+      <div class="nav-group"><div class="nav-title">人生</div>
+        <a href="#/life/overview" data-route="life/overview"><span class="ico">🏠</span>總覽</a>
+        <a href="#/life/resume" data-route="life/resume"><span class="ico">🏆</span>履歷</a>
+        <a href="#/life/wealth" data-route="life/wealth"><span class="ico">💰</span>財富</a>
+        <div class="nav-sub">職涯</div>
+        <a href="#/calendar" data-route="calendar"><span class="ico">📅</span>我的行事曆</a>
+        <a href="#/overview" data-route="overview"><span class="ico">📋</span>部屬總覽</a>
+        <a href="#/subs" data-route="subs"><span class="ico">👥</span>部屬</a>
+        <a href="#/matrix" data-route="matrix" class="nav-indent"><span class="ico">🎯</span>人才矩陣</a>
+        <a href="#/stats" data-route="stats" class="nav-indent"><span class="ico">📊</span>統計圖表</a>
+        <a href="#/perf" data-route="perf" class="nav-indent"><span class="ico">🏅</span>評分加總</a>
+        <a href="#/roster" data-route="roster" class="nav-indent"><span class="ico">🗓️</span>班表</a>
+        <a href="#/cards" data-route="cards"><span class="ico">🪪</span>名片</a>
+        <a href="#/org" data-route="org"><span class="ico">🏢</span>公司組織</a>
+        <a href="#/grades" data-route="grades"><span class="ico">🔢</span>部門職等</a>
+        <a href="#/sideroles" data-route="sideroles"><span class="ico">🧩</span>兼任職務</a>
+        <a href="#/life/family" data-route="life/family"><span class="ico">👨‍👩‍👧</span>家庭</a>
+        <a href="#/life/realestate" data-route="life/realestate"><span class="ico">🏘️</span>房地產</a>
+        <a href="#/tax" data-route="tax"><span class="ico">🧾</span>稅務</a>
+        <a href="#/food" data-route="food"><span class="ico">🍜</span>美食地圖</a>
+        <a href="#/travel" data-route="travel"><span class="ico">✈️</span>旅遊地圖</a>
+        <a href="#/medical" data-route="medical"><span class="ico">🏥</span>醫療地圖</a>
+      </div>
+      <div class="nav-group"><div class="nav-title">設定</div>
+        <a href="#/settings" data-route="settings"><span class="ico">⚙️</span>設定</a>
+      </div>
+    </nav>
+    <div class="sidebar-foot">
+      <div id="data-source" class="muted small"></div>
+      <div class="row">
+        <button id="reload-btn" class="btn ghost small">重新讀取</button>
+        <button id="signout-btn" class="btn ghost small">登出</button>
+      </div>
+      <div id="apple-sign-out-button" hidden></div>
+    </div>
+  </aside>
+  <main id="main" class="main"></main>
+</div>
+
+<div id="toast" class="toast" hidden></div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.1/chart.umd.min.js"></script>
+<script src="https://cdn.apple-cloudkit.com/ck/2/cloudkit.js" async onload="window.__ckReady=true" onerror="window.__ckFailed=true"></script>
+<script src="demo-data.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
