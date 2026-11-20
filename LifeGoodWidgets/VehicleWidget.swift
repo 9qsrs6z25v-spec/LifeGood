@@ -44,8 +44,8 @@ struct VehicleWidget: Widget {
             VehicleWidgetEntryView(entry: entry)
         }
         .configurationDisplayName("我的車")
-        .description("每月養車、車貸繳到第幾期、下一筆扣什麼")
-        .supportedFamilies([.systemSmall, .systemMedium, .accessoryCircular, .accessoryRectangular])
+        .description("每月養車、車貸繳到第幾期、下一筆扣什麼；大的多列接下來 4 筆，還能直接記一筆")
+        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge, .accessoryCircular, .accessoryRectangular])
     }
 }
 
@@ -350,7 +350,8 @@ struct VehicleWidgetEntryView: View {
 
     var body: some View {
         let model = VehicleWidgetModel.make(entry: entry)
-        VehicleWidgetContent(model: model, palette: palette, family: family)
+        let large: VehicleLargeModel? = family == .systemLarge ? VehicleLargeModel.make(entry: entry, base: model) : nil
+        VehicleWidgetContent(model: model, palette: palette, family: family, large: large)
             .containerBackground(for: .widget) {
                 background
             }
@@ -373,6 +374,8 @@ private struct VehicleWidgetContent: View {
     let model: VehicleWidgetModel
     let palette: WidgetPalette
     let family: WidgetFamily
+    /// 大型才有（VehicleWidgetEntryView 只在 .systemLarge 算）
+    var large: VehicleLargeModel? = nil
 
     var body: some View {
         if family == .accessoryCircular {
@@ -381,6 +384,8 @@ private struct VehicleWidgetContent: View {
             VehicleWidgetRect(model: model)
         } else if model.isMessage {
             VehicleWidgetMessage(text: model.message, palette: palette)
+        } else if family == .systemLarge {
+            VehicleLargeView(model: large ?? VehicleLargeModel(), palette: palette)
         } else if family == .systemMedium {
             VehicleWidgetMedium(model: model, palette: palette)
         } else {
@@ -934,5 +939,632 @@ private struct VehicleWidgetRectTitle: View {
                 .lineLimit(1)
                 .fixedSize()
         }
+    }
+}
+
+// MARK: - 大型（v25.631 large1）
+//
+// 規格：scratchpad/radar/build/large1/brief.md §0 C2、§2 G2；示意圖 scratchpad/largewidgets/vehicle.html。
+// 由上而下：主卡（車圖方塊＋名字／電車＋車貸環）→ 三格（每月養車｜每度電｜估值；最後一個候選收成一行）
+// →「接下來」最多 4 筆 → 兩顆 44pt 按鈕（快照的 buttons，Button(intent: LifeGoodOpenIntent)，不新增 intent）。
+// 已售出只寫「已售出・成交 NT$200萬」＋主卡（不畫環、三格、清單、按鈕）。
+// 字全部在 VehicleLargeModel.make 組好（照 sim_large1.py 的 vehicle_large_make），這裡不算錢、不拼「NT$」；
+// 列數由 VehicleLargeLayout（LargeWidgetKit.swift）算好 4 個候選，View 用 ViewThatFits 由上往下挑。
+// 隱藏金額：每月養車、接下來每筆、成交價換成 mask；每度電（單價）照常；估值那格換成「車貸｜已繳 25／60 期」
+// （沒有車貸整格不畫）。「接下來」每筆不單獨連結（快照沒有每筆的網址），整塊開那一台車。
+
+/// 三格數字的一格：「每月養車｜約｜NT$5,200」「每度電｜｜NT$7.9」「估值｜｜NT$260萬」「車貸｜｜已繳 25／60 期」
+private struct VehicleLargeTile: Identifiable {
+    /// 「monthly」「energy」「value」「loan」
+    let id: String
+    let label: String
+    /// 「約」或空字串
+    let prefix: String
+    let value: String
+}
+
+/// 「接下來」一筆：「11/25｜(週三)｜車貸 第 26 期｜｜NT$3.2萬」
+private struct VehicleLargeDue: Identifiable {
+    let id: String
+    let dateMain: String
+    let dateWeek: String
+    let title: String
+    /// 「約」或空字串（隱藏金額時空字串）
+    let prefix: String
+    let amount: String
+    /// 今天、明天要扣（日期橘字）
+    let isSoon: Bool
+}
+
+/// ViewThatFits 的一個候選：畫幾筆、三格收不收成一行（dues 已經在 model 切好）
+private struct VehicleLargeCandidate: Identifiable {
+    let id: Int
+    let plan: VehicleLargeLayout.Plan
+    let dues: [VehicleLargeDue]
+}
+
+/// 拆 App 寫好的字（不算錢）
+private enum VehicleLargeText {
+    /// 從第一個空白拆成小標與值：「每度電 NT$7.9」→（每度電, NT$7.9）；沒有空白（或開頭就是空白）→（fallback, 整句）
+    static func split(_ text: String, fallback: String) -> (label: String, value: String) {
+        guard let space = text.firstIndex(of: " "), space > text.startIndex else {
+            return (fallback, text)
+        }
+        let label: String = String(text[text.startIndex..<space])
+        let value: String = String(text[text.index(after: space)...])
+        return (label, value)
+    }
+
+    /// 「約 NT$8,000」→（約, NT$8,000）；其他 →（"", 原樣）
+    static func splitAbout(_ text: String) -> (prefix: String, value: String) {
+        let about: String = "約 "
+        guard text.hasPrefix(about) else { return ("", text) }
+        return ("約", String(text.dropFirst(about.count)))
+    }
+
+    /// 估值格換成車貸時的值：「車貸 已繳 25／60 期」→「已繳 25／60 期」、「車貸繳清」→「繳清」、
+    /// 「車貸 2026/12 開始」→「2026/12 開始」
+    static func loanValue(_ loanText: String) -> String {
+        let head: String = "車貸"
+        let rest: String = loanText.hasPrefix(head) ? String(loanText.dropFirst(head.count)) : loanText
+        return rest.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+/// 大型要畫的字（全部在 make 組好，View 只讀）。所有欄位都有預設值：VehicleLargeModel() 是空的
+private struct VehicleLargeModel {
+    /// 中、小型同一份（名字、電車／「11/19 的數字」、插畫色、按鈕、一句話）
+    var base = VehicleWidgetModel()
+    var isSold = false
+    /// 「已售出・成交 NT$200萬」「已售出・NT$ ••••」「已售出」
+    var soldLine = ""
+    /// 有車貸才畫環
+    var hasRing = false
+    /// 「25／60」「繳清」
+    var ringText = ""
+    /// 「2029/9 繳完」；還沒開始「2026/12 開始」；繳清空字串
+    var ringCaption = ""
+    var ringFraction: Double = 0
+    var tiles: [VehicleLargeTile] = []
+    /// 收成一行：「每月養車 約 NT$5,200・每度電 NT$7.9・估值 NT$260萬」
+    var inlineLine = ""
+    /// 今天（含）以後還沒扣的（全部；候選再切）
+    var dues: [VehicleLargeDue] = []
+    /// dues 空的時候那一列：「下一筆 12/25 車貸 第 27 期」「45 天內沒有要扣的」
+    var emptyDuesText = ""
+    /// 固定 4 個（已售出、一句話是空的）
+    var candidates: [VehicleLargeCandidate] = []
+
+    /// 安全取值：超出範圍回最後一個；空的回一個 0 筆、收成一行的
+    func candidate(at index: Int) -> VehicleLargeCandidate {
+        if candidates.indices.contains(index) {
+            return candidates[index]
+        }
+        if let last = candidates.last {
+            return last
+        }
+        let plan = VehicleLargeLayout.Plan(rows: 0, tilesInline: true)
+        return VehicleLargeCandidate(id: 0, plan: plan, dues: [])
+    }
+
+    static func make(entry: VehicleWidgetEntry, base: VehicleWidgetModel) -> VehicleLargeModel {
+        var m = VehicleLargeModel()
+        m.base = base
+        guard !base.isMessage, let v = entry.vehicle else { return m }
+        let now: Date = entry.date
+        let hidden: Bool = entry.hidesAmounts
+        if v.isSold {
+            m.isSold = true
+            m.soldLine = makeSoldLine(v.valueText, hidden: hidden)
+            return m
+        }
+        m.tiles = makeTiles(vehicle: v, base: base, hidden: hidden)
+        m.inlineLine = makeInlineLine(m.tiles)
+        fillRing(&m, loan: v.loan, base: base, now: now)
+        let remaining: [WidgetVehicleDue] = v.remainingDues(at: now)
+        m.dues = remaining.map { (d: WidgetVehicleDue) -> VehicleLargeDue in
+            makeDue(d, now: now, hidden: hidden)
+        }
+        if m.dues.isEmpty {
+            m.emptyDuesText = base.nextText.isEmpty ? "45 天內沒有要扣的" : base.nextText
+        }
+        let plans: [VehicleLargeLayout.Plan] = VehicleLargeLayout.candidates(
+            dueCount: m.dues.count, hasRing: m.hasRing, hasButtons: !base.buttons.isEmpty)
+        m.candidates = makeCandidates(plans, dues: m.dues)
+        return m
+    }
+
+    /// 「已售出・成交 NT$200萬」（隱藏「已售出・NT$ ••••」）；沒有成交價「已售出」
+    private static func makeSoldLine(_ valueText: String?, hidden: Bool) -> String {
+        guard let text = valueText, !text.isEmpty else { return "已售出" }
+        return "已售出・" + (hidden ? WidgetHideAmounts.mask : text)
+    }
+
+    /// 三格：每月養車 → 每度電／每公升 → 估值（隱藏或沒填估值時換成車貸；都沒有就兩格）
+    private static func makeTiles(vehicle v: WidgetFinanceVehicle, base: VehicleWidgetModel,
+                                  hidden: Bool) -> [VehicleLargeTile] {
+        var out: [VehicleLargeTile] = []
+        out.append(monthlyTile(v.monthlyText, hidden: hidden))
+        if let energy = v.energyText, !energy.isEmpty {
+            let parts = VehicleLargeText.split(energy, fallback: "能源")
+            out.append(VehicleLargeTile(id: "energy", label: parts.label, prefix: "", value: parts.value))
+        }
+        if !hidden, let value = v.valueText, !value.isEmpty {
+            let parts = VehicleLargeText.split(value, fallback: "估值")
+            out.append(VehicleLargeTile(id: "value", label: parts.label, prefix: "", value: parts.value))
+        } else if base.hasLoan {
+            let loanValue: String = VehicleLargeText.loanValue(base.loanText)
+            out.append(VehicleLargeTile(id: "loan", label: "車貸", prefix: "", value: loanValue))
+        }
+        return out
+    }
+
+    /// 「每月養車｜約｜NT$5,200」；隱藏「每月養車｜｜NT$ ••••」；沒有紀錄「每月養車｜｜—」
+    private static func monthlyTile(_ monthlyText: String?, hidden: Bool) -> VehicleLargeTile {
+        guard let text = monthlyText, !text.isEmpty else {
+            return VehicleLargeTile(id: "monthly", label: "每月養車", prefix: "", value: "—")
+        }
+        if hidden {
+            return VehicleLargeTile(id: "monthly", label: "每月養車", prefix: "", value: WidgetHideAmounts.mask)
+        }
+        let parts = VehicleLargeText.splitAbout(text)
+        return VehicleLargeTile(id: "monthly", label: "每月養車", prefix: parts.prefix, value: parts.value)
+    }
+
+    /// 每格「小標 (約 )值」用「・」接
+    private static func makeInlineLine(_ tiles: [VehicleLargeTile]) -> String {
+        let parts: [String] = tiles.map { (t: VehicleLargeTile) -> String in
+            let pre: String = t.prefix.isEmpty ? "" : t.prefix + " "
+            return t.label + " " + pre + t.value
+        }
+        return parts.joined(separator: "・")
+    }
+
+    /// 車貸環：比例、「25／60」照中型（base）；下面小字：繳清不寫、還沒開始寫開始、其他寫繳完
+    private static func fillRing(_ m: inout VehicleLargeModel, loan: WidgetVehicleLoan?, base: VehicleWidgetModel,
+                                 now: Date) {
+        guard base.hasLoan, let loan else { return }
+        m.hasRing = true
+        m.ringText = base.ringText
+        m.ringFraction = base.loanFraction
+        if loan.isDone(at: now) {
+            m.ringCaption = ""
+        } else if loan.paid(at: now) == 0, let start = loan.startText, !start.isEmpty {
+            m.ringCaption = start
+        } else {
+            m.ringCaption = loan.payoffText ?? ""
+        }
+    }
+
+    /// 一筆：「11/25」「(週三)」「車貸 第 26 期」「約」「NT$8,000」；隱藏金額時沒有「約」、金額 mask
+    private static func makeDue(_ d: WidgetVehicleDue, now: Date, hidden: Bool) -> VehicleLargeDue {
+        let main: String = WidgetDateText.shortDate(d.date)
+        let full: String = WidgetDateText.billDate(d.date)
+        let rest: String = full.hasPrefix(main) ? String(full.dropFirst(main.count)) : ""
+        let week: String = rest.trimmingCharacters(in: .whitespacesAndNewlines)
+        var title: String = d.title
+        if let period = d.periodText, !period.isEmpty {
+            title += " " + period
+        }
+        var prefix: String = ""
+        var amount: String = WidgetHideAmounts.mask
+        if !hidden {
+            let parts = VehicleLargeText.splitAbout(d.amountText)
+            prefix = parts.prefix
+            amount = parts.value
+        }
+        let soon: Bool = WidgetDateText.isDueSoon(d.date, from: now)
+        return VehicleLargeDue(id: d.id, dateMain: main, dateWeek: week, title: title, prefix: prefix,
+                               amount: amount, isSoon: soon)
+    }
+
+    /// 每個候選先切好 dues（View 裡不切陣列）
+    private static func makeCandidates(_ plans: [VehicleLargeLayout.Plan],
+                                       dues: [VehicleLargeDue]) -> [VehicleLargeCandidate] {
+        var out: [VehicleLargeCandidate] = []
+        for (i, plan) in plans.enumerated() {
+            let shown: [VehicleLargeDue] = Array(dues.prefix(max(0, plan.rows)))
+            out.append(VehicleLargeCandidate(id: i, plan: plan, dues: shown))
+        }
+        return out
+    }
+}
+
+// MARK: 大型的畫面
+
+/// 已售出 → 一行；其他 → 4 個候選由上往下挑（字級不變、只砍列數）
+private struct VehicleLargeView: View {
+    let model: VehicleLargeModel
+    let palette: WidgetPalette
+
+    var body: some View {
+        if model.isSold {
+            VehicleLargeSold(model: model, palette: palette)
+        } else {
+            ViewThatFits(in: .vertical) {
+                VehicleLargeColumn(model: model, candidate: model.candidate(at: 0), palette: palette)
+                VehicleLargeColumn(model: model, candidate: model.candidate(at: 1), palette: palette)
+                VehicleLargeColumn(model: model, candidate: model.candidate(at: 2), palette: palette)
+                VehicleLargeColumn(model: model, candidate: model.candidate(at: 3), palette: palette)
+            }
+        }
+    }
+}
+
+/// 一個候選：主卡 → 三格（或一行）→ 接下來 → 按鈕。每一塊的高度都是 VehicleLargeLayout 的常數
+private struct VehicleLargeColumn: View {
+    let model: VehicleLargeModel
+    let candidate: VehicleLargeCandidate
+    let palette: WidgetPalette
+
+    /// 沒有要扣的：一列一句話；有要扣的但這個候選 0 筆：整個清單不畫（同 VehicleLargeLayout.height）
+    private var showsList: Bool { model.dues.isEmpty || !candidate.dues.isEmpty }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            VehicleLargeMain(model: model, palette: palette)
+            tiles
+            list
+            Spacer(minLength: 0)
+            VehicleLargeButtons(model: model, palette: palette)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    @ViewBuilder
+    private var tiles: some View {
+        if candidate.plan.tilesInline {
+            VehicleLargeInlineLine(text: model.inlineLine, palette: palette)
+        } else {
+            VehicleLargeTiles(tiles: model.tiles, palette: palette)
+        }
+    }
+
+    @ViewBuilder
+    private var list: some View {
+        if showsList {
+            VehicleLargeList(dues: candidate.dues, emptyText: model.emptyDuesText, palette: palette)
+        }
+    }
+}
+
+/// 主卡：車圖方塊（84×60，SF Symbol）＋名字／「電車」（快照舊了橘字「11/19 的數字」）＋右邊車貸環
+private struct VehicleLargeMain: View {
+    let model: VehicleLargeModel
+    let palette: WidgetPalette
+
+    private var height: CGFloat {
+        model.hasRing ? VehicleLargeLayout.mainHeight : VehicleLargeLayout.mainHeightNoRing
+    }
+
+    private var subColor: Color { model.base.subIsStale ? palette.warn : palette.label }
+
+    var body: some View {
+        HStack(spacing: 12) {
+            VehicleWidgetArt(model: model.base, palette: palette, width: VehicleLargeLayout.artWidth,
+                             height: VehicleLargeLayout.artHeight, iconSize: 26)
+            names
+            Spacer(minLength: 4)
+            ring
+        }
+        .frame(height: height)
+    }
+
+    private var names: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            Text(model.base.name)
+                .font(.system(size: 19, weight: .bold))
+                .foregroundStyle(palette.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+            Text(model.base.subText)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundStyle(subColor)
+                .lineLimit(1)
+        }
+    }
+
+    @ViewBuilder
+    private var ring: some View {
+        if model.hasRing {
+            VehicleLargeRingBlock(model: model, palette: palette)
+        }
+    }
+}
+
+/// 車貸環「25／60」＋下面「2029/9 繳完」（繳清不寫小字）
+private struct VehicleLargeRingBlock: View {
+    let model: VehicleLargeModel
+    let palette: WidgetPalette
+
+    private var fill: Color { VehicleWidgetInk.accent(model.base, palette: palette) }
+
+    var body: some View {
+        VStack(spacing: 3) {
+            ZStack {
+                LargeWidgetRing(fraction: model.ringFraction, fill: fill, track: palette.barTrack)
+                ringLabel
+            }
+            .frame(width: VehicleLargeLayout.ringSize, height: VehicleLargeLayout.ringSize)
+            caption
+        }
+    }
+
+    private var ringLabel: some View {
+        Text(model.ringText)
+            .font(.system(size: 11.5, weight: .bold))
+            .monospacedDigit()
+            .foregroundStyle(palette.ink)
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+            .padding(.horizontal, 8)
+    }
+
+    @ViewBuilder
+    private var caption: some View {
+        if !model.ringCaption.isEmpty {
+            Text(model.ringCaption)
+                .font(.system(size: 9.5, weight: .medium))
+                .foregroundStyle(palette.label)
+                .lineLimit(1)
+                .fixedSize()
+        }
+    }
+}
+
+/// 三格（上面空 tilesTopGap、每格 tileHeight）
+private struct VehicleLargeTiles: View {
+    let tiles: [VehicleLargeTile]
+    let palette: WidgetPalette
+
+    var body: some View {
+        HStack(spacing: VehicleLargeLayout.tileSpacing) {
+            ForEach(tiles) { tile in
+                VehicleLargeTileView(tile: tile, palette: palette)
+            }
+        }
+        .padding(.top, VehicleLargeLayout.tilesTopGap)
+    }
+}
+
+/// 一格：小標「每月養車」／「約」＋「NT$5,200」（著色模式染重點色）
+private struct VehicleLargeTileView: View {
+    let tile: VehicleLargeTile
+    let palette: WidgetPalette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(tile.label)
+                .font(.system(size: 9.5, weight: .semibold))
+                .foregroundStyle(palette.label)
+                .lineLimit(1)
+            valueLine
+        }
+        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .frame(height: VehicleLargeLayout.tileHeight)
+        .background {
+            LargeWidgetCardBackground(palette: palette, cornerRadius: 11)
+        }
+    }
+
+    private var valueLine: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 2) {
+            prefixText
+            Text(tile.value)
+                .font(.system(size: 14, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(palette.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .widgetAccentable()
+        }
+    }
+
+    @ViewBuilder
+    private var prefixText: some View {
+        if !tile.prefix.isEmpty {
+            Text(tile.prefix)
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(palette.label)
+                .fixedSize()
+        }
+    }
+}
+
+/// 三格收成一行（最後一個候選）：「每月養車 約 NT$5,200・每度電 NT$7.9・估值 NT$260萬」
+private struct VehicleLargeInlineLine: View {
+    let text: String
+    let palette: WidgetPalette
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 11, weight: .semibold))
+            .monospacedDigit()
+            .foregroundStyle(palette.inkSoft)
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+            .frame(maxWidth: .infinity, minHeight: VehicleLargeLayout.tilesLineHeight,
+                   maxHeight: VehicleLargeLayout.tilesLineHeight, alignment: .bottomLeading)
+    }
+}
+
+/// 「接下來」小標＋每筆一列（列與列之間一條細線）；沒有要扣的一列一句話
+private struct VehicleLargeList: View {
+    let dues: [VehicleLargeDue]
+    let emptyText: String
+    let palette: WidgetPalette
+
+    private var lastID: String { dues.last?.id ?? "" }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            LargeWidgetSectionLabel(title: "接下來", height: VehicleLargeLayout.listHeaderHeight, palette: palette,
+                                    bottomGap: 2)
+            rows
+        }
+    }
+
+    @ViewBuilder
+    private var rows: some View {
+        if dues.isEmpty {
+            emptyRow
+        } else {
+            ForEach(dues) { due in
+                VehicleLargeDueRow(due: due, showsDivider: due.id != lastID, palette: palette)
+            }
+        }
+    }
+
+    private var emptyRow: some View {
+        Text(emptyText)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(palette.label)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .frame(maxWidth: .infinity, minHeight: VehicleLargeLayout.rowHeight,
+                   maxHeight: VehicleLargeLayout.rowHeight, alignment: .leading)
+    }
+}
+
+/// 「11/25 (週三)｜車貸 第 26 期｜NT$3.2萬」；今天、明天要扣的日期橘字
+private struct VehicleLargeDueRow: View {
+    let due: VehicleLargeDue
+    let showsDivider: Bool
+    let palette: WidgetPalette
+
+    private var dateColor: Color { due.isSoon ? palette.warn : palette.ink }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            dateBlock
+            Text(due.title)
+                .font(.system(size: 12.5, weight: .semibold))
+                .foregroundStyle(palette.ink)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            amountBlock
+        }
+        .frame(height: VehicleLargeLayout.rowHeight)
+        .overlay(alignment: .bottom) {
+            divider
+        }
+    }
+
+    private var dateBlock: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 3) {
+            Text(due.dateMain)
+                .font(.system(size: 12, weight: .bold))
+                .monospacedDigit()
+                .foregroundStyle(dateColor)
+                .lineLimit(1)
+            Text(due.dateWeek)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundStyle(palette.label)
+                .lineLimit(1)
+        }
+        .frame(width: 86, alignment: .leading)
+    }
+
+    private var amountBlock: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 3) {
+            prefixText
+            Text(due.amount)
+                .font(.system(size: 12.5, weight: .bold))
+                .monospacedDigit()
+                .foregroundStyle(palette.ink)
+                .lineLimit(1)
+                .fixedSize()
+        }
+    }
+
+    @ViewBuilder
+    private var prefixText: some View {
+        if !due.prefix.isEmpty {
+            Text(due.prefix)
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(palette.label)
+                .fixedSize()
+        }
+    }
+
+    @ViewBuilder
+    private var divider: some View {
+        if showsDivider {
+            Rectangle()
+                .fill(palette.barTrack)
+                .frame(height: 1)
+        }
+    }
+}
+
+/// 最下面兩顆按鈕（快照的 buttons：電車〔記電費〕〔記停車〕、油車油電機車〔記加油〕〔記停車〕）；上面至少空 8
+private struct VehicleLargeButtons: View {
+    let model: VehicleLargeModel
+    let palette: WidgetPalette
+
+    var body: some View {
+        if !model.base.buttons.isEmpty {
+            HStack(spacing: VehicleLargeLayout.buttonSpacing) {
+                ForEach(model.base.buttons) { button in
+                    VehicleLargeButton(button: button, model: model.base, palette: palette)
+                }
+            }
+            .padding(.top, 8)
+        }
+    }
+}
+
+/// 一顆 44pt 按鈕：打開 App 的新增支出、車子與分類帶好（既有的 LifeGoodOpenIntent，openAppWhenRun）。
+/// 底是車子主題色漸層；著色模式 LedgerDeskCardBackground 自己只畫外框
+private struct VehicleLargeButton: View {
+    let button: WidgetVehicleButton
+    let model: VehicleWidgetModel
+    let palette: WidgetPalette
+
+    private var ink: Color { palette.isMono ? palette.ink : palette.tileInk }
+
+    var body: some View {
+        Button(intent: LifeGoodOpenIntent(url: button.url)) {
+            label
+                .frame(maxWidth: .infinity)
+                .frame(height: VehicleLargeLayout.buttonHeight)
+                .background {
+                    LedgerDeskCardBackground(top: model.top, bottom: model.bottom, plain: false,
+                                             palette: palette, cornerRadius: 11)
+                }
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var label: some View {
+        HStack(spacing: 6) {
+            Image(systemName: button.icon)
+                .font(.system(size: 15, weight: .bold))
+            Text(button.title)
+                .font(.system(size: 13.5, weight: .bold))
+                .lineLimit(1)
+        }
+        .foregroundStyle(ink)
+    }
+}
+
+/// 已售出：主卡（沒有環）＋「已售出・成交 NT$200萬」
+private struct VehicleLargeSold: View {
+    let model: VehicleLargeModel
+    let palette: WidgetPalette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VehicleLargeMain(model: model, palette: palette)
+            Text(model.soldLine)
+                .font(.system(size: 17, weight: .bold))
+                .foregroundStyle(palette.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .widgetAccentable()
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }

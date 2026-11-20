@@ -44,8 +44,8 @@ struct BillsWidget: Widget {
             BillsWidgetEntryView(entry: entry)
         }
         .configurationDisplayName("接下來要繳")
-        .description("30 天內哪天要扣什麼錢")
-        .supportedFamilies([.systemMedium])
+        .description("30 天內哪天要扣什麼錢；大的照這週、下週分開列")
+        .supportedFamilies([.systemMedium, .systemLarge])
     }
 }
 
@@ -324,6 +324,8 @@ struct BillsWidgetEntryView: View {
     @Environment(\.colorScheme) private var colorScheme
     @Environment(\.widgetRenderingMode) private var renderingMode
     @Environment(\.showsWidgetContainerBackground) private var showsBackground
+    /// [v25.631 large1] 大型另外畫（BillsLargeView）；中型照舊
+    @Environment(\.widgetFamily) private var family
 
     private var surface: WidgetPalette.Surface {
         WidgetPalette.Surface(renderingMode: renderingMode, showsBackground: showsBackground)
@@ -341,8 +343,24 @@ struct BillsWidgetEntryView: View {
                               scope: entry.scope, days: entry.days, lockScreen: onLockScreen)
     }
 
+    /// [v25.631 large1] 大型：同一個 entry（同一個 timeline），字在 BillsLargeModel.make 組好
+    private var largeModel: BillsLargeModel {
+        BillsLargeModel.make(snapshot: entry.snapshot, now: entry.date, hidden: entry.hidesAmounts,
+                             scope: entry.scope, days: entry.days, lockScreen: onLockScreen)
+    }
+
+    /// [v25.631 large1] 大型 → BillsLargeView；其他（中型）→ 既有 BillsWidgetContent
+    @ViewBuilder
+    private var content: some View {
+        if family == .systemLarge {
+            BillsLargeView(model: largeModel, palette: palette)
+        } else {
+            BillsWidgetContent(model: model, palette: palette)
+        }
+    }
+
     var body: some View {
-        BillsWidgetContent(model: model, palette: palette)
+        content
             .containerBackground(for: .widget) {
                 backgroundView
             }
@@ -584,5 +602,401 @@ private struct BillsWidgetMessage: View {
                 .lineLimit(3)
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+    }
+}
+
+// MARK: - 大型（v25.631 large1）
+//
+// 規格：scratchpad/radar/build/large1/brief.md §0 C1、§2 G1；示意圖 scratchpad/largewidgets/bills.html（版面以示意圖為準）。
+// 參考答案：sim_large1.py 的 bills_large_make／bills_large_row／bills_large_more（一個字一個字對照）。
+//
+//   表頭「接下來 30 天」＋大字「9」＋「件」、右上「10:02 更新」（超過兩天「上次更新 11/17」橘字）→
+//   「這週／下週／之後」（LargeWeekBucket.of，週的第一天照 Calendar.current）→ 每列兩行：
+//   名稱（會領回的前面一顆星）／「今天扣款」（橘）＋「・每月」或「11/25 (週三)・第 26／60 期」；右邊金額 →
+//   頁腳「再來 12/15 Spotify 等 4 件」（剩下的第一個名字＋剩下件數）。只寫件數、不寫合計；大型的小字不寫「N 天後」。
+//   沒快照、過了 horizonEnd、30 天內沒有要扣的：直接畫中型的畫面（BillsWidgetContent，同一個 BillsWidgetModel）。
+//   放不下只砍列數不縮字：每一塊用 BillsLargeLayout 的常數固定高度，候選 4 個（BillsLargeLayout.candidates）。
+//   隱藏金額＝entry.hidesAmounts（provider 讀一次）；vibrant（Mac 桌面沒聚焦）卡費、交割寫類別字、不寫小字與金額。
+
+/// 大型一列：兩行（名稱／小字）＋右邊金額
+private struct BillsLargeRow: Identifiable {
+    let id: String
+    /// 「Netflix」；vibrant 的卡費、交割寫類別字「卡費」「交割」
+    let title: String
+    /// 會領回的（保單滿期）：名稱前面畫 star.fill（色條同色）
+    let showsStar: Bool
+    /// 今天／明天的「今天扣款」「明天扣款」「今天到期」（橘）；其他是空字串
+    let lead: String
+    /// lead 有字時「・每月」（沒有小字就空）；其他「11/25 (週三)・第 26／60 期」
+    let rest: String
+    /// 「NT$390」「+美金 3.6萬」；隱藏金額時 mask；vibrant 的卡費、交割是空字串（不畫）
+    let amount: String
+    /// 綠字：會領回、沒隱藏、沒收起來
+    let incomeStyle: Bool
+    let tint: UInt32
+    let tintDark: UInt32
+    let url: URL
+    let bucket: LargeWeekBucket
+}
+
+/// 一區（「這週」那幾列）；不畫區標時整個候選只有一區（id -1、title 空字串）
+private struct BillsLargeSection: Identifiable {
+    /// LargeWeekBucket.rawValue；不畫區標 -1
+    let id: Int
+    let title: String
+    let rows: [BillsLargeRow]
+}
+
+/// ViewThatFits 的一個候選：畫幾列、分不分區、頁腳
+private struct BillsLargeCandidate: Identifiable {
+    let id: Int
+    let plan: BillsLargeLayout.Plan
+    let sections: [BillsLargeSection]
+    /// 「再來 12/15 Spotify 等 4 件」；全部列完了是空字串（不畫）
+    let footer: String
+}
+
+private struct BillsLargeModel {
+    /// 中型的 model：kind 不是 .list（一句話、30 天內沒有要扣的）時大型直接畫中型的畫面
+    var base = BillsWidgetModel()
+    /// 「接下來 30 天」
+    var header = ""
+    /// 「9」（表頭另外畫「件」）
+    var countNumber = ""
+    /// 「10:02 更新」「11/19 22:00 更新」；超過兩天「上次更新 11/17」
+    var updatedText = ""
+    var updatedIsStale = false
+    /// 固定 4 個（大到小）
+    var candidates: [BillsLargeCandidate] = []
+
+    /// 安全取值：超出範圍回最後一個；沒有候選回一個 0 列的
+    func candidate(at index: Int) -> BillsLargeCandidate {
+        guard let last = candidates.last else {
+            let plan = BillsLargeLayout.Plan(rows: 0, showsSections: false)
+            return BillsLargeCandidate(id: 0, plan: plan, sections: [], footer: "")
+        }
+        guard index >= 0, index < candidates.count else { return last }
+        return candidates[index]
+    }
+
+    /// 只挑字、不算錢（sim bills_large_make）。參數跟 BillsWidgetModel.make 一樣
+    static func make(snapshot: WidgetBillsSnapshot?, now: Date, hidden: Bool,
+                     scope: WidgetBillScope, days: Int, lockScreen: Bool) -> BillsLargeModel {
+        var model = BillsLargeModel()
+        model.base = BillsWidgetModel.make(snapshot: snapshot, now: now, hidden: hidden,
+                                           scope: scope, days: days, lockScreen: lockScreen)
+        guard model.base.kind == .list, let snap = snapshot else { return model }
+        let list: [WidgetBill] = snap.upcoming(at: now, days: days, scope: scope)
+        model.header = model.base.header
+        model.countNumber = "\(list.count)"
+        let stale: Bool = snap.isStale(at: now)
+        model.updatedIsStale = stale
+        model.updatedText = stale
+            ? WidgetDateText.lastUpdated(snap.generatedAt)
+            : WidgetDateText.updatedAt(snap.generatedAt, now: now)
+        // 全部（不是只有前 maxRows 筆）：BillsLargeLayout 要知道後面還有沒有、跨了幾區
+        let buckets: [LargeWeekBucket] = list.map { (bill: WidgetBill) -> LargeWeekBucket in
+            LargeWeekBucket.of(bill.dueDate, now: now)
+        }
+        var rows: [BillsLargeRow] = []
+        for (i, bill) in list.prefix(BillsLargeLayout.maxRows).enumerated() {
+            rows.append(row(bill, bucket: buckets[i], now: now, hidden: hidden, lockScreen: lockScreen))
+        }
+        let raw: [Int] = buckets.map { (b: LargeWeekBucket) -> Int in b.rawValue }
+        let plans: [BillsLargeLayout.Plan] = BillsLargeLayout.candidates(buckets: raw)
+        var candidates: [BillsLargeCandidate] = []
+        for (i, plan) in plans.enumerated() {
+            let n: Int = max(0, plan.rows)
+            let shown: [BillsLargeRow] = Array(rows.prefix(n))
+            let rest: [WidgetBill] = Array(list.dropFirst(n))
+            let item = BillsLargeCandidate(id: i, plan: plan,
+                                           sections: sections(shown, labeled: plan.showsSections),
+                                           footer: moreText(rest, lockScreen: lockScreen))
+            candidates.append(item)
+        }
+        model.candidates = candidates
+        return model
+    }
+
+    /// 照 bucket 連續分段（清單照日期排好，同一區連在一起）；不分區時一段
+    private static func sections(_ rows: [BillsLargeRow], labeled: Bool) -> [BillsLargeSection] {
+        guard labeled else {
+            return [BillsLargeSection(id: -1, title: "", rows: rows)]
+        }
+        var out: [BillsLargeSection] = []
+        for row in rows {
+            if let last = out.last, last.id == row.bucket.rawValue {
+                out[out.count - 1] = BillsLargeSection(id: last.id, title: last.title, rows: last.rows + [row])
+            } else {
+                out.append(BillsLargeSection(id: row.bucket.rawValue, title: row.bucket.title, rows: [row]))
+            }
+        }
+        return out
+    }
+
+    /// 一列（sim bills_large_row）。lockScreen：vibrant 的卡費、交割寫類別字、不寫小字與金額
+    private static func row(_ bill: WidgetBill, bucket: LargeWeekBucket, now: Date, hidden: Bool,
+                            lockScreen: Bool) -> BillsLargeRow {
+        let locked: Bool = lockScreen && bill.kind.isWealth
+        let title: String = locked ? bill.lockedTitle : bill.title
+        let detailText: String = locked ? "" : (bill.detail ?? "")
+        let detail: String = detailText.isEmpty ? "" : "・" + detailText
+        let lead: String
+        let rest: String
+        if WidgetDateText.isDueSoon(bill.dueDate, from: now) {
+            lead = WidgetDateText.dueText(bill.dueDate, from: now, isIncome: bill.isIncome) ?? ""
+            rest = detail
+        } else {
+            lead = ""
+            rest = WidgetDateText.billDate(bill.dueDate) + detail
+        }
+        let amount: String = locked ? "" : (hidden ? WidgetHideAmounts.mask : bill.amountText)
+        let income: Bool = bill.isIncome && !hidden && !locked
+        return BillsLargeRow(id: bill.id, title: title, showsStar: bill.isIncome, lead: lead, rest: rest,
+                             amount: amount, incomeStyle: income,
+                             tint: bill.tint, tintDark: bill.tintDark, url: bill.url, bucket: bucket)
+    }
+
+    /// 「再來 12/15 Spotify 等 4 件」：只寫剩下的第一個名字＋剩下件數；剩 1 件只寫那一件（sim bills_large_more）。
+    /// vibrant 的卡費、交割寫類別字（「12/16 交割」）
+    private static func moreText(_ rest: [WidgetBill], lockScreen: Bool) -> String {
+        guard let first = rest.first else { return "" }
+        let locked: Bool = lockScreen && first.kind.isWealth
+        let name: String = locked ? first.lockedTitle : first.title
+        let head: String = WidgetDateText.shortDate(first.dueDate) + " " + name
+        if rest.count == 1 { return "再來 " + head }
+        return "再來 " + head + " 等 \(rest.count) 件"
+    }
+}
+
+/// 大型：清單 → BillsLargeList；一句話、30 天內沒有要扣的 → 中型的畫面
+private struct BillsLargeView: View {
+    let model: BillsLargeModel
+    let palette: WidgetPalette
+
+    var body: some View {
+        if model.base.kind == .list {
+            BillsLargeList(model: model, palette: palette)
+        } else {
+            BillsWidgetContent(model: model.base, palette: palette)
+        }
+    }
+}
+
+/// 4 個候選由上往下挑（字級不變、只砍列數；不巢狀 ViewThatFits）
+private struct BillsLargeList: View {
+    let model: BillsLargeModel
+    let palette: WidgetPalette
+
+    var body: some View {
+        ViewThatFits(in: .vertical) {
+            BillsLargeColumn(model: model, candidate: model.candidate(at: 0), palette: palette)
+            BillsLargeColumn(model: model, candidate: model.candidate(at: 1), palette: palette)
+            BillsLargeColumn(model: model, candidate: model.candidate(at: 2), palette: palette)
+            BillsLargeColumn(model: model, candidate: model.candidate(at: 3), palette: palette)
+        }
+    }
+}
+
+/// 表頭 → 各區 → Spacer → 頁腳。每一塊固定高度（BillsLargeLayout.height 算的就是這一欄）
+private struct BillsLargeColumn: View {
+    let model: BillsLargeModel
+    let candidate: BillsLargeCandidate
+    let palette: WidgetPalette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            BillsLargeHeader(model: model, palette: palette)
+            ForEach(candidate.sections) { section in
+                BillsLargeSectionView(section: section, palette: palette)
+            }
+            Spacer(minLength: 0)
+            footer
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    @ViewBuilder
+    private var footer: some View {
+        if !candidate.footer.isEmpty {
+            LargeWidgetFooterLine(text: candidate.footer, palette: palette, height: BillsLargeLayout.footerHeight)
+        }
+    }
+}
+
+/// 「接下來 30 天」＋大字「9」「件」、右上「10:02 更新」（整塊 → 固定支出頁）
+private struct BillsLargeHeader: View {
+    let model: BillsLargeModel
+    let palette: WidgetPalette
+
+    var body: some View {
+        Link(destination: WidgetLink.fixedExpenses) {
+            HStack(alignment: .top, spacing: 0) {
+                titleBlock
+                Spacer(minLength: 6)
+                updatedLine
+            }
+            .frame(height: BillsLargeLayout.headerHeight, alignment: .top)
+        }
+    }
+
+    private var titleBlock: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text(model.header)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundStyle(palette.inkDate)
+                .lineLimit(1)
+            countLine
+        }
+    }
+
+    private var countLine: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 3) {
+            Text(model.countNumber)
+                .font(.system(size: 28, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(palette.ink)
+                .widgetAccentable()
+            Text("件")
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(palette.ink)
+        }
+        .lineLimit(1)
+    }
+
+    private var updatedColor: Color { model.updatedIsStale ? palette.warn : palette.label }
+
+    private var updatedLine: some View {
+        Text(model.updatedText)
+            .font(.system(size: 9.5, weight: .medium))
+            .foregroundStyle(updatedColor)
+            .lineLimit(1)
+            .fixedSize()
+            .padding(.top, 2)
+    }
+}
+
+/// 區標（不分區時只空 compactTopGap）＋這一區的列（每列 → 那一筆）
+private struct BillsLargeSectionView: View {
+    let section: BillsLargeSection
+    let palette: WidgetPalette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            label
+            VStack(spacing: BillsLargeLayout.rowSpacing) {
+                ForEach(section.rows) { row in
+                    Link(destination: row.url) {
+                        BillsLargeRowView(row: row, palette: palette)
+                    }
+                }
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var label: some View {
+        if section.title.isEmpty {
+            Color.clear
+                .frame(height: BillsLargeLayout.compactTopGap)
+        } else {
+            LargeWidgetSectionLabel(title: section.title, height: BillsLargeLayout.sectionHeaderHeight,
+                                    palette: palette, bottomGap: BillsLargeLayout.sectionLabelBottomGap)
+        }
+    }
+}
+
+/// 一列：色條、（星）名稱／小字、右邊金額。固定高 rowHeight
+private struct BillsLargeRowView: View {
+    let row: BillsLargeRow
+    let palette: WidgetPalette
+
+    private var barColor: Color { palette.billBar(tint: row.tint, tintDark: row.tintDark) }
+
+    var body: some View {
+        HStack(spacing: 8) {
+            LargeWidgetTintBar(color: barColor, height: BillsLargeLayout.tintBarHeight)
+            texts
+            Spacer(minLength: 4)
+            BillsLargeAmount(text: row.amount, incomeStyle: row.incomeStyle, palette: palette)
+        }
+        .padding(.leading, 8)
+        .padding(.trailing, 9)
+        .frame(height: BillsLargeLayout.rowHeight)
+        .background { LargeWidgetCardBackground(palette: palette) }
+    }
+
+    private var texts: some View {
+        VStack(alignment: .leading, spacing: 1) {
+            titleLine
+            BillsLargeSubline(lead: row.lead, rest: row.rest, palette: palette)
+        }
+    }
+
+    private var titleLine: some View {
+        HStack(spacing: 3) {
+            star
+            Text(row.title)
+                .font(.system(size: 12.5, weight: .bold))
+                .foregroundStyle(palette.ink)
+                .lineLimit(1)
+        }
+    }
+
+    @ViewBuilder
+    private var star: some View {
+        if row.showsStar {
+            Image(systemName: "star.fill")
+                .font(.system(size: 10, weight: .bold))
+                .foregroundStyle(barColor)
+        }
+    }
+}
+
+/// 「今天扣款」（橘）＋「・每月」，或「11/25 (週三)・第 26／60 期」；兩個都空不畫
+private struct BillsLargeSubline: View {
+    let lead: String
+    let rest: String
+    let palette: WidgetPalette
+
+    var body: some View {
+        if !lead.isEmpty || !rest.isEmpty {
+            HStack(spacing: 0) {
+                leadText
+                Text(rest)
+                    .foregroundStyle(palette.label)
+            }
+            .font(.system(size: 10, weight: .semibold))
+            .lineLimit(1)
+        }
+    }
+
+    @ViewBuilder
+    private var leadText: some View {
+        if !lead.isEmpty {
+            Text(lead)
+                .foregroundStyle(palette.warn)
+                .fixedSize()
+        }
+    }
+}
+
+/// 右邊金額：空字串（vibrant 的卡費、交割）不畫；會領回的綠字
+private struct BillsLargeAmount: View {
+    let text: String
+    let incomeStyle: Bool
+    let palette: WidgetPalette
+
+    private var color: Color { incomeStyle ? palette.good : palette.ink }
+
+    var body: some View {
+        if !text.isEmpty {
+            Text(text)
+                .font(.system(size: 13, weight: .bold))
+                .monospacedDigit()
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .fixedSize()
+        }
     }
 }

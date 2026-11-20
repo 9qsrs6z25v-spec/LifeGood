@@ -289,6 +289,7 @@
 		A01B000001001674 /* Code39.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000027 /* Code39.swift */; };
 		A01B000001001675 /* CarrierBarcodeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001675 /* CarrierBarcodeView.swift */; };
 		A01B000001001676 /* CarrierBarcodeWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001676 /* CarrierBarcodeWidget.swift */; };
+		A01B000001001678 /* LargeWidgetKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001678 /* LargeWidgetKit.swift */; };
 		A01B000001001619 /* OrgMoveCardParts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001619 /* OrgMoveCardParts.swift */; };
 		A01B000001001621 /* OrgMoveWizardRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001621 /* OrgMoveWizardRows.swift */; };
 		A01B000001001623 /* OrgMoveDueViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001623 /* OrgMoveDueViews.swift */; };
@@ -707,6 +708,7 @@
 		A01A000001001671 /* CarrierBarcodeShared.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarrierBarcodeShared.swift; sourceTree = "<group>"; };
 		A01A000001001675 /* CarrierBarcodeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarrierBarcodeView.swift; sourceTree = "<group>"; };
 		A01A000001001676 /* CarrierBarcodeWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarrierBarcodeWidget.swift; sourceTree = "<group>"; };
+		A01A000001001678 /* LargeWidgetKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LargeWidgetKit.swift; sourceTree = "<group>"; };
 		A01A000001001619 /* OrgMoveCardParts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveCardParts.swift; sourceTree = "<group>"; };
 		A01A000001001621 /* OrgMoveWizardRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveWizardRows.swift; sourceTree = "<group>"; };
 		A01A000001001623 /* OrgMoveDueViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveDueViews.swift; sourceTree = "<group>"; };
@@ -959,6 +961,7 @@
 				A01A000002000090 /* TeamWidget.swift */,
 				A01A000002000096 /* RunLiveActivity.swift */,
 				A01A000001001676 /* CarrierBarcodeWidget.swift */,
+				A01A000001001678 /* LargeWidgetKit.swift */,
 				A01A000002000006 /* Info.plist */,
 				A01A000002000050 /* LifeGoodWidgets.entitlements */,
 			);
@@ -1621,6 +1624,7 @@
 				A01B000001001672 /* CarrierBarcodeShared.swift in Sources */,
 				A01B000001001674 /* Code39.swift in Sources */,
 				A01B000001001676 /* CarrierBarcodeWidget.swift in Sources */,
+				A01B000001001678 /* LargeWidgetKit.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
