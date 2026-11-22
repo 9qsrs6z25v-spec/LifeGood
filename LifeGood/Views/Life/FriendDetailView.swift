@@ -53,7 +53,7 @@ struct FriendDetailView: View {
                 if let r = friend {
                     ScrollView { AnyView(page(r)).padding(.vertical) }
                 } else {
-                    Color.clear.onAppear { dismiss() }     // 被刪、或別台同步拿掉 → 關頁
+                    Text(FriendText.notFound).foregroundStyle(.secondary).frame(maxWidth: .infinity, maxHeight: .infinity).onAppear { dismiss() }     // 被刪、或別台同步拿掉 → 關頁
                 }
             }
             .background(Color(.systemGroupedBackground))
@@ -65,7 +65,7 @@ struct FriendDetailView: View {
             }
             .task(id: giftsKey) { reloadGifts() }
             .modifier(FriendDetailSheets(editor: $editor, adding: $adding, openCard: $openCard,
-                                         showPremiumAlert: $showPremiumAlert))
+                                         showPremiumAlert: $showPremiumAlert, onEditorClosed: { closeIfGone() }))
         }
     }
 
@@ -124,6 +124,11 @@ struct FriendDetailView: View {
         }
     }
 
+    /// [v25.636] 編輯器收起來後：這位已經被刪了就關頁（收起動畫中那次 dismiss 可能被忽略）
+    private func closeIfGone() {
+        if friend == nil { dismiss() }
+    }
+
     private func tapAddInteraction() {
         gated { adding = FriendDetailTarget(id: relationshipId) }
     }
@@ -143,11 +148,12 @@ fileprivate struct FriendDetailSheets: ViewModifier {
     @Binding var adding: FriendDetailTarget?
     @Binding var openCard: FriendDetailTarget?
     @Binding var showPremiumAlert: Bool
+    let onEditorClosed: () -> Void
 
     func body(content: Content) -> some View {
         content
             .premiumLockAlert(isPresented: $showPremiumAlert)
-            .sheet(item: $editor) { t in
+            .sheet(item: $editor, onDismiss: onEditorClosed) { t in
                 FriendEditor(target: t)
                     .appStores()
             }

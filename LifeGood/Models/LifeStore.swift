@@ -9051,6 +9051,7 @@ class LifeStore: ObservableObject {
         competencySetup = CompetencySetupBook()     // [v25.599] 職能雷達 v1a-1
         competencyRatings = CompetencyRatingBook()  // [v25.599] 職能雷達 v1a-1
         OrgMoveReminderLater.clearAll()  // [v25.596] 轉組織 v3：自動套用時沒動的提醒事項（只在這台）
+        FriendSuggestMemory.clearAll()  // [v25.636] 朋友頁建議卡「不要再提」的名字（只在這台）
         companySites.removeAll()
         // 行程的照片檔也要一起清，不然會留下沒人指向的孤兒檔被雲端一直重傳
         for plan in tripPlans {

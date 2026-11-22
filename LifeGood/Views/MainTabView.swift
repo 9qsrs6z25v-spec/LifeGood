@@ -1489,7 +1489,7 @@ struct MainTabView: View {
                     if hasExtendedFamily { FamilyMembersResumeView() } else { FamilyView() }
                 // [v25.636] 朋友履歷
                 case .friendResume:
-                    FriendsResumeView()
+                    if !lifeStore.familyMembers.isEmpty || !lifeStore.relationships.isEmpty { FriendsResumeView() } else { LifeOverviewView() }
                 }
             // [v25.636] 只有朋友也進家庭
             } else if !lifeStore.familyMembers.isEmpty || !lifeStore.relationships.isEmpty {

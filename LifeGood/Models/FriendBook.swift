@@ -418,7 +418,7 @@ enum FriendText {
     static let interactionEmpty = "還沒有互動紀錄"
     static let noteTitle = "備註"
     static let cardsTitle = "名片"
-    static let notFound = "這位朋友已經不在了（可能在別台刪掉了）"
+    static let notFound = "找不到這位朋友（可能在別台刪掉了）"
 
     /// 列表那一列：「生日 5/1」（沒填＝nil）
     static func birthdayLine(_ d: Date?, calendar: Calendar) -> String? {
@@ -573,6 +573,11 @@ enum FriendSuggestMemory {
 
     static func load(_ d: UserDefaults = .standard) -> Set<String> {
         Set(d.stringArray(forKey: defaultsKey) ?? [])
+    }
+
+    /// 設定 → 清除所有資料時一起清掉（只在這台）
+    static func clearAll(_ d: UserDefaults = .standard) {
+        d.removeObject(forKey: defaultsKey)
     }
 
     static func dismiss(_ key: String, _ d: UserDefaults = .standard) {
