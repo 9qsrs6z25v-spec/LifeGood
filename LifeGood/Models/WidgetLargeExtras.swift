@@ -13,7 +13,7 @@ import Foundation
 // 規矩：
 //   • 只讀不寫：不改任何 store。**不呼叫 FinanceChartBoardData.build**（它會 FinanceHistory.record 寫每月紀錄）、
 //     不呼叫 FinanceHistory.record；走勢只用 FinanceHistory.series(months: 12)（只讀），而且只在換日、財富的 revision
-//     或理財的筆數變了才重算過去那 11 個月（historyCache）；這個月那一點每次都用剛算好的 FinanceSnapshot.current。
+//     或過去月份回推讀得到的東西（historyKey）變了才重算過去那 11 個月（historyCache）；這個月那一點每次都用剛算好的 FinanceSnapshot.current。
 //   • 統計數字跟 App 同一個來源：變動支出一律 expense.ownAmount（25.634 起分帳那頓只算自己那份；同 OverviewBoardData.build、
 //     VariableBoardData.build）。「今天記的」金額照 App 列表卡片的大字（MoneyItem.amountText：刷卡金額，外幣照原幣）。
 //   • 字要穩定：金額只用 MoneyFormat.short／MoneyFormat.percent／ntdWanString；比例一律夾 0…1、四捨五入到小數三位；
@@ -247,7 +247,8 @@ enum WidgetLargeExtras {
 
     // MARK: - finance：淨資產（大）走勢
 
-    /// 過去 11 個月（不含這個月）的快取：換日、財富 revision、理財的筆數變了才重算（FinanceHistory.series 要回推好幾個月，很重）
+    /// 過去 11 個月（不含這個月）的快取：換日、財富 revision、過去月份回推會讀到的東西變了才重算
+    ///（FinanceHistory.series 要回推好幾個月，很重）
     private struct HistoryCache {
         let key: String
         let past: [FinanceMonthPoint]
@@ -255,12 +256,38 @@ enum WidgetLargeExtras {
 
     private static var historyCache: HistoryCache? = nil
 
-    /// 快取的鑰匙：哪一天｜財富 revision｜房子、車、保單、股票幾筆、股票交易幾筆（股價更新不算：只改市值，這個月那一點每次重算）
-    static func historyKey(finance f: FinanceStore, now: Date, wealthRevision: Int) -> String {
-        let trades: Int = f.stocks.reduce(0) { $0 + $1.transactions.count }
-        let parts: [String] = [WidgetDateText.dayKey(now), String(wealthRevision), String(f.realEstates.count),
-                               String(f.vehicles.count), String(f.insurances.count), String(f.stocks.count),
-                               String(trades)]
+    /// 快取的鑰匙：哪一天｜財富 revision｜記帳的 modifyID（支出、收入、分帳、細項、iCloud 重載；貸款、存款與卡費的回推）｜
+    /// 匯率｜房子、車、保單、股票的內容指紋｜每月紀錄、每週股票市值的指紋。
+    /// [審查 fix] 原本只看筆數：改估價、買價、日期、貸款、補記舊帳、匯率、iCloud 拉來的每月紀錄都不會重算，
+    /// 過去 11 個月停在舊的、只有這個月跳。股票不含 currentPrice（股價更新只動這個月那一點，不重算）
+    static func historyKey(finance f: FinanceStore, expense ex: ExpenseStore, now: Date, wealthRevision: Int) -> String {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.sortedKeys]
+        let stocks: [Stock] = f.stocks.map { (stock: Stock) -> Stock in
+            var copy = stock
+            copy.currentPrice = 0
+            return copy
+        }
+        let blobs: [Data?] = [try? encoder.encode(f.realEstates), try? encoder.encode(f.vehicles),
+                              try? encoder.encode(f.insurances), try? encoder.encode(stocks),
+                              UserDefaults.standard.data(forKey: FinanceHistory.key)]
+        var hasher = Hasher()
+        for blob in blobs {
+            guard let blob else {
+                hasher.combine(-1)
+                continue
+            }
+            hasher.combine(blob.count)
+            blob.withUnsafeBytes { (raw: UnsafeRawBufferPointer) in hasher.combine(bytes: raw) }
+        }
+        for week in StockValueHistory.load() {
+            hasher.combine(week.weekStart.timeIntervalSinceReferenceDate)
+            hasher.combine(week.value)
+        }
+        let rateSig: String = ex.currencyRates.map { (rate: CurrencyRate) -> String in "\(rate.code)=\(rate.rate)" }
+            .joined(separator: ",")
+        let parts: [String] = [WidgetDateText.dayKey(now), String(wealthRevision), ex.modifyID.uuidString, rateSig,
+                               String(hasher.finalize())]
         return parts.joined(separator: "|")
     }
 
@@ -271,7 +298,7 @@ enum WidgetLargeExtras {
                                 index: FinanceLoanIndex, current: FinanceSnapshot, now: Date, wealthRevision: Int,
                                 calendar cal: Calendar = .current) -> [WidgetNetWorthPoint]? {
         guard let thisMonth = cal.date(from: cal.dateComponents([.year, .month], from: now)) else { return nil }
-        let key: String = historyKey(finance: f, now: now, wealthRevision: wealthRevision)
+        let key: String = historyKey(finance: f, expense: e, now: now, wealthRevision: wealthRevision)
         let past: [FinanceMonthPoint]
         if let cached = historyCache, cached.key == key {
             past = cached.past
