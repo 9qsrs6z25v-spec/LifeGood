@@ -382,6 +382,10 @@ extension ExpenseSplitBook {
                 shares[i] = x
                 changed = true
             } else {
+                // [review] 同名、還過錢、這次沒載到的那一列還在（整頓墓碑被合併叫回來再編輯）：留那一列，不再多一個同名的人要還
+                let name = r.name.trimmingCharacters(in: .whitespaces)
+                if shares.contains(where: { x in x.hasRepayment && !draftIds.contains(x.id)
+                    && x.name.trimmingCharacters(in: .whitespaces) == name }) { continue }
                 shares.append(SplitShare(id: r.id, name: r.name, role: r.role, amount: r.amount,
                                          isManual: r.isManual ? true : nil, updatedAt: now))
                 changed = true
@@ -1013,8 +1017,18 @@ enum SplitPeople {
         return out
     }
 
+    /// [review] 本人、家人照 AI 記帳的規則（中文名，沒填才用英文名：AIExpenseCommitter.memberName／speakerName），
+    /// 再加人際關係「家人」那一組（選單「家人」那組也有這些人）；朋友、同事、部屬、名片不加
     static func meAndFamily(_ life: LifeStore) -> Set<String> {
-        meAndFamily(profileName: life.profile.chineseName, family: life.familyMembers.map { m in m.chineseName })
+        func pick(_ chinese: String, _ english: String) -> String {
+            let c = chinese.trimmingCharacters(in: .whitespaces)
+            return c.isEmpty ? english : c
+        }
+        var family: [String] = life.familyMembers.map { m in pick(m.chineseName, m.englishName) }
+        for r in life.relationships where r.group == .family {
+            family.append(r.name)
+        }
+        return meAndFamily(profileName: pick(life.profile.chineseName, life.profile.englishName), family: family)
     }
 
     /// C12 錢包自動記帳：帶過來的同行人員只留本人＋家人（朋友、同事、部屬拿掉；一個都不剩＝nil）。永遠不自動產生分帳
@@ -1069,10 +1083,11 @@ enum ExpenseSplitRepay {
     /// 「上次用的」帳戶：只存這支手機（不同步）
     static let lastAccountKey = "lifegood.splitRepay.lastAccount"
 
-    /// 能入帳的帳戶：照 AddIncomeView.bankMilestones（成就・銀行），再排除停用的
-    static func accounts(_ milestones: [LifeMilestone]) -> [LifeMilestone] {
+    /// 能入帳的帳戶：成就・銀行，跟收入、記帳的銀行選單同一套（WealthFacts.pickerBanks：收起來／銷戶的、定存不列），再排除停用的
+    static func accounts(_ milestones: [LifeMilestone], book: WealthBook) -> [LifeMilestone] {
         milestones.filter { m in
             m.category == .achievement && m.financeSubCategory == .bank && m.isDisabled != true
+                && m.bankAccountType != .fixed && book.account(m.id).hidden != true
         }
     }
 

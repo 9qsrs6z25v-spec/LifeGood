@@ -333,7 +333,7 @@ struct SplitRepaySheet: View {
     }
 
     private var accounts: [LifeMilestone] {
-        ExpenseSplitRepay.accounts(lifeStore.milestones)
+        ExpenseSplitRepay.accounts(lifeStore.milestones, book: lifeStore.wealthBook)
     }
 
     private var title: String {

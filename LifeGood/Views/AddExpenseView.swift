@@ -4335,7 +4335,9 @@ struct AddExpenseView: View {
         // [v25.634] 分帳存在另一個鍵（ExpenseSplits.swift；Expense 一個欄位都沒加）：先 dismiss，下一個 runloop 才寫。每次存檔都叫（不能分帳／沒有別人＝nil，它自己判斷要不要拿掉沒還過的人）
         let splitStore = ExpenseSplitStore.shared
         let splitId = expense.id
-        let splitSaved: ExpenseSplitDraft? = splitCanSplit
+        // [review] 只有這筆本來就有分帳、改過「誰付多少」、或那一列看得到（進階模式）才照現在的人算；簡易模式打開 AI 記的那筆
+        // （diningMember 有 AI 照原字填的稱呼、英文名）只改備註就存，不會默默多一包「要還我」（nil＝沒有就不寫）
+        let splitSaved: ExpenseSplitDraft? = splitCanSplit && (loadedSplit != nil || splitDraft != nil || showsSplitRow)
             ? ExpenseSplitMath.resolve(edited: splitDraft, loaded: loadedSplit, names: splitOthers, family: splitFamily, total: amount)
             : nil
         DispatchQueue.main.async { splitStore.recordSave(expenseId: splitId, draft: splitSaved) }
