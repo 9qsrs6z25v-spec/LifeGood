@@ -290,6 +290,7 @@
 		A01B000001001675 /* CarrierBarcodeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001675 /* CarrierBarcodeView.swift */; };
 		A01B000001001676 /* CarrierBarcodeWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001676 /* CarrierBarcodeWidget.swift */; };
 		A01B000001001678 /* LargeWidgetKit.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001678 /* LargeWidgetKit.swift */; };
+		A01B000001001679 /* MapPickerPresenter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001679 /* MapPickerPresenter.swift */; };
 		A01B000001001619 /* OrgMoveCardParts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001619 /* OrgMoveCardParts.swift */; };
 		A01B000001001621 /* OrgMoveWizardRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001621 /* OrgMoveWizardRows.swift */; };
 		A01B000001001623 /* OrgMoveDueViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001623 /* OrgMoveDueViews.swift */; };
@@ -709,6 +710,7 @@
 		A01A000001001675 /* CarrierBarcodeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarrierBarcodeView.swift; sourceTree = "<group>"; };
 		A01A000001001676 /* CarrierBarcodeWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CarrierBarcodeWidget.swift; sourceTree = "<group>"; };
 		A01A000001001678 /* LargeWidgetKit.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LargeWidgetKit.swift; sourceTree = "<group>"; };
+		A01A000001001679 /* MapPickerPresenter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MapPickerPresenter.swift; sourceTree = "<group>"; };
 		A01A000001001619 /* OrgMoveCardParts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveCardParts.swift; sourceTree = "<group>"; };
 		A01A000001001621 /* OrgMoveWizardRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveWizardRows.swift; sourceTree = "<group>"; };
 		A01A000001001623 /* OrgMoveDueViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveDueViews.swift; sourceTree = "<group>"; };
@@ -1192,6 +1194,7 @@
 				A01A000001001524 /* FinanceBoards.swift */,
 				A01A000001001525 /* FinanceItems.swift */,
 				A01A000001001501 /* MapPlacePicker.swift */,
+				A01A000001001679 /* MapPickerPresenter.swift */,
 				A01A000001000218 /* AmountCalculator.swift */,
 				A01A000001000219 /* PagedImageExporter.swift */,
 				A01A000001000220 /* FinanceItemCard.swift */,
@@ -1937,6 +1940,7 @@
 				A01B000001001671 /* CarrierBarcodeShared.swift in Sources */,
 				A01B000001001673 /* Code39.swift in Sources */,
 				A01B000001001675 /* CarrierBarcodeView.swift in Sources */,
+				A01B000001001679 /* MapPickerPresenter.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

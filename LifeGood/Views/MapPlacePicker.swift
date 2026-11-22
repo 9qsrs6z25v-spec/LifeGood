@@ -76,7 +76,7 @@ struct PlaceDistanceBadge: View {
 
 /// [v25.627] 一次「在地圖上選位置」的進度：鏡頭、搜尋字、點到的點。
 ///
-/// 由〔在地圖上選位置〕那一列在按下去那一刻建立、交給 sheet（sheet(item:) 的 item 就是它）。
+/// [v25.633] 由 MapPickerPresenter 在按下去那一刻建立（25.627 是那一列自己建、當 sheet(item:) 的 item）。
 /// sheet 的畫面就算被系統重建，也從這裡接著來：不會回到打開時的位置，打到一半的字也不會不見。
 /// 以前這些都是 sheet 自己的 @State，畫面一重建就全部回到初值（地圖跳回打開時的中心）。
 ///
@@ -104,6 +104,10 @@ final class MapPickerSession: ObservableObject, Identifiable {
     var searchActive = false
     /// 畫面重建後把焦點還回去的次數（最多 maxFocusRestores 次，防止「鍵盤 → 重建 → 鍵盤」打轉）
     var focusRestores = 0
+    /// [v25.633] 搜尋列最近一次拿到焦點的時刻（點地圖時判斷「是不是同一下點擊」用；不必觸發重繪）
+    var focusGainedAt: Date?
+    /// [v25.633] 這一次打開之後畫面出現過幾次（診斷 log 用：變 2 以上＝畫面被重建了）
+    var appearCount = 0
 
     /// 沒有任何線索時的起點：台北車站。總比落在大西洋上好。
     static let fallbackCenter = CLLocationCoordinate2D(latitude: 25.0478, longitude: 121.5170)
@@ -115,6 +119,10 @@ final class MapPickerSession: ObservableObject, Identifiable {
     static let locationMaxAge: TimeInterval = 120
     /// 點地圖時，離搜尋層底線、定位鈕這麼近（pt）也不算點地圖
     static let tapMargin: CGFloat = 4
+    /// [v25.633] 搜尋列拿到焦點後這麼多秒內點地圖，不算「打字中點地圖」（同一下點擊被兩邊都收到）
+    static let focusTapGrace: TimeInterval = 0.4
+    /// [v25.633] 畫面出現後等多久才把焦點還回去（奈秒）。同 AddExpenseView「等 sheet 升起再給焦點」
+    static let focusRestoreDelay: UInt64 = 500_000_000
 
     init(initialCoordinate: CLLocationCoordinate2D?) {
         let start = initialCoordinate
@@ -169,13 +177,22 @@ final class MapPickerSession: ObservableObject, Identifiable {
     }
 
     /// 點地圖的判斷。p、searchBottom、controlsFrame 都是同一個座標（地圖的左上角＝原點）。
-    /// controlsFrame 是 .zero（空的）＝定位鈕收起來了。
-    static func tapAction(at p: CGPoint, searchFocused: Bool,
+    /// controlsFrame 是 .zero（空的）＝定位鈕收起來了（打字中、有建議清單時呼叫端傳 .zero）。
+    /// sinceFocus＝搜尋列拿到焦點到現在幾秒；nil＝沒記到。
+    ///
+    /// [v25.633] 先看位置、再看焦點。25.627 是第一行就看焦點：焦點一在，連點在搜尋列本身也算成
+    /// 「打字中點地圖」把鍵盤收掉（使用者說的「點了搜尋欄，畫面閃一下又回到原地」可能就是這條）。
+    /// 現在點在搜尋列、建議清單、定位鈕那一塊，不管有沒有焦點都不算點地圖。
+    static func tapAction(at p: CGPoint, searchFocused: Bool, sinceFocus: TimeInterval?,
                           searchBottom: CGFloat, controlsFrame: CGRect) -> TapAction {
-        if searchFocused { return .dismissKeyboard }
         if p.y <= searchBottom + tapMargin { return .ignore }
         if !controlsFrame.isEmpty,
            controlsFrame.insetBy(dx: -tapMargin, dy: -tapMargin).contains(p) { return .ignore }
+        if searchFocused {
+            // 剛拿到焦點的那一下：同一下點擊被兩個手勢都收到，不算「打字中點地圖」
+            if let t = sinceFocus, t < focusTapGrace { return .ignore }
+            return .dismissKeyboard
+        }
         return .pick
     }
 
@@ -190,7 +207,7 @@ final class MapPickerSession: ObservableObject, Identifiable {
 struct MapPlacePickerSheet: View {
     @Environment(\.dismiss) private var dismiss
 
-    /// [v25.627] 這一次選位置的進度（鏡頭、搜尋字、點到的點）。由〔在地圖上選位置〕那一列建立，
+    /// [v25.627] 這一次選位置的進度（鏡頭、搜尋字、點到的點）。由 MapPickerPresenter 建立（v25.633），
     /// 畫面被重建時從這裡接著來（以前是這個畫面自己的 @State，一重建就回到打開時的位置）
     @ObservedObject private var session: MapPickerSession
     /// 回傳挑到的地點（名稱、地址、座標、電話）
@@ -212,6 +229,8 @@ struct MapPlacePickerSheet: View {
     @State private var searchDebounce: Task<Void, Never>?
     @State private var isJumping = false
     @FocusState private var searchFocused: Bool
+    /// [v25.633] 還焦點的那個等待（disappear() 取消）
+    @State private var focusTask: Task<Void, Never>?
 
     /// [v25.627] 定位鈕、指北針跟地圖用同一個 scope（照 RunTrackingView），才能排在搜尋列下面
     @Namespace private var mapScope
@@ -237,12 +256,23 @@ struct MapPlacePickerSheet: View {
         }
     }
 
+    /// [v25.633] 〔取消〕、〔使用這個位置〕要收掉地圖時呼叫（MapPickerPresenter 給的）。
+    /// nil＝照舊用 dismiss()。由 UIKit 呈現的畫面上 @Environment(\.dismiss) 不保證有效，所以要它。
+    let onClose: (() -> Void)?
+
     init(session: MapPickerSession,
          accent: Color = TripDayPalette.color(0),
-         onPick: @escaping (PickedPlace) -> Void) {
+         onPick: @escaping (PickedPlace) -> Void,
+         onClose: (() -> Void)? = nil) {
         _session = ObservedObject(wrappedValue: session)
         self.accent = accent
         self.onPick = onPick
+        self.onClose = onClose
+    }
+
+    /// [v25.633] 收掉地圖：有 onClose 就交給它（MapPickerPresenter），沒有才用 dismiss()
+    private func close() {
+        if let onClose { onClose() } else { dismiss() }
     }
 
     // [v25.627] 轉接：狀態搬進 session，原本讀這些名字的地方不用改
@@ -264,6 +294,9 @@ struct MapPlacePickerSheet: View {
                 mapLayer
                 infoCard
             }
+            // [v25.633] 鍵盤出來時地圖、底部卡片都不動（鍵盤直接蓋住卡片）。以前卡片被推上去又掉下來，
+            // 加上定位鈕整塊拿掉又放回，就是使用者看到的「畫面閃一下」
+            .ignoresSafeArea(.keyboard, edges: .bottom)
             .overlay(alignment: .top) { searchOverlay }
             // [v25.627] 地圖、搜尋層同一個座標空間（點地圖時判斷是不是點在搜尋列那一塊）、
             // 同一個 mapScope（定位鈕、指北針排在搜尋列下面，見 mapControlsColumn）
@@ -275,12 +308,13 @@ struct MapPlacePickerSheet: View {
                 ToolbarItem(placement: .topBarLeading) {
                     Button("取消") {
                         session.searchActive = false
-                        dismiss()
+                        MapPickerLog.note("取消")
+                        close()
                     }
                 }
             }
             .onAppear { appear() }
-            .onDisappear { searchDebounce?.cancel() }
+            .onDisappear { disappear() }
             // 點到別的地標、或挪動地圖之後，都要重查一次地址
             .task(id: resolveKey) { await resolve(pickedCoordinate) }
         }
@@ -306,12 +340,25 @@ struct MapPlacePickerSheet: View {
         if !session.query.isEmpty, searchCompleter.results.isEmpty {
             scheduleSearch(session.query)
         }
+        // [v25.633] 還焦點改成 focusTask：等 500ms（sheet 升起再給，同 AddExpenseView），
+        // 畫面先消失就在 disappear() 取消，不會寫到已經沒用的舊畫面上。只試一次
+        session.appearCount += 1
+        MapPickerLog.note("sheet onAppear #\(session.appearCount)")
+        focusTask?.cancel()
         if session.takeFocusRestore() {
-            Task { @MainActor in
-                try? await Task.sleep(nanoseconds: 350_000_000)
+            focusTask = Task { @MainActor in
+                try? await Task.sleep(nanoseconds: MapPickerSession.focusRestoreDelay)
+                guard !Task.isCancelled else { return }
+                MapPickerLog.note("focus ← 還焦點")
                 searchFocused = true
             }
         }
+    }
+
+    private func disappear() {
+        searchDebounce?.cancel()
+        focusTask?.cancel()
+        MapPickerLog.note("sheet onDisappear #\(session.appearCount)")
     }
 
     private var mapLayer: some View {
@@ -367,12 +414,16 @@ struct MapPlacePickerSheet: View {
     /// 點了地圖。點的位置是地圖自己的座標（.local），它的原點就是 canvas 的原點，
     /// 所以可以直接跟 searchBottom、controlsFrame 比。
     private func mapTapped(at screenPoint: CGPoint, proxy: MapProxy) {
+        let sinceFocus = session.focusGainedAt.map { Date().timeIntervalSince($0) }
         let action = MapPickerSession.tapAction(at: screenPoint, searchFocused: searchFocused,
+                                                sinceFocus: sinceFocus,
                                                 searchBottom: searchBottom,
-                                                controlsFrame: controlsFrame)
+                                                controlsFrame: showMapControls ? controlsFrame : .zero)
+        MapPickerLog.note("tap \(action) y=\(Int(screenPoint.y)) bottom=\(Int(searchBottom))")
         switch action {
         case .dismissKeyboard:
             // 正在打字時點地圖：只收鍵盤，不算選點（第一下是「不打了」）
+            MapPickerLog.note("focus ← 打字中點地圖（收鍵盤）")
             searchFocused = false
             session.searchActive = false
         case .ignore:
@@ -394,16 +445,36 @@ struct MapPlacePickerSheet: View {
                 searchField
                 if !searchCompleter.results.isEmpty { suggestionList }
             }
+            // [v25.633] 內距從外層搬進來、底下鋪一層接點擊：搜尋框左右 12pt、上面 8pt 的縫
+            // 點到也算點搜尋列，不會漏給地圖。用一個 EdgeInsets（少一層，depth 卡在 33）
+            .padding(EdgeInsets(top: 8, leading: 12, bottom: 0, trailing: 12))
+            .background { searchTapCatcher }
             // [v25.627] 量出搜尋列＋建議清單的底：點地圖落在這條線以上不算選點
             .onGeometryChange(for: CGFloat.self) { proxy in
                 proxy.frame(in: .named(Self.canvasSpace)).maxY
             } action: { y in
                 searchBottom = y
             }
-            if showMapControls { mapControlsColumn }
+            // [v25.633] 一直留在版面上，打字時只淡掉、不吃點擊（以前用 if 拿掉，整塊消失又出現）
+            mapControlsColumn
+                .opacity(showMapControls ? 1 : 0)
+                .allowsHitTesting(showMapControls)
+                .animation(.easeOut(duration: 0.15), value: showMapControls)
         }
-        .padding(.horizontal, 12)
-        .padding(.top, 8)
+    }
+
+    /// [v25.633] 搜尋層的底：點到縫也算點搜尋列。掛在 background，不在 TextField 上層，不跟它搶點擊
+    private var searchTapCatcher: some View {
+        Color.clear.contentShape(Rectangle()).onTapGesture { focusSearch() }
+    }
+
+    /// [v25.633] 使用者明確點了搜尋列（背景、縫）：先寫意圖、還焦點的額度歸零、記時刻，再給焦點
+    private func focusSearch() {
+        session.searchActive = true
+        session.focusRestores = 0
+        session.focusGainedAt = Date()
+        MapPickerLog.note("focus ← 點搜尋列背景")
+        searchFocused = true
     }
 
     /// [v25.627] 打字中、有建議清單時先把定位鈕收起來，免得又疊到
@@ -426,9 +497,9 @@ struct MapPlacePickerSheet: View {
             } action: { r in
                 controlsFrame = r
             }
-            .onDisappear { controlsFrame = .zero }
         }
         .padding(.top, 2)
+        .padding(.horizontal, 12)
     }
 
     private var searchField: some View {
@@ -445,10 +516,15 @@ struct MapPlacePickerSheet: View {
                     .onChange(of: session.query) { _, newValue in scheduleSearch(newValue) }
                     .onChange(of: searchFocused) { _, focused in
                         // 只記「開始打字」；false 不在這裡清（重建時舊畫面可能先送一個 false）
-                        if focused { session.searchActive = true }
+                        if focused {
+                            session.searchActive = true
+                            session.focusGainedAt = Date()
+                        }
+                        MapPickerLog.note("focus → \(focused)")
                     }
                     .onSubmit {
                         session.searchActive = false
+                        MapPickerLog.note("focus ← 按搜尋")
                         jumpToFirstResult()
                     }
                 if isJumping {
@@ -469,7 +545,7 @@ struct MapPlacePickerSheet: View {
                 RoundedRectangle(cornerRadius: 12).fill(.ultraThinMaterial)
                     // [v25.627] 點到放大鏡、左右留白也算點搜尋列。手勢掛在背景上，
                     // 不是 TextField 的上層，不會跟 TextField 自己的點擊打架
-                    .onTapGesture { searchFocused = true }
+                    .onTapGesture { focusSearch() }
             }
             .overlay(RoundedRectangle(cornerRadius: 12)
                 .stroke(Color(.separator).opacity(0.18), lineWidth: 0.75))
@@ -521,6 +597,7 @@ struct MapPlacePickerSheet: View {
     /// 只移動鏡頭是不夠的——使用者搜「大分縣福岡事務所」就是要選它，
     /// 飛過去之後還要再點一次才算數的話，等於只做了一半。
     private func jump(to completion: MKLocalSearchCompletion) {
+        MapPickerLog.note("focus ← 選了建議")
         searchFocused = false
         session.searchActive = false
         isJumping = true
@@ -652,7 +729,7 @@ struct MapPlacePickerSheet: View {
                 onPick(PickedPlace(name: pickedName, address: address,
                                    coordinate: pickedCoordinate,
                                    phone: tapped?.phone))
-                dismiss()
+                close()
             } label: {
                 HStack(spacing: 6) {
                     Image(systemName: "checkmark.circle.fill")
@@ -1022,7 +1099,8 @@ struct MapPickerPlaceGallery: View {
 /// 抽出來的理由很單純：這一列在旅遊景點、子地點、變動支出三個地方長得一模一樣，
 /// 而且以後只會更多。各自複製一份的話，哪天改了說明文字就會有兩種版本並存。
 ///
-/// sheet 由這一列自己開，但**選到什麼交給呼叫端處理**（onPick）——
+/// 地圖由 MapPickerPresenter 從自己的視窗開（v25.633：從表單那一列 .sheet 開，底下表單一動就可能被收掉重開，
+/// 點搜尋列閃一下），但**選到什麼交給呼叫端處理**（onPick）——
 /// 每個畫面要塞進哪個欄位不一樣，硬要在這裡決定只會多一堆參數。
 struct MapPlacePickerButton: View {
     /// 打開地圖時停在哪裡；nil＝用使用者目前位置
@@ -1037,15 +1115,15 @@ struct MapPlacePickerButton: View {
     /// 按「清除」；nil＝不提供清除
     var onClear: (() -> Void)?
 
-    /// [v25.627] 這一次選位置的進度。有值＝sheet 開著；sheet 重建時從它接著來
-    @State private var session: MapPickerSession? = nil
-    /// 按下去到下一輪真的打開之間（連點兩下只開一張）
-    @State private var opening = false
-
     var body: some View {
         Group {
             Button {
-                open()
+                // [v25.633] 地圖由 MapPickerPresenter 從自己的視窗開（連點兩下只開一張、先收鍵盤下一輪才開都在那裡）。
+                // 包一層 Task { @MainActor }：presenter 是 @MainActor，同 MainTabView.takeVoice() 的寫法
+                Task { @MainActor in
+                    MapPickerPresenter.shared.present(startCoordinate: startCoordinate,
+                                                      accent: accent, onPick: onPick)
+                }
             } label: {
                 HStack(spacing: 8) {
                     Image(systemName: "map.fill")
@@ -1062,15 +1140,6 @@ struct MapPlacePickerButton: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            // [v25.627] sheet 只掛在這顆按鈕上：以前掛在 Group 上，Group 會把它套到每個子 view，
-            // 有座標時（兩列）就變成兩個呈現者綁同一個開關。item 是同一個 session 物件，
-            // 父畫面重繪、sheet 被重新呈現都還是同一個，不會回到打開時的位置
-            .sheet(item: $session) { s in
-                MapPlacePickerSheet(session: s, accent: accent) { picked in
-                    onPick(picked)
-                }
-                .appStores()
-            }
 
             if hasCoordinate {
                 HStack {
@@ -1083,21 +1152,6 @@ struct MapPlacePickerButton: View {
                     }
                 }
             }
-        }
-    }
-
-    /// [v25.627] 先把別的輸入框的鍵盤收掉，下一輪才開地圖（跟 v25.612／614 同一個寫法）：
-    /// 父畫面收鍵盤、候選清單收起來的那次重排，在地圖出來之前就做完，
-    /// 不會跟地圖自己的搜尋列搶鍵盤。
-    private func open() {
-        guard session == nil, !opening else { return }   // 連點兩下只開一次
-        opening = true
-        _ = UIApplication.shared.sendAction(#selector(UIResponder.resignFirstResponder),
-                                            to: nil, from: nil, for: nil)
-        let s = MapPickerSession(initialCoordinate: startCoordinate)
-        DispatchQueue.main.async {
-            opening = false
-            session = s
         }
     }
 }
