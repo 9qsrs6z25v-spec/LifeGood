@@ -1247,6 +1247,9 @@ private struct NetWorthLargeRowView: View {
     private var shareSize: CGFloat { sharesOnly ? 12 : 10 }
     private var shareColor: Color { sharesOnly ? palette.ink : palette.label }
     private var shareWidth: CGFloat { sharesOnly ? 36 : 28 }
+    /// 名稱至少留到縮成 0.8 倍放得下的寬（類別名都是中文，一字約一個字級寬＋2pt 餘裕；最長「卡費與交割」）。
+    /// 金額有 layoutPriority(1)：不留的話窄欄（SE 每欄約 136pt）金額先拿走整個寬，名稱被擠成「…」
+    private var titleMinWidth: CGFloat { min(CGFloat(row.title.count) * 11.5 * 0.8 + 2, 50) }
 
     var body: some View {
         HStack(spacing: 6) {
@@ -1256,6 +1259,7 @@ private struct NetWorthLargeRowView: View {
                 .foregroundStyle(palette.ink)
                 .lineLimit(1)
                 .minimumScaleFactor(0.8)
+                .frame(minWidth: titleMinWidth, alignment: .leading)
             Spacer(minLength: 4)
             amount
             share
