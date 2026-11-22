@@ -38,11 +38,11 @@ struct MoneyLeftWidget: Widget {
         // [v3] StaticConfiguration → AppIntentConfiguration（kind 不變：已經放好的升級後用預設值、外觀一樣）
         AppIntentConfiguration(kind: WidgetKind.moneyLeft, intent: MoneyLeftConfigIntent.self,
                                provider: MoneyLeftProvider()) { entry in
-            MoneyLeftEntryView(entry: entry)
+            MoneyLeftRootView(entry: entry)
         }
         .configurationDisplayName("還能花")
-        .description("這個月還能花多少、每天還能花多少")
-        .supportedFamilies([.systemSmall])
+        .description("這個月還能花多少、每天還能花多少；大的多了近 7 天和花在哪")
+        .supportedFamilies([.systemSmall, .systemLarge])
     }
 }
 
@@ -62,12 +62,18 @@ struct MoneyLeftEntry: TimelineEntry {
 struct MoneyLeftProvider: AppIntentTimelineProvider {
     func placeholder(in context: Context) -> MoneyLeftEntry {
         let now = Date()
+        if context.family == .systemLarge {
+            return MoneyLeftEntry(date: now, snapshot: MoneyLeftLargeSample.snapshot(at: now), hidesAmounts: false)
+        }
         return MoneyLeftEntry(date: now, snapshot: MoneyLeftSample.snapshot(at: now), hidesAmounts: false)
     }
 
     func snapshot(for configuration: MoneyLeftConfigIntent, in context: Context) async -> MoneyLeftEntry {
         let now = Date()
         if context.isPreview {
+            if context.family == .systemLarge {
+                return MoneyLeftEntry(date: now, snapshot: MoneyLeftLargeSample.snapshot(at: now), hidesAmounts: false)
+            }
             // 小工具庫裡的預覽：寫死的展示字
             return MoneyLeftEntry(date: now, snapshot: MoneyLeftSample.snapshot(at: now), hidesAmounts: false)
         }
@@ -604,5 +610,605 @@ struct MoneyLeftBar: View {
         let x: CGFloat = width * clamp(income) - 1
         let maxX: CGFloat = max(width - 2, 0)
         return min(max(x, 0), maxX)
+    }
+}
+
+// MARK: - 大型（v25.637 large3）
+//
+// 規格見 scratchpad/radar/build/large3/brief.md §0 C1、§2 G1；規劃 judge_largewidgets.md 第 7 個（沒有示意圖）。
+// ①「11/20 週五」→「本月還能花」→ 大字 30pt＋同一行「每天 NT$2,402」（右上 36pt ⊕）
+// ② 既有 MoneyLeftBar＋「已花 62%・還有 11 天」
+// ③「近 7 天」區標（右邊「7 天 NT$9,860」）＋7 根柱子（今天那根實色加重）＋星期字
+// ④「花在哪」區標＋最多 5 列（圖示、名稱、占比條、%、金額）
+// • ①② 的字一律用既有 MoneyLeftModel.make（超支紅、沒收入、上次更新、跨月都跟小型同一套，不重寫）。
+// • ③④ 是 money 快照頂層 recentDays／monthCategories（App 算好的字與 0…1 比例）；舊快照沒有 → 不畫，退成①②。
+//   **這一段不算錢、不拼「NT$」**；分類的圖示、名稱、顏色從快照的 categories 找（小工具不寫分類字面字串）。
+// • 隱藏金額：①② 用 App 的遮罩版（MoneyLeftModel 已經處理）、7 天合計用 totalTextMasked、花在哪只留占比條和 %。
+// • 放不下只砍列數（MoneyLeftLargeLayout.candidates 固定 4 個），字級不變。
+// • 小型、StandBy：MoneyLeftRootView 原封不動交給既有 MoneyLeftEntryView。
+
+/// 依尺寸分：大型 → MoneyLeftLargeEntryView；其他（小型、StandBy）照舊 MoneyLeftEntryView
+struct MoneyLeftRootView: View {
+    let entry: MoneyLeftEntry
+
+    @Environment(\.widgetFamily) private var family
+
+    var body: some View {
+        if family == .systemLarge {
+            MoneyLeftLargeEntryView(entry: entry)
+        } else {
+            MoneyLeftEntryView(entry: entry)
+        }
+    }
+}
+
+// MARK: 大型要畫的字（sim ml_large_make）
+
+/// 近 7 天的一根柱子
+private struct MoneyLeftLargeBar: Identifiable {
+    /// bar.dayKey（「2026-11-20」）
+    let id: String
+    /// 「四」
+    let weekday: String
+    /// 0…1（App 正規化好的；LargeWidgetWeekBarMath 換成 pt）
+    let height: Double
+    /// 這一份是哪一天看的那一根（最後一根）
+    let isToday: Bool
+}
+
+/// 花在哪的一列
+private struct MoneyLeftLargeCategory: Identifiable {
+    /// row.key（「飲食」「其他」）
+    let id: String
+    /// 「飲食」（快照 categories 找不到就寫 key）
+    let title: String
+    /// SF Symbol；找不到空字串（不畫）
+    let icon: String
+    /// 分類色；找不到 nil（用 palette.variableTop）
+    let tint: UInt32?
+    /// 0…1（占比條）
+    let share: Double
+    /// 「38%」
+    let shareText: String
+    /// 「NT$1萬」；隱藏金額空字串（不畫這一欄、% 放大）
+    let amount: String
+}
+
+/// ViewThatFits 的一個候選：畫不畫近 7 天、花在哪放幾列（列 model 先切好，View 不切陣列）
+private struct MoneyLeftLargeCandidate: Identifiable {
+    let id: Int
+    let plan: MoneyLeftLargeLayout.Plan
+    let categories: [MoneyLeftLargeCategory]
+}
+
+private struct MoneyLeftLargeModel {
+    /// ①② 跟小型同一個 model
+    var base = MoneyLeftModel()
+    /// ③ 7 根柱子（舊到新）；沒有這一天的近 7 天是空的
+    var bars: [MoneyLeftLargeBar] = []
+    var hasWeek = false
+    /// 「7 天 NT$9,860」；隱藏「7 天 NT$ ••••」
+    var weekTotal = ""
+    /// ④ 全部列（最多 maxCategoryRows）
+    var categories: [MoneyLeftLargeCategory] = []
+    /// 固定 4 個（大到小）
+    var candidates: [MoneyLeftLargeCandidate] = []
+
+    /// 安全取值：index 夾在 0…count-1；沒有候選回一個只有①②的
+    func candidate(at index: Int) -> MoneyLeftLargeCandidate {
+        guard !candidates.isEmpty else {
+            let plan = MoneyLeftLargeLayout.Plan(showsWeek: false, categoryRows: 0)
+            return MoneyLeftLargeCandidate(id: 0, plan: plan, categories: [])
+        }
+        let i: Int = min(max(0, index), candidates.count - 1)
+        return candidates[i]
+    }
+
+    /// 只挑字、不算錢（sim ml_large_make）
+    static func make(snapshot: WidgetMoneySnapshot?, now: Date, hidden: Bool) -> MoneyLeftLargeModel {
+        var m = MoneyLeftLargeModel()
+        m.base = MoneyLeftModel.make(snapshot: snapshot, now: now, hidden: hidden)
+        guard m.base.kind == .day, let snap = snapshot, let day = snap.day(at: now) else { return m }
+        if let week = snap.recentWeek(dayKey: day.dayKey) {
+            m.hasWeek = true
+            m.bars = week.bars.map { (bar: WidgetMoneyRecentBar) -> MoneyLeftLargeBar in
+                MoneyLeftLargeBar(id: bar.dayKey, weekday: bar.weekday, height: bar.height,
+                                  isToday: bar.dayKey == week.dayKey)
+            }
+            m.weekTotal = hidden ? week.totalTextMasked : week.totalText
+        }
+        let rows: [WidgetMoneyCategoryShare] = snap.monthCategoryRows(dayKey: day.dayKey) ?? []
+        m.categories = rows.prefix(MoneyLeftLargeLayout.maxCategoryRows).map { (row: WidgetMoneyCategoryShare) -> MoneyLeftLargeCategory in
+            category(row, snap: snap, hidden: hidden)
+        }
+        let plans: [MoneyLeftLargeLayout.Plan] = MoneyLeftLargeLayout.candidates(hasWeek: m.hasWeek,
+                                                                               categoryCount: m.categories.count)
+        var out: [MoneyLeftLargeCandidate] = []
+        for (i, plan) in plans.enumerated() {
+            let picked: [MoneyLeftLargeCategory] = Array(m.categories.prefix(max(0, plan.categoryRows)))
+            out.append(MoneyLeftLargeCandidate(id: i, plan: plan, categories: picked))
+        }
+        m.candidates = out
+        return m
+    }
+
+    /// 一列：圖示、名稱、顏色從快照的 categories 找；隱藏金額時金額欄空字串（只寫占比）
+    private static func category(_ row: WidgetMoneyCategoryShare, snap: WidgetMoneySnapshot,
+                                 hidden: Bool) -> MoneyLeftLargeCategory {
+        let c: WidgetCategory? = snap.category(forKey: row.key)
+        return MoneyLeftLargeCategory(id: row.key, title: c?.title ?? row.key, icon: c?.icon ?? "", tint: c?.tint,
+                                      share: row.share, shareText: row.shareText,
+                                      amount: hidden ? "" : row.amountText)
+    }
+}
+
+/// 小工具庫預覽與 placeholder（大型）用的樣本。**這些是寫死的展示字，不是計算**；
+/// 樣本 key 一律 sample-…（小工具裡不寫分類字面字串）。①② 照小型的 MoneyLeftSample
+enum MoneyLeftLargeSample {
+    static func snapshot(at now: Date) -> WidgetMoneySnapshot {
+        var snap = MoneyLeftSample.snapshot(at: now)
+        guard !snap.days.isEmpty else { return snap }
+        snap.days[0].masked = WidgetMoneyMasked(title: "本月已花", hero: "62%", line: "還有 19 天", footer: "今天 3 筆")
+        snap.categories = categories
+        snap.monthCategories = monthCategories
+        snap.recentDays = [week(dayKey: snap.days[0].dayKey)]
+        return snap
+    }
+
+    private static let categories: [WidgetCategory] = [
+        WidgetCategory(key: "sample-food", title: "飲食", icon: "fork.knife",
+                       top: 0xFFB45E, bottom: 0xEE5E3B, tint: 0xEE5E3B),
+        WidgetCategory(key: "sample-shopping", title: "購物", icon: "bag.fill",
+                       top: 0xFF9CBB, bottom: 0xE0457A, tint: 0xE0457A),
+        WidgetCategory(key: "sample-transport", title: "交通", icon: "car.fill",
+                       top: 0x8EC5FF, bottom: 0x3A6FE0, tint: 0x3A6FE0),
+        WidgetCategory(key: "sample-fun", title: "娛樂", icon: "gamecontroller.fill",
+                       top: 0xC9A8FF, bottom: 0x7B4DE0, tint: 0x7B4DE0),
+        WidgetCategory(key: "sample-other", title: "其他", icon: "ellipsis.circle.fill",
+                       top: 0xC5CCDA, bottom: 0x7A869E, tint: 0x7A869E),
+    ]
+
+    private static let monthCategories: [WidgetMoneyCategoryShare] = [
+        WidgetMoneyCategoryShare(key: "sample-food", amountText: "NT$1萬", share: 0.38, shareText: "38%", count: 21),
+        WidgetMoneyCategoryShare(key: "sample-shopping", amountText: "NT$4,820", share: 0.18, shareText: "18%", count: 3),
+        WidgetMoneyCategoryShare(key: "sample-transport", amountText: "NT$3,400", share: 0.13, shareText: "13%", count: 12),
+        WidgetMoneyCategoryShare(key: "sample-fun", amountText: "NT$2,650", share: 0.10, shareText: "10%", count: 2),
+        WidgetMoneyCategoryShare(key: "sample-other", amountText: "NT$5,500", share: 0.21, shareText: "21%", count: 9),
+    ]
+
+    /// 樣本那天是 10/13 週二：前 6 根 sample-d1…d6，最後一根＝樣本那一天
+    private static let weekdays: [String] = ["三", "四", "五", "六", "日", "一", "二"]
+    private static let heights: [Double] = [0.42, 0.18, 0.66, 1.0, 0.35, 0, 0.52]
+
+    private static func week(dayKey: String) -> WidgetMoneyRecentWeek {
+        var bars: [WidgetMoneyRecentBar] = []
+        let last: Int = weekdays.count - 1
+        for i in 0..<weekdays.count {
+            let key: String = i == last ? dayKey : "sample-d\(i + 1)"
+            let h: Double = i < heights.count ? heights[i] : 0
+            bars.append(WidgetMoneyRecentBar(dayKey: key, weekday: weekdays[i], height: h))
+        }
+        return WidgetMoneyRecentWeek(dayKey: dayKey, bars: bars, totalText: "7 天 NT$9,860",
+                                     totalTextMasked: "7 天 " + WidgetHideAmounts.mask)
+    }
+}
+
+// MARK: 大型畫面
+
+/// palette／surface 同小型；右上 ⊕（StandBy 不放）；整塊 → 收支總覽（同小型）
+private struct MoneyLeftLargeEntryView: View {
+    let entry: MoneyLeftEntry
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.widgetRenderingMode) private var renderingMode
+    @Environment(\.showsWidgetContainerBackground) private var showsBackground
+
+    private var surface: WidgetPalette.Surface {
+        WidgetPalette.Surface(renderingMode: renderingMode, showsBackground: showsBackground)
+    }
+
+    private var palette: WidgetPalette {
+        WidgetPalette(colorScheme, mono: surface.isMono)
+    }
+
+    private var model: MoneyLeftLargeModel {
+        MoneyLeftLargeModel.make(snapshot: entry.snapshot, now: entry.date, hidden: entry.hidesAmounts)
+    }
+
+    var body: some View {
+        MoneyLeftLargeContent(model: model, palette: palette)
+            .overlay(alignment: .topTrailing) {
+                addButton
+            }
+            .containerBackground(for: .widget) {
+                background
+            }
+            .widgetURL(WidgetLink.expenseOverview)
+    }
+
+    @ViewBuilder
+    private var addButton: some View {
+        if !surface.isStandBy {
+            MoneyLeftLargeAddButton(palette: palette)
+        }
+    }
+
+    /// 全彩畫天空（不放月牙：右上是 ⊕）；著色、透明 Color.clear
+    @ViewBuilder
+    private var background: some View {
+        if surface.drawsSky {
+            WidgetSky(palette: palette, moon: WidgetSkyMoon.none)
+        } else {
+            Color.clear
+        }
+    }
+}
+
+/// 沒快照 → 既有 MoneyLeftMessage；跨月 → 既有 MoneyLeftMonthStarted；某一天 → 4 個候選
+private struct MoneyLeftLargeContent: View {
+    let model: MoneyLeftLargeModel
+    let palette: WidgetPalette
+
+    var body: some View {
+        switch model.base.kind {
+        case .message:
+            MoneyLeftMessage(text: model.base.message, palette: palette)
+        case .monthStarted:
+            MoneyLeftMonthStarted(model: model.base, palette: palette)
+        case .day:
+            MoneyLeftLargeBoard(model: model, palette: palette)
+        }
+    }
+}
+
+/// 4 個候選由上往下挑（字級不變、只砍列數；不巢狀）
+private struct MoneyLeftLargeBoard: View {
+    let model: MoneyLeftLargeModel
+    let palette: WidgetPalette
+
+    var body: some View {
+        ViewThatFits(in: .vertical) {
+            MoneyLeftLargeColumn(model: model, candidate: model.candidate(at: 0), palette: palette)
+            MoneyLeftLargeColumn(model: model, candidate: model.candidate(at: 1), palette: palette)
+            MoneyLeftLargeColumn(model: model, candidate: model.candidate(at: 2), palette: palette)
+            MoneyLeftLargeColumn(model: model, candidate: model.candidate(at: 3), palette: palette)
+        }
+    }
+}
+
+/// ①② → ③ → ④ → Spacer。每一塊固定高度（MoneyLeftLargeLayout.height 算的就是這一欄）
+private struct MoneyLeftLargeColumn: View {
+    let model: MoneyLeftLargeModel
+    let candidate: MoneyLeftLargeCandidate
+    let palette: WidgetPalette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            MoneyLeftLargeHead(model: model.base, palette: palette)
+            week
+            categories
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    @ViewBuilder
+    private var week: some View {
+        if candidate.plan.showsWeek {
+            MoneyLeftLargeWeek(bars: model.bars, total: model.weekTotal, palette: palette)
+        }
+    }
+
+    @ViewBuilder
+    private var categories: some View {
+        if !candidate.categories.isEmpty {
+            MoneyLeftLargeCategories(rows: candidate.categories, palette: palette)
+        }
+    }
+}
+
+/// ① 日期、小標（兩行都讓開右上 ⊕）、大字＋每天 → ② 橫條、已花 %
+private struct MoneyLeftLargeHead: View {
+    let model: MoneyLeftModel
+    let palette: WidgetPalette
+
+    private var tone: MoneyLeftTone { MoneyLeftTone(model: model, palette: palette) }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            dateText
+            titleText
+            MoneyLeftLargeHeroRow(model: model, palette: palette)
+            barBlock
+            footerText
+        }
+    }
+
+    private var dateText: some View {
+        Text(model.dateText)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(palette.inkDate)
+            .lineLimit(1)
+            .padding(.trailing, MoneyLeftLargeLayout.addButtonSize)
+            .frame(maxWidth: .infinity, minHeight: MoneyLeftLargeLayout.captionHeight,
+                   maxHeight: MoneyLeftLargeLayout.captionHeight, alignment: .topLeading)
+    }
+
+    private var titleText: some View {
+        Text(model.title)
+            .font(.system(size: 12.5, weight: .medium))
+            .foregroundStyle(tone.title)
+            .lineLimit(1)
+            .padding(.trailing, MoneyLeftLargeLayout.addButtonSize)
+            .frame(maxWidth: .infinity, minHeight: MoneyLeftLargeLayout.titleHeight,
+                   maxHeight: MoneyLeftLargeLayout.titleHeight, alignment: .bottomLeading)
+    }
+
+    /// 橫條：上面空、條 barTrackHeight；舊快照沒有 bar 也留同樣的高度（候選高度才對得上）
+    private var barBlock: some View {
+        barContent
+            .frame(height: MoneyLeftLargeLayout.barHeight)
+    }
+
+    @ViewBuilder
+    private var barContent: some View {
+        if let bar = model.bar {
+            MoneyLeftBar(bar: bar, palette: palette)
+                .frame(height: MoneyLeftLargeLayout.barTrackHeight)
+                .padding(.top, MoneyLeftLargeLayout.barHeight - MoneyLeftLargeLayout.barTrackHeight)
+        } else {
+            Color.clear
+        }
+    }
+
+    private var footerText: some View {
+        Text(model.footer)
+            .font(.system(size: 11, weight: .medium))
+            .foregroundStyle(palette.label)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .frame(maxWidth: .infinity, minHeight: MoneyLeftLargeLayout.progressHeight,
+                   maxHeight: MoneyLeftLargeLayout.progressHeight, alignment: .bottomLeading)
+    }
+}
+
+/// 大字 30pt＋同一行「每天 NT$2,402」（超支紅：MoneyLeftTone）
+private struct MoneyLeftLargeHeroRow: View {
+    let model: MoneyLeftModel
+    let palette: WidgetPalette
+
+    private var tone: MoneyLeftTone { MoneyLeftTone(model: model, palette: palette) }
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            MoneyLeftHero(text: model.hero, color: tone.hero, size: 30)
+                .layoutPriority(1)
+            lineText
+            Spacer(minLength: 0)
+        }
+        .frame(height: MoneyLeftLargeLayout.heroHeight)
+    }
+
+    private var lineText: some View {
+        Text(model.line)
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundStyle(tone.line)
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+    }
+}
+
+/// ③ 區標＋7 根柱子＋星期字（高度＝MoneyLeftLargeLayout.weekHeight）
+private struct MoneyLeftLargeWeek: View {
+    let bars: [MoneyLeftLargeBar]
+    let total: String
+    let palette: WidgetPalette
+
+    var body: some View {
+        VStack(spacing: 0) {
+            MoneyLeftLargeWeekLabel(total: total, palette: palette)
+            MoneyLeftLargeWeekBars(bars: bars, palette: palette)
+            MoneyLeftLargeWeekdays(bars: bars, palette: palette)
+        }
+    }
+}
+
+/// 「近 7 天」＋右邊「7 天 NT$9,860」（字貼底）
+private struct MoneyLeftLargeWeekLabel: View {
+    let total: String
+    let palette: WidgetPalette
+
+    var body: some View {
+        HStack(alignment: .lastTextBaseline, spacing: 6) {
+            titleText
+            Spacer(minLength: 6)
+            totalText
+        }
+        .padding(.bottom, 3)
+        .frame(maxWidth: .infinity, minHeight: MoneyLeftLargeLayout.weekLabelHeight,
+               maxHeight: MoneyLeftLargeLayout.weekLabelHeight, alignment: .bottom)
+    }
+
+    private var titleText: some View {
+        Text("近 7 天")
+            .font(.system(size: 10.5, weight: .semibold))
+            .foregroundStyle(palette.label)
+    }
+
+    private var totalText: some View {
+        Text(total)
+            .font(.system(size: 10.5, weight: .semibold))
+            .monospacedDigit()
+            .foregroundStyle(palette.ink)
+            .lineLimit(1)
+    }
+}
+
+/// 7 根 Capsule（底對齊）；今天那根實色、著色模式染重點色
+private struct MoneyLeftLargeWeekBars: View {
+    let bars: [MoneyLeftLargeBar]
+    let palette: WidgetPalette
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: MoneyLeftLargeLayout.weekBarSpacing) {
+            ForEach(bars, id: \.id) { (bar: MoneyLeftLargeBar) in
+                barView(bar)
+            }
+        }
+        .frame(height: MoneyLeftLargeLayout.weekBarsHeight, alignment: .bottom)
+    }
+
+    private func barView(_ bar: MoneyLeftLargeBar) -> some View {
+        Capsule()
+            .fill(color(bar))
+            .frame(height: LargeWidgetWeekBarMath.barHeight(bar.height))
+            .frame(maxWidth: .infinity)
+            .widgetAccentable(bar.isToday)
+    }
+
+    private func color(_ bar: MoneyLeftLargeBar) -> Color {
+        if palette.isMono {
+            return bar.isToday ? palette.ink : palette.ink.opacity(0.35)
+        }
+        return bar.isToday ? palette.variableTop : palette.variableTop.opacity(0.4)
+    }
+}
+
+/// 柱子下面的星期字（今天粗、ink）
+private struct MoneyLeftLargeWeekdays: View {
+    let bars: [MoneyLeftLargeBar]
+    let palette: WidgetPalette
+
+    var body: some View {
+        HStack(alignment: .bottom, spacing: MoneyLeftLargeLayout.weekBarSpacing) {
+            ForEach(bars, id: \.id) { (bar: MoneyLeftLargeBar) in
+                dayText(bar)
+            }
+        }
+        .frame(height: MoneyLeftLargeLayout.weekdayHeight, alignment: .bottom)
+    }
+
+    private func dayText(_ bar: MoneyLeftLargeBar) -> some View {
+        let weight: Font.Weight = bar.isToday ? .bold : .medium
+        let color: Color = bar.isToday ? palette.ink : palette.label
+        return Text(bar.weekday)
+            .font(.system(size: 10, weight: weight))
+            .foregroundStyle(color)
+            .lineLimit(1)
+            .frame(maxWidth: .infinity)
+    }
+}
+
+/// ④「花在哪」區標＋每列固定高度
+private struct MoneyLeftLargeCategories: View {
+    let rows: [MoneyLeftLargeCategory]
+    let palette: WidgetPalette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            LargeWidgetSectionLabel(title: "花在哪", height: MoneyLeftLargeLayout.categoryLabelHeight, palette: palette)
+            ForEach(rows, id: \.id) { (row: MoneyLeftLargeCategory) in
+                MoneyLeftLargeCategoryRow(row: row, palette: palette)
+                    .frame(height: MoneyLeftLargeLayout.categoryRowHeight)
+            }
+        }
+    }
+}
+
+/// 圖示、名稱、占比條、%、金額（隱藏金額：不畫金額、% 放大）
+private struct MoneyLeftLargeCategoryRow: View {
+    let row: MoneyLeftLargeCategory
+    let palette: WidgetPalette
+
+    private var hidesAmount: Bool { row.amount.isEmpty }
+
+    /// 著色模式一律 ink；全彩用分類色（快照找不到用變動支出藍）
+    private var fillColor: Color {
+        if palette.isMono { return palette.ink }
+        guard let tint = row.tint else { return palette.variableTop }
+        return Color(widgetHex: tint)
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            icon
+            titleText
+            LargeWidgetBar(fraction: row.share, fill: fillColor, track: palette.barTrack, height: 6)
+            shareText
+            amountText
+        }
+    }
+
+    @ViewBuilder
+    private var icon: some View {
+        if !row.icon.isEmpty {
+            Image(systemName: row.icon)
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(fillColor)
+                .frame(width: 14)
+        }
+    }
+
+    private var titleText: some View {
+        Text(row.title)
+            .font(.system(size: 11.5, weight: .semibold))
+            .foregroundStyle(palette.ink)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .frame(width: 50, alignment: .leading)
+    }
+
+    private var shareSize: CGFloat { hidesAmount ? 12 : 10.5 }
+    private var shareWidth: CGFloat { hidesAmount ? 36 : 32 }
+    private var shareColor: Color { hidesAmount ? palette.ink : palette.label }
+
+    private var shareText: some View {
+        Text(row.shareText)
+            .font(.system(size: shareSize, weight: .bold))
+            .monospacedDigit()
+            .foregroundStyle(shareColor)
+            .lineLimit(1)
+            .frame(width: shareWidth, alignment: .trailing)
+    }
+
+    @ViewBuilder
+    private var amountText: some View {
+        if !hidesAmount {
+            Text(row.amount)
+                .font(.system(size: 11.5, weight: .bold))
+                .monospacedDigit()
+                .foregroundStyle(palette.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+                .frame(minWidth: 56, alignment: .trailing)
+        }
+    }
+}
+
+/// 右上 36pt「⊕」：打開 App 到新增支出（同小型 MoneyLeftAddButton 的那一條路）
+private struct MoneyLeftLargeAddButton: View {
+    let palette: WidgetPalette
+
+    var body: some View {
+        Button(intent: LifeGoodOpenIntent(url: WidgetLink.addExpense())) {
+            MoneyLeftLargeAddIcon(palette: palette)
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("新增支出")
+    }
+}
+
+/// ⊕ 的圖示（26pt；外框 36pt 靠右上對齊，疊在日期、小標右邊，不佔版面）
+private struct MoneyLeftLargeAddIcon: View {
+    let palette: WidgetPalette
+
+    var body: some View {
+        Image(systemName: "plus.circle.fill")
+            .font(.system(size: 26, weight: .semibold))
+            .foregroundStyle(palette.deskAddIcon)
+            .widgetAccentable()
+            .frame(width: MoneyLeftLargeLayout.addButtonSize, height: MoneyLeftLargeLayout.addButtonSize,
+                   alignment: .topTrailing)
+            .contentShape(Rectangle())
     }
 }

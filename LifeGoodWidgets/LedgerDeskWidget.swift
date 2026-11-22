@@ -41,7 +41,7 @@ struct LedgerDeskWidget: Widget {
             LedgerDeskRootView(entry: entry)
         }
         .configurationDisplayName("記帳台")
-        .description("看還能花，一按就記帳；大的上面整排還能花、下面四張大卡")
+        .description("看還能花，一按就記帳；大的上面整排還能花、中間四張大卡、下面今天記的")
         .supportedFamilies([.systemMedium, .systemLarge])
     }
 }
@@ -224,6 +224,7 @@ enum LedgerDeskSample {
                                              categoryKey: "sample-electricity", title: "Taycan 電費",
                                              icon: "bolt.fill", top: 0x7FE3D0, bottom: 0x1A9C8C, tint: 0x138A7E)
         snap.templates = []
+        snap.todayEntries = LedgerDeskLargeSample.todayEntries
         return snap
     }
 
@@ -409,17 +410,23 @@ struct LedgerDeskRootView: View {
     }
 }
 
-/// 大型要的東西：上半的字、卡、4 個候選（只挑、不算；sim ledger_large_make）
+/// 大型要的東西：上半的字、卡、今天記的、4 個候選（只挑、不算；sim ld3_large_make）
+/// [v25.637 large3] 候選改用 LedgerDeskTodayLayout（今天記的 0 筆＝第二版的候選逐一相同）；
+/// 每個候選先切好今天記的幾筆、右邊「共 N 筆」（View 不切陣列）。
 private struct LedgerDeskLargeModel {
     let panel: WidgetMoneyPanelWideModel
     let tiles: [WidgetDeskTile]
+    /// 今天記的（最多 4 筆，最新的在前；過了午夜、舊快照、不是 .day 時空的）
+    let today: [LedgerDeskTodayRow]
     /// 固定 4 個（大到小）
-    let candidates: [LedgerDeskLargeLayout.Plan]
+    let candidates: [LedgerDeskLargeCandidate]
 
-    /// 安全取值：index 夾在 0...count-1；沒有候選回最矮、不帶頁腳的
-    func candidate(at index: Int) -> LedgerDeskLargeLayout.Plan {
+    /// 安全取值：index 夾在 0...count-1；沒有候選回最矮、不帶頁腳、沒有今天記的
+    func candidate(at index: Int) -> LedgerDeskLargeCandidate {
         guard !candidates.isEmpty else {
-            return LedgerDeskLargeLayout.Plan(tileHeight: LedgerDeskLargeLayout.compactTileHeight, showsFooter: false)
+            let plan = LedgerDeskTodayLayout.Plan(tileHeight: LedgerDeskLargeLayout.compactTileHeight,
+                                                  showsFooter: false, todayRows: 0)
+            return LedgerDeskLargeCandidate(id: 0, plan: plan, today: [], trailing: "")
         }
         let i: Int = min(max(index, 0), candidates.count - 1)
         return candidates[i]
@@ -428,9 +435,39 @@ private struct LedgerDeskLargeModel {
     static func make(entry: LedgerDeskEntry) -> LedgerDeskLargeModel {
         let panel = WidgetMoneyPanelWideModel.make(snapshot: entry.snapshot, now: entry.date, hidden: entry.hidesAmounts)
         let tiles: [WidgetDeskTile] = LedgerDeskModel.tiles(snapshot: entry.snapshot, choiceIDs: entry.choiceIDs)
-        let plans: [LedgerDeskLargeLayout.Plan] = LedgerDeskLargeLayout.candidates(tileCount: tiles.count,
-                                                                                   hasFooter: !panel.footer.isEmpty)
-        return LedgerDeskLargeModel(panel: panel, tiles: tiles, candidates: plans)
+        var rows: [LedgerDeskTodayRow] = []
+        var total: Int = 0
+        if panel.kind == .day, let snap = entry.snapshot, let day = snap.day(at: entry.date) {
+            let entries: [WidgetMoneyTodayEntry] = snap.todayEntryRows(dayKey: day.dayKey) ?? []
+            rows = entries.prefix(LedgerDeskTodayLayout.maxRows).map { (e: WidgetMoneyTodayEntry) -> LedgerDeskTodayRow in
+                row(e, snap: snap, hidden: entry.hidesAmounts)
+            }
+            total = day.todayCount ?? rows.count
+        }
+        let plans: [LedgerDeskTodayLayout.Plan] = LedgerDeskTodayLayout.candidates(tileCount: tiles.count,
+                                                                                   hasFooter: !panel.footer.isEmpty,
+                                                                                   entryCount: rows.count)
+        var out: [LedgerDeskLargeCandidate] = []
+        for (i, plan) in plans.enumerated() {
+            out.append(makeCandidate(id: i, plan: plan, rows: rows, total: total))
+        }
+        return LedgerDeskLargeModel(panel: panel, tiles: tiles, today: rows, candidates: out)
+    }
+
+    /// 一個候選：今天記的先切好；放得下的比今天記的少時右邊寫「共 N 筆」
+    private static func makeCandidate(id: Int, plan: LedgerDeskTodayLayout.Plan, rows: [LedgerDeskTodayRow],
+                                      total: Int) -> LedgerDeskLargeCandidate {
+        let shown: [LedgerDeskTodayRow] = Array(rows.prefix(max(0, plan.todayRows)))
+        let trailing: String = plan.todayRows > 0 && total > shown.count ? "共 \(total) 筆" : ""
+        return LedgerDeskLargeCandidate(id: id, plan: plan, today: shown, trailing: trailing)
+    }
+
+    /// 一筆：時間、分類（圖示、名稱、色）、金額（隱藏時用 App 寫好的遮罩版）。不算錢、不拼 NT$
+    private static func row(_ e: WidgetMoneyTodayEntry, snap: WidgetMoneySnapshot, hidden: Bool) -> LedgerDeskTodayRow {
+        let c: WidgetCategory? = snap.category(forKey: e.categoryKey)
+        return LedgerDeskTodayRow(id: e.id, time: e.timeText, icon: c?.icon ?? "", tint: c?.tint,
+                                  title: c?.title ?? e.categoryKey,
+                                  amount: hidden ? e.amountTextMasked : e.amountText)
     }
 }
 
@@ -480,19 +517,22 @@ private struct LedgerDeskLargeBoard: View {
 
     var body: some View {
         ViewThatFits(in: .vertical) {
-            LedgerDeskLargeColumn(model: model, plan: model.candidate(at: 0), palette: palette)
-            LedgerDeskLargeColumn(model: model, plan: model.candidate(at: 1), palette: palette)
-            LedgerDeskLargeColumn(model: model, plan: model.candidate(at: 2), palette: palette)
-            LedgerDeskLargeColumn(model: model, plan: model.candidate(at: 3), palette: palette)
+            LedgerDeskLargeColumn(model: model, candidate: model.candidate(at: 0), palette: palette)
+            LedgerDeskLargeColumn(model: model, candidate: model.candidate(at: 1), palette: palette)
+            LedgerDeskLargeColumn(model: model, candidate: model.candidate(at: 2), palette: palette)
+            LedgerDeskLargeColumn(model: model, candidate: model.candidate(at: 3), palette: palette)
         }
     }
 }
 
-/// 上半（固定高）→ Spacer（至少 12）→ 卡片（貼底）。LedgerDeskLargeLayout.height 算的就是這一欄
+/// 上半（固定高）→ Spacer（至少 12）→ 卡片 →（有的話）今天記的。LedgerDeskTodayLayout.height 算的就是這一欄；
+/// 今天記的 0 筆時跟第二版一模一樣（卡片貼底）
 private struct LedgerDeskLargeColumn: View {
     let model: LedgerDeskLargeModel
-    let plan: LedgerDeskLargeLayout.Plan
+    let candidate: LedgerDeskLargeCandidate
     let palette: WidgetPalette
+
+    private var plan: LedgerDeskTodayLayout.Plan { candidate.plan }
 
     private var gap: CGFloat {
         model.tiles.isEmpty ? 0 : LedgerDeskLargeLayout.gridTopGap
@@ -505,8 +545,19 @@ private struct LedgerDeskLargeColumn: View {
             }
             Spacer(minLength: gap)
             LedgerDeskLargeGrid(tiles: model.tiles, tileHeight: plan.tileHeight, palette: palette)
+            today
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    /// 今天記的（候選已經切好幾筆；空的不畫，連區標）。點了 → 收支總覽
+    @ViewBuilder
+    private var today: some View {
+        if !candidate.today.isEmpty {
+            Link(destination: WidgetLink.expenseOverview) {
+                LedgerDeskLargeToday(rows: candidate.today, trailing: candidate.trailing, palette: palette)
+            }
+        }
     }
 }
 
@@ -578,4 +629,132 @@ private struct LedgerDeskLargeTileView: View {
             LedgerDeskCardBackground(top: tile.top, bottom: tile.bottom, plain: isAdd, palette: palette)
         }
     }
+}
+
+// MARK: - 大型「今天記的」（v25.637 large3）
+//
+// judge_largewidgets.md §C 第三版 C3、brief §2 G3。money 快照頂層 todayEntries（App 在 3 秒防抖裡寫好，最多 4 筆、
+// 最新的在前），只在畫的那一天＝快照的 dataDay 才畫（snap.todayEntryRows(dayKey:)）。一筆只有時間、分類、金額：
+// 「12:10 🍴 飲食 ｜ NT$180」；不放名稱、備註、店名、地點、同行人員。隱藏金額時用 App 寫好的遮罩版。
+// 放不下照順序砍（LedgerDeskTodayLayout.candidates）：筆數 4→3→2→1、先帶頁腳再不帶、卡片 76→68→60；都不行＝第二版。
+//
+// 型別：LedgerDeskLargeSample（internal）；LedgerDeskTodayRow、LedgerDeskLargeCandidate 與畫面零件 private。
+
+/// 今天記的一筆（畫面要的字；只挑、不算）
+private struct LedgerDeskTodayRow: Identifiable {
+    let id: String
+    /// 「12:10」
+    let time: String
+    /// SF Symbol（快照沒有這個分類時空字串，不畫）
+    let icon: String
+    /// 分類色（0xRRGGBB）；nil＝用 label 色
+    let tint: UInt32?
+    /// 分類名稱「飲食」
+    let title: String
+    /// 「NT$180」／「JPY 15,238」；隱藏時「NT$ ••••」
+    let amount: String
+}
+
+/// 一個候選：版面（卡片高、頁腳、今天記的幾筆）＋今天記的先切好＋右邊「共 N 筆」（沒有＝空字串）
+private struct LedgerDeskLargeCandidate: Identifiable {
+    let id: Int
+    let plan: LedgerDeskTodayLayout.Plan
+    let today: [LedgerDeskTodayRow]
+    let trailing: String
+}
+
+/// 區標＋每筆一列（固定高：LedgerDeskTodayLayout.todayHeight）
+private struct LedgerDeskLargeToday: View {
+    let rows: [LedgerDeskTodayRow]
+    let trailing: String
+    let palette: WidgetPalette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            LedgerDeskLargeTodayLabel(trailing: trailing, palette: palette)
+            ForEach(rows, id: \.id) { (row: LedgerDeskTodayRow) in
+                LedgerDeskLargeTodayRow(row: row, palette: palette)
+                    .frame(height: LedgerDeskTodayLayout.rowHeight)
+            }
+        }
+    }
+}
+
+/// 「今天記的」＋右邊「共 5 筆」（空的不畫）；上面空、字貼底
+private struct LedgerDeskLargeTodayLabel: View {
+    let trailing: String
+    let palette: WidgetPalette
+
+    var body: some View {
+        HStack(alignment: .lastTextBaseline, spacing: 6) {
+            Text("今天記的")
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(palette.label)
+            Spacer(minLength: 6)
+            if !trailing.isEmpty {
+                Text(trailing)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundStyle(palette.label)
+            }
+        }
+        .padding(.bottom, 3)
+        .frame(maxWidth: .infinity, minHeight: LedgerDeskTodayLayout.sectionHeight,
+               maxHeight: LedgerDeskTodayLayout.sectionHeight, alignment: .bottom)
+    }
+}
+
+/// 「12:10 🍴 飲食 ……… NT$180」
+private struct LedgerDeskLargeTodayRow: View {
+    let row: LedgerDeskTodayRow
+    let palette: WidgetPalette
+
+    private var iconColor: Color {
+        if palette.isMono { return palette.ink }
+        return row.tint.map { Color(widgetHex: $0) } ?? palette.label
+    }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text(row.time)
+                .font(.system(size: 11, weight: .semibold))
+                .monospacedDigit()
+                .foregroundStyle(palette.label)
+                .fixedSize()
+            icon
+            Text(row.title)
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundStyle(palette.ink)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            Text(row.amount)
+                .font(.system(size: 11.5, weight: .bold))
+                .monospacedDigit()
+                .foregroundStyle(palette.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+    }
+
+    @ViewBuilder
+    private var icon: some View {
+        if !row.icon.isEmpty {
+            Image(systemName: row.icon)
+                .font(.system(size: 11, weight: .bold))
+                .foregroundStyle(iconColor)
+                .frame(width: 14)
+        }
+    }
+}
+
+/// 小工具庫預覽的今天記的（寫死的展示字；key 用 sample-…，跟 LedgerDeskSample 的分類對得上）。
+/// 樣本的 todayCount 是 3，不寫「共 N 筆」
+enum LedgerDeskLargeSample {
+    static let todayEntries: [WidgetMoneyTodayEntry] = [
+        WidgetMoneyTodayEntry(id: "sample-t1", timeText: "12:10", categoryKey: "sample-food",
+                              amountText: "NT$180", amountTextMasked: WidgetHideAmounts.mask),
+        WidgetMoneyTodayEntry(id: "sample-t2", timeText: "08:40", categoryKey: "sample-shopping",
+                              amountText: "NT$65", amountTextMasked: WidgetHideAmounts.mask),
+        WidgetMoneyTodayEntry(id: "sample-t3", timeText: "08:05", categoryKey: "sample-food",
+                              amountText: "NT$35", amountTextMasked: WidgetHideAmounts.mask),
+    ]
 }

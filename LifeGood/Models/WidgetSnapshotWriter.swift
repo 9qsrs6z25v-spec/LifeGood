@@ -210,7 +210,9 @@ final class WidgetSnapshotWriter {
         // [v4] 理財四個小工具：只重畫內容真的變了的那幾種（App 在背景叫重畫會吃小工具每天的額度）
         if parts.contains(.finance), let expense = expenseStore, let finance = financeStore {
             let old = WidgetSnapshotStore.read(WidgetFinanceSnapshot.self)
-            let snapshot = WidgetFinanceBuilder.snapshot(expense: expense, finance: finance, now: now)
+            // [large3 v25.637] 多帶財富的 revision：淨資產（大）走勢的過去 11 個月只在換日、財富變了才重算
+            let snapshot = WidgetFinanceBuilder.snapshot(expense: expense, finance: finance, now: now,
+                                                         wealthRevision: lifeStore?.wealthRevision ?? -1)
             if WidgetSnapshotStore.write(snapshot) {
                 WidgetRefresh.reload(Self.financeKindsToReload(old: old, new: snapshot))
             }
@@ -379,6 +381,10 @@ final class WidgetSnapshotWriter {
         snapshot.templates = templates
         // [v3] 車子選單（記帳台按鈕、控制項「記到…」）；finance 還沒有（還沒 start）是空陣列
         snapshot.vehicleOptions = finance.map { WidgetMoneyExtras.vehicleOptions(finance: $0, now: now) } ?? []
+        // [large3 v25.637] 還能花（大）「花在哪」「近 7 天」、記帳台（大）「今天記的」（WidgetLargeExtras；同一個防抖 3 秒、ownAmount）
+        snapshot.monthCategories = WidgetLargeExtras.monthCategories(expense: expense, now: now, calendar: cal)
+        snapshot.recentDays = WidgetLargeExtras.recentDays(expense: expense, now: now, calendar: cal)
+        snapshot.todayEntries = WidgetLargeExtras.todayEntries(expense: expense, now: now, calendar: cal)
         return snapshot
     }
 

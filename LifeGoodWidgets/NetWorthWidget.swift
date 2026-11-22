@@ -43,7 +43,7 @@ struct NetWorthWidget: Widget {
             NetWorthWidgetRootView(entry: entry)
         }
         .configurationDisplayName("淨資產")
-        .description("身家比上個月多還是少；大的列出每一類資產和貸款")
+        .description("身家比上個月多還是少；大的列出每一類資產和貸款、近 12 個月走勢")
         .supportedFamilies([.systemSmall, .systemMedium, .systemLarge, .accessoryCircular, .accessoryRectangular])
     }
 }
@@ -257,7 +257,7 @@ enum NetWorthWidgetSample {
 
     static func netWorth(at now: Date) -> WidgetNetWorth {
         let month: Int = Calendar.current.component(.month, from: now)
-        return WidgetNetWorth(monthKey: WidgetDateText.monthKey(now),
+        var w = WidgetNetWorth(monthKey: WidgetDateText.monthKey(now),
                               monthText: "\(month) 月",
                               netWorthText: "NT$1761.7萬",
                               isNegative: false,
@@ -272,6 +272,8 @@ enum NetWorthWidgetSample {
                               debtsBar: 0.542,
                               summaryText: "資產 5 類・\(month) 月",
                               stockPriceAt: nil)
+        w.history = NetWorthLargeSample.history
+        return w
     }
 
     private static let assets: [WidgetNetWorthPart] = [
@@ -845,7 +847,8 @@ private struct NetWorthWidgetRect: View {
 // 規格見 scratchpad/radar/build/large2/brief.md §0 C2、§2 G2；示意圖 scratchpad/largewidgets/networth.html（只做到兩欄＋頁腳）。
 // 「淨資產　11 月」→ 大字 30pt＋膠囊「比上月 ↑2%」→ App 寫好的那一句 → 資產色帶（＋貸款色帶，長度＝debtsBar）→
 // 兩欄（資產最多 6 類｜貸款最多 4 類：色塊、名稱、金額、占比）→ 右下「股價 11/20 13:30」（舊快照再加橘字「11/18 的數字」）。
-// • 走勢是第三版：這一版不畫、不留位置（兩欄下面 Spacer，頁腳貼底）。
+// • [v25.637 large3] 走勢：兩欄下面畫「近 12 個月」（NetWorthLargeTrend；history 至少 2 點、兩欄放得下 (4／3) 類才畫，
+//   候選改用 NetWorthTrendLayout.candidates）。沒有 history（舊快照）＝第二版一模一樣（兩欄下面 Spacer，頁腳貼底）。
 // • 字全部來自既有 NetWorthWidgetModel.make(entry:)（大字、比上月、那一句、跨月、舊快照、隱藏金額的規則都不重寫）；
 //   **這一段不算錢、不拼「NT$」**。大型共用同一個 provider／timeline（不多排 entry、不上網）。
 // • 「比上月」膠囊不上紅綠（v25.549：跟理財總覽一致，方向靠 ↑↓）；舊數字橘字（palette.warn）。
@@ -889,6 +892,8 @@ private struct NetWorthLargeRow: Identifiable {
 private struct NetWorthLargeCandidate: Identifiable {
     let id: Int
     let plan: NetWorthLargeLayout.Plan
+    /// [v25.637] 兩欄下面畫「近 12 個月」走勢
+    let showsTrend: Bool
     let assets: [NetWorthLargeRow]
     let debts: [NetWorthLargeRow]
 }
@@ -920,6 +925,10 @@ private struct NetWorthLargeModel {
     var footStock = ""
     var footStale = ""
     var hasFoot = false
+    /// [v25.637] 走勢：每一點 0…1（history 不到 2 點是空陣列＝不畫）；頭尾月份「去年 12 月」「11 月」
+    var trend: [Double] = []
+    var trendStart = ""
+    var trendEnd = ""
     /// 固定 4 個（大到小）
     var candidates: [NetWorthLargeCandidate] = []
 
@@ -927,14 +936,15 @@ private struct NetWorthLargeModel {
     func candidate(at index: Int) -> NetWorthLargeCandidate {
         guard !candidates.isEmpty else {
             let plan = NetWorthLargeLayout.Plan(assetRows: 0, debtRows: 0, rowHeight: NetWorthLargeLayout.rowHeight)
-            return NetWorthLargeCandidate(id: 0, plan: plan, assets: [], debts: [])
+            return NetWorthLargeCandidate(id: 0, plan: plan, showsTrend: false, assets: [], debts: [])
         }
         let i: Int = min(max(0, index), candidates.count - 1)
         return candidates[i]
     }
 
-    /// 只挑字、不算錢（sim nw_large_make）。base＝NetWorthWidgetModel.make(entry:)（小、中同一個）
-    static func make(base: NetWorthWidgetModel, hidden: Bool) -> NetWorthLargeModel {
+    /// 只挑字、不算錢（sim nw_large_make；[v25.637] nw3_large_make）。base＝NetWorthWidgetModel.make(entry:)（小、中同一個）；
+    /// history＝entry.netWorth?.history（App 算好的 0…1，沒有金額）
+    static func make(base: NetWorthWidgetModel, history: [WidgetNetWorthPoint]?, hidden: Bool) -> NetWorthLargeModel {
         var m = NetWorthLargeModel()
         m.message = base.message
         guard !base.isMessage else { return m }
@@ -955,14 +965,21 @@ private struct NetWorthLargeModel {
         m.hasFoot = !base.stockPriceText.isEmpty || !base.footStale.isEmpty
         let assets: [NetWorthLargeRow] = base.assetParts.prefix(NetWorthLargeLayout.maxAssets).map { row($0, hidden: hidden) }
         let debts: [NetWorthLargeRow] = base.debtParts.prefix(NetWorthLargeLayout.maxDebts).map { row($0, hidden: hidden) }
-        let plans: [NetWorthLargeLayout.Plan] = NetWorthLargeLayout.candidates(assetCount: base.assetParts.count,
+        let points: [WidgetNetWorthPoint] = history ?? []
+        if points.count >= 2 {
+            m.trend = points.map { $0.height }
+            m.trendStart = points.first?.monthText ?? ""
+            m.trendEnd = points.last?.monthText ?? ""
+        }
+        let plans: [NetWorthTrendLayout.Plan] = NetWorthTrendLayout.candidates(assetCount: base.assetParts.count,
                                                                               debtCount: base.debtParts.count,
-                                                                              hasFoot: m.hasFoot)
+                                                                              hasFoot: m.hasFoot,
+                                                                              hasTrend: !m.trend.isEmpty)
         var out: [NetWorthLargeCandidate] = []
         for (i, plan) in plans.enumerated() {
-            let a: [NetWorthLargeRow] = Array(assets.prefix(max(0, plan.assetRows)))
-            let d: [NetWorthLargeRow] = Array(debts.prefix(max(0, plan.debtRows)))
-            out.append(NetWorthLargeCandidate(id: i, plan: plan, assets: a, debts: d))
+            let a: [NetWorthLargeRow] = Array(assets.prefix(max(0, plan.base.assetRows)))
+            let d: [NetWorthLargeRow] = Array(debts.prefix(max(0, plan.base.debtRows)))
+            out.append(NetWorthLargeCandidate(id: i, plan: plan.base, showsTrend: plan.showsTrend, assets: a, debts: d))
         }
         m.candidates = out
         return m
@@ -998,7 +1015,8 @@ private struct NetWorthLargeEntryView: View {
     }
 
     private var model: NetWorthLargeModel {
-        NetWorthLargeModel.make(base: NetWorthWidgetModel.make(entry: entry), hidden: entry.hidesAmounts)
+        NetWorthLargeModel.make(base: NetWorthWidgetModel.make(entry: entry), history: entry.netWorth?.history,
+                                hidden: entry.hidesAmounts)
     }
 
     var body: some View {
@@ -1039,7 +1057,7 @@ private struct NetWorthLargeView: View {
     }
 }
 
-/// 標題 → 大字＋膠囊 → 那一句 → 色帶 → 兩欄 → Spacer → 頁腳。每一塊固定高度（NetWorthLargeLayout.height 算的就是這一欄）
+/// 標題 → 大字＋膠囊 → 那一句 → 色帶 → 兩欄 →（[v25.637] 走勢）→ Spacer → 頁腳。每一塊固定高度（NetWorthLargeLayout.height 算的就是這一欄）
 private struct NetWorthLargeColumn: View {
     let model: NetWorthLargeModel
     let candidate: NetWorthLargeCandidate
@@ -1052,10 +1070,19 @@ private struct NetWorthLargeColumn: View {
             NetWorthLargeLine(text: model.line, palette: palette)
             NetWorthLargeBands(model: model, palette: palette)
             NetWorthLargeColumns(model: model, candidate: candidate, palette: palette)
+            trend
             Spacer(minLength: 0)
             foot
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    /// [v25.637] 兩欄下面「近 12 個月」（候選說要畫才畫；高度 NetWorthTrendLayout.trendHeight）
+    @ViewBuilder
+    private var trend: some View {
+        if candidate.showsTrend {
+            NetWorthLargeTrend(heights: model.trend, start: model.trendStart, end: model.trendEnd, palette: palette)
+        }
     }
 
     @ViewBuilder
@@ -1316,4 +1343,68 @@ private struct NetWorthLargeFoot: View {
                 .minimumScaleFactor(0.8)
         }
     }
+}
+
+// MARK: 大型：近 12 個月走勢（v25.637 large3）
+//
+// 規格見 scratchpad/radar/build/large3/brief.md §0 C2、§2 G2；示意圖 scratchpad/largewidgets/networth.html 下半。
+// 上面空 10 → 區標「近 12 個月」→ 折線（LargeWidgetTrendLine：全彩淡填色＋藍線、著色只有 ink 線）→ 頭尾兩個月份。
+// 不標金額軸、不上紅綠（不用漲跌那幾個色：up／down／change）；history 本來就沒有金額，隱藏金額照畫形狀。
+
+/// 區標＋折線＋頭尾月份（整塊 NetWorthTrendLayout.trendHeight）
+private struct NetWorthLargeTrend: View {
+    let heights: [Double]
+    let start: String
+    let end: String
+    let palette: WidgetPalette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            LargeWidgetSectionLabel(title: "近 12 個月", height: NetWorthTrendLayout.trendLabelHeight,
+                                    palette: palette, bottomGap: 2)
+            LargeWidgetTrendLine(heights: heights, palette: palette)
+                .frame(height: NetWorthTrendLayout.trendChartHeight)
+            NetWorthLargeTrendMonths(start: start, end: end, palette: palette)
+        }
+        .padding(.top, NetWorthTrendLayout.trendTopGap)
+        .frame(height: NetWorthTrendLayout.trendHeight, alignment: .top)
+    }
+}
+
+/// 頭尾兩個月份「去年 12 月」…「11 月」（App 寫好的字）
+private struct NetWorthLargeTrendMonths: View {
+    let start: String
+    let end: String
+    let palette: WidgetPalette
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(start)
+            Spacer(minLength: 4)
+            Text(end)
+        }
+        .font(.system(size: 9.5, weight: .semibold))
+        .foregroundStyle(palette.label)
+        .lineLimit(1)
+        .frame(maxWidth: .infinity, minHeight: NetWorthTrendLayout.trendMonthsHeight,
+               maxHeight: NetWorthTrendLayout.trendMonthsHeight, alignment: .bottom)
+    }
+}
+
+/// 小工具庫預覽的走勢（寫死的展示字；中小型不讀 history，預覽不變）
+enum NetWorthLargeSample {
+    static let history: [WidgetNetWorthPoint] = [
+        WidgetNetWorthPoint(monthKey: "sample-0", monthText: "一年前", height: 0.0),
+        WidgetNetWorthPoint(monthKey: "sample-1", monthText: "", height: 0.08),
+        WidgetNetWorthPoint(monthKey: "sample-2", monthText: "", height: 0.05),
+        WidgetNetWorthPoint(monthKey: "sample-3", monthText: "", height: 0.18),
+        WidgetNetWorthPoint(monthKey: "sample-4", monthText: "", height: 0.22),
+        WidgetNetWorthPoint(monthKey: "sample-5", monthText: "", height: 0.2),
+        WidgetNetWorthPoint(monthKey: "sample-6", monthText: "", height: 0.35),
+        WidgetNetWorthPoint(monthKey: "sample-7", monthText: "", height: 0.42),
+        WidgetNetWorthPoint(monthKey: "sample-8", monthText: "", height: 0.38),
+        WidgetNetWorthPoint(monthKey: "sample-9", monthText: "", height: 0.6),
+        WidgetNetWorthPoint(monthKey: "sample-10", monthText: "", height: 0.72),
+        WidgetNetWorthPoint(monthKey: "sample-11", monthText: "這個月", height: 1.0)
+    ]
 }

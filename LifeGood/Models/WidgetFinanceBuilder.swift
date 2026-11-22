@@ -36,15 +36,16 @@ enum WidgetFinanceBuilder {
     private static let otherLoanBottom: UInt32 = 0x7A869E
 
     /// 理財四個小工具的快照。只讀不寫：不呼叫 FinanceOverviewData.build、不呼叫 FinanceHistory.record
+    /// [large3 v25.637] wealthRevision：LifeStore.wealthRevision（淨資產走勢的快取鑰匙之一；不知道 -1）
     static func snapshot(expense: ExpenseStore, finance: FinanceStore, now: Date,
-                         calendar cal: Calendar = .current) -> WidgetFinanceSnapshot {
+                         calendar cal: Calendar = .current, wealthRevision: Int = -1) -> WidgetFinanceSnapshot {
         let index = FinanceLoanIndex(finance: finance, expense: expense, now: now)
         let rates = FinanceRates(expense)
         let stocks = stocksBlock(finance: finance, now: now, calendar: cal)
         let rateBlock = ratesBlock(expense: expense)
         let cars = vehicles(expense: expense, finance: finance, index: index, now: now, calendar: cal)
         let worth = netWorth(expense: expense, finance: finance, rates: rates, index: index,
-                             now: now, calendar: cal)
+                             now: now, calendar: cal, wealthRevision: wealthRevision)
         return WidgetFinanceSnapshot(generatedAt: now,
                                      dataDay: WidgetDateText.dayKey(now),
                                      stocks: stocks,
@@ -395,7 +396,8 @@ enum WidgetFinanceBuilder {
     /// 理財總覽頭部同一套：FinanceSnapshot.current＋FinanceHistory.series(months: 2)（只讀，不 record）。
     /// 沒有任何資產、也沒有貸款 nil
     private static func netWorth(expense: ExpenseStore, finance: FinanceStore, rates: FinanceRates,
-                                 index: FinanceLoanIndex, now: Date, calendar cal: Calendar) -> WidgetNetWorth? {
+                                 index: FinanceLoanIndex, now: Date, calendar cal: Calendar,
+                                 wealthRevision: Int) -> WidgetNetWorth? {
         let s = FinanceSnapshot.current(finance: finance, expense: expense, rates: rates, now: now, index: index)
         guard s.assets > 0 || s.debt > 0 else { return nil }
         // 上個月：有存下來的用存的、沒有的 App 自己回推（同 FinanceOverviewData.build 的 :74-76）
@@ -409,7 +411,7 @@ enum WidgetFinanceBuilder {
         let assets = assetParts(s)
         let debts = debtParts(s)
         let scale = max(s.assets, s.debt, 1)
-        return WidgetNetWorth(monthKey: WidgetDateText.monthKey(now),
+        var worth = WidgetNetWorth(monthKey: WidgetDateText.monthKey(now),
                               monthText: "\(month) 月",
                               netWorthText: MoneyFormat.short(finite(s.netWorth)),
                               isNegative: s.netWorth < 0,
@@ -424,6 +426,12 @@ enum WidgetFinanceBuilder {
                               debtsBar: clamp01(s.debt / scale),
                               summaryText: assets.isEmpty ? "\(month) 月" : "資產 \(assets.count) 類・\(month) 月",
                               stockPriceAt: stockPriceAt(finance))
+        // [large3 v25.637] 淨資產（大）⑥ 近 12 個月：FinanceHistory.series(months: 12) 只讀（WidgetLargeExtras；不呼叫
+        // FinanceChartBoardData.build、不 record），這個月那一點＝上面的 s
+        worth.history = WidgetLargeExtras.netWorthHistory(finance: finance, expense: expense, rates: rates, index: index,
+                                                          current: s, now: now, wealthRevision: wealthRevision,
+                                                          calendar: cal)
+        return worth
     }
 
     /// 「比上月 ↑1.8%」「比上月 ↓0.6%」「比上月 持平」：照 FinanceOverviewBoard.changeCapsule 逐字

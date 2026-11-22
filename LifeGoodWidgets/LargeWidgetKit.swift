@@ -975,3 +975,325 @@ enum LedgerDeskLargeLayout {
         }
     }
 }
+
+// MARK: - [v25.637 large3] 第三版共用：還能花（大）、淨資產（大）走勢、記帳台（大）今天記的
+//
+// 規格見 scratchpad/radar/build/large3/brief.md（主控定案）；judge_largewidgets.md §C 第三版。
+// **上面第一版、第二版的部分一個字都不改**（keycheck_large3 檢查 3f3d329 的這個檔是現在這個檔的開頭）。
+// 總設計先做好，G1（還能花）、G2（淨資產）、G3（記帳台）只呼叫、不改。sim_large3.py 一個函式一個函式對照。
+//
+// 這一段提供：
+//   • MoneyLeftLargeLayout        還能花・大的高度與「畫不畫近 7 天、花在哪放幾列」
+//   • NetWorthTrendLayout         淨資產・大加走勢之後「兩欄各放幾類、列高、畫不畫走勢」（不畫走勢＝第二版的 NetWorthLargeLayout）
+//   • LedgerDeskTodayLayout       記帳台・大加「今天記的」之後「卡片多高、畫不畫頁腳、今天記的放幾筆」（0 筆＝第二版）
+//   • LargeWidgetTrendMath／LargeWidgetTrendShape／LargeWidgetTrendArea／LargeWidgetTrendLine
+//                                 走勢折線（Shape 的 path(in:)；不用 Charts、Canvas、GeometryReader）
+//   • LargeWidgetWeekBarMath      近 7 天柱子多高（比例 → pt）
+
+// MARK: 還能花（大）的高度
+
+/// ①「11/20 週五」→「本月還能花」→ 大字＋「每天 NT$2,402」（右上 ⊕ 疊在日期那兩行右邊）→ ② 橫條 →「已花 62%・還有 11 天」
+/// → ③「近 7 天」區標（右邊「7 天 NT$9,860」）＋7 根柱子＋星期字 → ④「花在哪」區標＋最多 5 列。
+/// 放不下照順序砍：④ 5 列 → 4 列 → 3 列 → 只有 ③ → 只有 ①②（字級不變）
+enum MoneyLeftLargeLayout {
+    /// 「11/20 週五」
+    static let captionHeight: CGFloat = 16
+    /// 「本月還能花」
+    static let titleHeight: CGFloat = 18
+    /// 大字 30pt＋「每天 NT$2,402」
+    static let heroHeight: CGFloat = 38
+    /// 橫條：上面空 8＋條 10
+    static let barHeight: CGFloat = 18
+    static let barTrackHeight: CGFloat = 10
+    /// 「已花 62%・還有 11 天」：上面空 4＋一行 14
+    static let progressHeight: CGFloat = 18
+    /// 右上 ⊕（疊在日期、小標右邊，不佔版面）
+    static let addButtonSize: CGFloat = 36
+    /// ③ 區標（上面空 10＋字 14）
+    static let weekLabelHeight: CGFloat = 24
+    /// 柱子那一塊（最高的柱子＝這麼高；有花錢的柱子至少 barMinHeight；0 畫一條 2pt 的底）
+    static let weekBarsHeight: CGFloat = 40
+    static let weekBarSpacing: CGFloat = 6
+    static let weekBarMinHeight: CGFloat = 4
+    static let weekBarZeroHeight: CGFloat = 2
+    /// 星期字（上面空 3＋字 12）
+    static let weekdayHeight: CGFloat = 15
+    /// ④ 區標（上面空 10＋字 14）＋每列
+    static let categoryLabelHeight: CGFloat = 24
+    static let categoryRowHeight: CGFloat = 22
+    static let maxCategoryRows = 5
+    /// 依序試的「花在哪」列數
+    static let categoryLimits: [Int] = [5, 4, 3]
+
+    struct Plan: Equatable {
+        /// 畫不畫 ③ 近 7 天
+        let showsWeek: Bool
+        /// ④ 放幾列（0＝整塊不畫，連區標）
+        let categoryRows: Int
+    }
+
+    /// ①② 一塊多高
+    static var headHeight: CGFloat {
+        captionHeight + titleHeight + heroHeight + barHeight + progressHeight
+    }
+
+    /// ③ 一塊多高
+    static var weekHeight: CGFloat {
+        weekLabelHeight + weekBarsHeight + weekdayHeight
+    }
+
+    /// ④ n 列一塊多高（0 列 0）
+    static func categoryHeight(rows n: Int) -> CGFloat {
+        guard n > 0 else { return 0 }
+        return categoryLabelHeight + CGFloat(n) * categoryRowHeight
+    }
+
+    static func height(_ plan: Plan) -> CGFloat {
+        let week: CGFloat = plan.showsWeek ? weekHeight : 0
+        return headHeight + week + categoryHeight(rows: plan.categoryRows)
+    }
+
+    /// hasWeek：快照有這一天的近 7 天；categoryCount：這個月「花在哪」幾列（舊快照、跨月 0）
+    static func plan(available: CGFloat, hasWeek: Bool, categoryCount: Int) -> Plan {
+        let count: Int = min(maxCategoryRows, max(0, categoryCount))
+        if count > 0 {
+            for limit in categoryLimits {
+                let p = Plan(showsWeek: hasWeek, categoryRows: min(limit, count))
+                if LargeWidgetFit.fits(height(p), in: available) { return p }
+            }
+        }
+        let weekOnly = Plan(showsWeek: hasWeek, categoryRows: 0)
+        if hasWeek, LargeWidgetFit.fits(height(weekOnly), in: available) { return weekOnly }
+        return Plan(showsWeek: false, categoryRows: 0)
+    }
+
+    static func candidates(hasWeek: Bool, categoryCount: Int) -> [Plan] {
+        LargeWidgetFit.candidates { (h: CGFloat) -> Plan in
+            plan(available: h, hasWeek: hasWeek, categoryCount: categoryCount)
+        }
+    }
+}
+
+/// 近 7 天柱子多高：比例 0…1 → pt。有花錢（> 0）至少 weekBarMinHeight；0 畫 weekBarZeroHeight 的底（看得出那天沒花）
+enum LargeWidgetWeekBarMath {
+    static func barHeight(_ fraction: Double) -> CGFloat {
+        let f: Double = fraction.isFinite ? min(1, max(0, fraction)) : 0
+        guard f > 0 else { return MoneyLeftLargeLayout.weekBarZeroHeight }
+        let h: CGFloat = MoneyLeftLargeLayout.weekBarsHeight * CGFloat(f)
+        return max(MoneyLeftLargeLayout.weekBarMinHeight, h)
+    }
+}
+
+// MARK: 淨資產（大）加走勢的高度
+
+/// 第二版那一欄（標題 → 大字 → 那一句 → 色帶 → 兩欄 → 頁腳），兩欄和頁腳中間多一塊「近 12 個月」：
+/// 上面空 10＋區標 14＋折線 28＋頭尾月份 12。走勢只在兩欄至少放得下 (4／3) 類時才畫（類別比走勢重要），
+/// 放不下就退回第二版（NetWorthLargeLayout.plan，不畫走勢）
+enum NetWorthTrendLayout {
+    static let trendTopGap: CGFloat = 10
+    static let trendLabelHeight: CGFloat = 14
+    static let trendChartHeight: CGFloat = 28
+    static let trendMonthsHeight: CGFloat = 12
+    /// 折線上下左右留的空（線的粗細＋最後一點的圓點）
+    static let trendInset: CGFloat = 3
+    static let trendLineWidth: CGFloat = 2
+    static let trendDotSize: CGFloat = 5
+    /// 有走勢時依序試的類別上限（資產、貸款）；每一組先試高的列再試矮的
+    static let assetLimits: [Int] = [6, 5, 4]
+    static let debtLimits: [Int] = [4, 3, 3]
+
+    struct Plan: Equatable {
+        let base: NetWorthLargeLayout.Plan
+        let showsTrend: Bool
+    }
+
+    static var trendHeight: CGFloat {
+        trendTopGap + trendLabelHeight + trendChartHeight + trendMonthsHeight
+    }
+
+    static func height(_ plan: Plan, hasDebtBand: Bool, hasFoot: Bool) -> CGFloat {
+        let base: CGFloat = NetWorthLargeLayout.height(plan.base, hasDebtBand: hasDebtBand, hasFoot: hasFoot)
+        return plan.showsTrend ? base + trendHeight : base
+    }
+
+    /// hasTrend：快照有走勢（至少 2 點）
+    static func plan(available: CGFloat, assetCount: Int, debtCount: Int, hasFoot: Bool, hasTrend: Bool) -> Plan {
+        let a0: Int = max(0, assetCount)
+        let d0: Int = max(0, debtCount)
+        let hasDebtBand: Bool = d0 > 0
+        if hasTrend {
+            let heights: [CGFloat] = [NetWorthLargeLayout.tallRowHeight, NetWorthLargeLayout.rowHeight]
+            for i in 0..<assetLimits.count {
+                let a: Int = min(assetLimits[i], a0)
+                let d: Int = min(debtLimits[i], d0)
+                for rh in heights {
+                    let p = Plan(base: NetWorthLargeLayout.Plan(assetRows: a, debtRows: d, rowHeight: rh), showsTrend: true)
+                    if LargeWidgetFit.fits(height(p, hasDebtBand: hasDebtBand, hasFoot: hasFoot), in: available) {
+                        return p
+                    }
+                }
+            }
+        }
+        let base = NetWorthLargeLayout.plan(available: available, assetCount: a0, debtCount: d0, hasFoot: hasFoot)
+        return Plan(base: base, showsTrend: false)
+    }
+
+    static func candidates(assetCount: Int, debtCount: Int, hasFoot: Bool, hasTrend: Bool) -> [Plan] {
+        LargeWidgetFit.candidates { (h: CGFloat) -> Plan in
+            plan(available: h, assetCount: assetCount, debtCount: debtCount, hasFoot: hasFoot, hasTrend: hasTrend)
+        }
+    }
+}
+
+// MARK: 走勢折線
+
+enum LargeWidgetTrendMath {
+    /// 每一點在 width×height 裡的位置：x 從 inset 到 width − inset 平均分（只有 1 點放正中間），
+    /// 高度 1 在最上面（y＝inset）、0 在最下面（y＝height − inset）。不是有限數當 0；寬或高 ≤ 0 回空陣列
+    static func points(heights: [Double], width: CGFloat, height: CGFloat, inset: CGFloat) -> [CGPoint] {
+        let n: Int = heights.count
+        guard n > 0, width > 0, height > 0 else { return [] }
+        let usableW: CGFloat = max(0, width - inset * 2)
+        let usableH: CGFloat = max(0, height - inset * 2)
+        var out: [CGPoint] = []
+        for (i, h) in heights.enumerated() {
+            let f: Double = h.isFinite ? min(1, max(0, h)) : 0
+            let x: CGFloat = n == 1 ? width / 2 : inset + usableW * CGFloat(i) / CGFloat(n - 1)
+            let y: CGFloat = inset + usableH * CGFloat(1 - f)
+            out.append(CGPoint(x: x, y: y))
+        }
+        return out
+    }
+}
+
+/// 折線（只有線）
+struct LargeWidgetTrendShape: Shape {
+    let heights: [Double]
+    var inset: CGFloat = NetWorthTrendLayout.trendInset
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let pts: [CGPoint] = LargeWidgetTrendMath.points(heights: heights, width: rect.width, height: rect.height,
+                                                          inset: inset)
+        guard let first = pts.first else { return path }
+        path.move(to: CGPoint(x: rect.minX + first.x, y: rect.minY + first.y))
+        for p in pts.dropFirst() {
+            path.addLine(to: CGPoint(x: rect.minX + p.x, y: rect.minY + p.y))
+        }
+        return path
+    }
+}
+
+/// 折線下面那一塊（收到底邊；全彩模式淡淡填色用）
+struct LargeWidgetTrendArea: Shape {
+    let heights: [Double]
+    var inset: CGFloat = NetWorthTrendLayout.trendInset
+
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        let pts: [CGPoint] = LargeWidgetTrendMath.points(heights: heights, width: rect.width, height: rect.height,
+                                                          inset: inset)
+        guard let first = pts.first, let last = pts.last, pts.count >= 2 else { return path }
+        path.move(to: CGPoint(x: rect.minX + first.x, y: rect.maxY))
+        for p in pts {
+            path.addLine(to: CGPoint(x: rect.minX + p.x, y: rect.minY + p.y))
+        }
+        path.addLine(to: CGPoint(x: rect.minX + last.x, y: rect.maxY))
+        path.closeSubpath()
+        return path
+    }
+}
+
+/// 走勢：全彩＝淡填色＋藍線；著色模式＝只有線（ink＋重點色）。不標金額軸。外面給高度（trendChartHeight）
+struct LargeWidgetTrendLine: View {
+    let heights: [Double]
+    let palette: WidgetPalette
+
+    private var lineColor: Color {
+        palette.isMono ? palette.ink : palette.variableTop
+    }
+
+    private var fill: LinearGradient {
+        LinearGradient(colors: [palette.variableTop.opacity(0.30), palette.variableTop.opacity(0)],
+                       startPoint: .top, endPoint: .bottom)
+    }
+
+    private var lineStyle: StrokeStyle {
+        StrokeStyle(lineWidth: NetWorthTrendLayout.trendLineWidth, lineCap: .round, lineJoin: .round)
+    }
+
+    var body: some View {
+        ZStack {
+            area
+            LargeWidgetTrendShape(heights: heights)
+                .stroke(lineColor, style: lineStyle)
+                .widgetAccentable()
+        }
+    }
+
+    @ViewBuilder
+    private var area: some View {
+        if !palette.isMono {
+            LargeWidgetTrendArea(heights: heights)
+                .fill(fill)
+        }
+    }
+}
+
+// MARK: 記帳台（大）加「今天記的」的高度
+
+/// 第二版那一欄（整寬還能花 → 2×2 卡片）下面多一塊「今天記的」：區標 20（上面空 8＋字 12）＋每筆 17。
+/// 依序試：筆數 4 → 3 → 2 → 1；同一個筆數先試帶頁腳、再不帶；卡片 76 → 68 → 60。都放不下＝第二版（0 筆）
+enum LedgerDeskTodayLayout {
+    static let sectionHeight: CGFloat = 20
+    static let rowHeight: CGFloat = 17
+    static let maxRows = 4
+    static let rowLimits: [Int] = [4, 3, 2, 1]
+
+    struct Plan: Equatable {
+        let tileHeight: CGFloat
+        let showsFooter: Bool
+        /// 今天記的放幾筆（0＝整塊不畫，連區標；版面同第二版）
+        let todayRows: Int
+    }
+
+    static func todayHeight(rows n: Int) -> CGFloat {
+        guard n > 0 else { return 0 }
+        return sectionHeight + CGFloat(n) * rowHeight
+    }
+
+    static func height(_ plan: Plan, tileCount: Int) -> CGFloat {
+        let base = LedgerDeskLargeLayout.Plan(tileHeight: plan.tileHeight, showsFooter: plan.showsFooter)
+        return LedgerDeskLargeLayout.height(base, tileCount: tileCount) + todayHeight(rows: plan.todayRows)
+    }
+
+    /// entryCount：快照有幾筆今天記的（舊快照、過了午夜 0）
+    static func plan(available: CGFloat, tileCount: Int, hasFooter: Bool, entryCount: Int) -> Plan {
+        let count: Int = min(maxRows, max(0, entryCount))
+        let tiles: [CGFloat] = [LedgerDeskLargeLayout.tallTileHeight, LedgerDeskLargeLayout.tileHeight,
+                                LedgerDeskLargeLayout.compactTileHeight]
+        let footers: [Bool] = hasFooter ? [true, false] : [false]
+        if count > 0 {
+            var tried: [Int] = []
+            for limit in rowLimits {
+                let rows: Int = min(limit, count)
+                if tried.contains(rows) { continue }
+                tried.append(rows)
+                for footer in footers {
+                    for t in tiles {
+                        let p = Plan(tileHeight: t, showsFooter: footer, todayRows: rows)
+                        if LargeWidgetFit.fits(height(p, tileCount: tileCount), in: available) { return p }
+                    }
+                }
+            }
+        }
+        let base = LedgerDeskLargeLayout.plan(available: available, tileCount: tileCount, hasFooter: hasFooter)
+        return Plan(tileHeight: base.tileHeight, showsFooter: base.showsFooter, todayRows: 0)
+    }
+
+    static func candidates(tileCount: Int, hasFooter: Bool, entryCount: Int) -> [Plan] {
+        LargeWidgetFit.candidates { (h: CGFloat) -> Plan in
+            plan(available: h, tileCount: tileCount, hasFooter: hasFooter, entryCount: entryCount)
+        }
+    }
+}

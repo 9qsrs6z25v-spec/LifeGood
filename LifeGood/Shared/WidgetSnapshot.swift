@@ -405,6 +405,22 @@ struct WidgetMoneySnapshot: Codable, Equatable, WidgetSnapshotPayload {
     ///（VehicleVariableCategory.categories(for: powerType) 的順序）。記帳台按鈕、控制項「記到…」的選單。
     /// 沒有車是空陣列；nil＝v2 以前的舊檔（選單只有分類）
     var vehicleOptions: [WidgetVehicleOption]? = nil
+
+    // MARK: [large3 v25.637] 大方塊第三版：以下也是選填（舊快照沒有＝那一塊不畫）
+    // 放在**頂層**、不放進 WidgetMoneyDay：手錶包（WatchPackageBuilder.watchMoney）一欄一欄抄 WidgetMoneyDay，
+    // 頂層這三欄不會流上手錶。App 在既有的 money 防抖 3 秒裡算（WidgetSnapshotWriter.moneySnapshot →
+    // LifeGood/Models/WidgetLargeExtras.swift），字要穩定（同樣的帳寫出同樣的字，比對才不會每次都不一樣）。
+    // 合成的 Codable 對 Optional 用 decodeIfPresent：舊檔沒有這三欄照樣解得開。
+
+    /// 還能花（大）④「花在哪」：這個月（dataDay 那個月）的變動支出照分類分（照 App 變動支出看板「市集」的分法：
+    /// 大到小，「其他」固定最後；有「其他」時前 4 類＋其他、沒有時最多 5 類）。金額一律 ownAmount（分帳那頓只算自己那份）。
+    /// 這個月還沒花錢是空陣列
+    var monthCategories: [WidgetMoneyCategoryShare]? = nil
+    /// 還能花（大）③「近 7 天」：今天、明天、後天各一份（最後一根＝那一天）。過了後天（App 兩天沒開）就沒有那一份，③ 不畫
+    var recentDays: [WidgetMoneyRecentWeek]? = nil
+    /// 記帳台（大）「今天記的」：dataDay 那一天的變動支出，最新的在前，最多 4 筆。只有時間、分類、金額，
+    /// **沒有名稱、備註、店名、地點、同行人員**
+    var todayEntries: [WidgetMoneyTodayEntry]? = nil
 }
 
 extension WidgetMoneySnapshot {
@@ -2191,6 +2207,10 @@ struct WidgetNetWorth: Codable, Equatable {
     var summaryText: String
     /// 淨資產裡股票用的是幾點的價（持有中股票的 AppQuoteClock 最新那一筆）；沒有股票或不知道 nil
     var stockPriceAt: Date?
+    /// [large3 v25.637] 淨資產（大）⑥「近 12 個月」：每月一點、舊到新（最後一點＝這個月），只有月份字與 0…1 高度，
+    /// **不放金額**。App 用 FinanceHistory.series(months: 12) 只讀算（不呼叫 FinanceChartBoardData.build），
+    /// 前面還什麼都沒有的月份不畫（同 App 的圖表頁）；不到 2 點是 nil。舊快照沒有＝不畫走勢
+    var history: [WidgetNetWorthPoint]? = nil
 
     /// 快照的月份就是現在這個月（跨月了就不寫「比上月」，改寫 WidgetDateText.figuresOf(generatedAt)）
     func isCurrentMonth(at now: Date) -> Bool {
@@ -2524,5 +2544,97 @@ enum WidgetSnapshotStore {
                                                                    negativeInfinity: "-inf",
                                                                    nan: "nan")
         return d
+    }
+}
+
+// MARK: - [large3 v25.637] 大方塊第三版：還能花（大）、記帳台（大）今天記的、淨資產（大）走勢
+//
+// 規格：scratchpad/radar/judge_largewidgets.md §C 第三版、scratchpad/radar/build/large3/brief.md。
+// 全部是 App 算好、組好的字與 0…1 的比例；小工具只挑、不算錢、不拼「NT$」。
+// 這幾個型別手錶 target 也編得到（同一個檔），但手錶包不帶（WatchPackageBuilder 一欄一欄抄，沒抄這幾欄）。
+
+/// 「花在哪」的一列（一個分類，或併起來的「其他」）
+struct WidgetMoneyCategoryShare: Codable, Equatable, Identifiable {
+    /// VariableCategory.rawValue（「飲食」）；併起來的那一列也是「其他」。小工具用 WidgetMoneySnapshot.category(forKey:) 找圖示與顏色
+    var key: String
+    /// 「NT$1萬」（MoneyFormat.short）；隱藏金額時小工具不畫這一欄
+    var amountText: String
+    /// 占這個月變動支出的比例 0…1（小數三位，占比條用）
+    var share: Double
+    /// 「38%」（MoneyFormat.percent）
+    var shareText: String
+    /// 幾筆
+    var count: Int
+
+    var id: String { key }
+}
+
+/// 「近 7 天」的一根柱子
+struct WidgetMoneyRecentBar: Codable, Equatable, Identifiable {
+    /// 那一天「2026-11-20」（WidgetDateText.dayKey）
+    var dayKey: String
+    /// 星期「四」（日一二三四五六）
+    var weekday: String
+    /// 0…1：7 天裡花最多的那一天＝1；7 天都沒花＝全部 0（小數三位）
+    var height: Double
+
+    var id: String { dayKey }
+}
+
+/// 某一天看的「近 7 天」：7 根柱子（舊到新，最後一根＝那一天）、右上的合計
+struct WidgetMoneyRecentWeek: Codable, Equatable, Identifiable {
+    /// 這一份是哪一天看的（＝最後一根的 dayKey）
+    var dayKey: String
+    var bars: [WidgetMoneyRecentBar]
+    /// 「7 天 NT$9,860」
+    var totalText: String
+    /// 隱藏金額版「7 天 NT$ ••••」
+    var totalTextMasked: String
+
+    var id: String { dayKey }
+}
+
+/// 「今天記的」一筆（只有時間、分類、金額）
+struct WidgetMoneyTodayEntry: Codable, Equatable, Identifiable {
+    /// 那筆支出的 id（UUID 字串；ForEach 用）
+    var id: String
+    /// 「12:10」
+    var timeText: String
+    /// VariableCategory.rawValue；沒有分類的寫「其他」
+    var categoryKey: String
+    /// 跟 App 列表卡片的大字同一個規則（刷卡金額：「NT$180」；外幣「JPY 1,200」）
+    var amountText: String
+    /// 隱藏金額版「NT$ ••••」
+    var amountTextMasked: String
+}
+
+/// 淨資產走勢的一點（一個月）
+struct WidgetNetWorthPoint: Codable, Equatable, Identifiable {
+    /// 「2026-11」（WidgetDateText.monthKey）
+    var monthKey: String
+    /// 「11 月」；去年的「去年 12 月」；更早「2024/12」
+    var monthText: String
+    /// 0…1：12 個月裡最低＝0、最高＝1；全部一樣＝0.5（小數三位）
+    var height: Double
+
+    var id: String { monthKey }
+}
+
+extension WidgetMoneySnapshot {
+    /// [large3] 還能花（大）③：dayKey 那一天看的近 7 天；舊快照、App 超過兩天沒開（沒有那一天）nil
+    func recentWeek(dayKey: String) -> WidgetMoneyRecentWeek? {
+        recentDays?.first { $0.dayKey == dayKey }
+    }
+
+    /// [large3] 還能花（大）④：dayKey 跟 dataDay 同一個月才給（跨月、App 還沒開 → nil，不拿上個月的分類當這個月）
+    func monthCategoryRows(dayKey: String) -> [WidgetMoneyCategoryShare]? {
+        guard let rows = monthCategories, dayKey.prefix(7) == dataDay.prefix(7) else { return nil }
+        return rows
+    }
+
+    /// [large3] 記帳台（大）「今天記的」：dayKey 就是 dataDay 才給（過了午夜、App 還沒開 → nil，不把昨天的當今天）
+    func todayEntryRows(dayKey: String) -> [WidgetMoneyTodayEntry]? {
+        guard let rows = todayEntries, dayKey == dataDay else { return nil }
+        return rows
     }
 }

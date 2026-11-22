@@ -59,6 +59,7 @@
 		A01B000002000087 /* NetWorthWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000087 /* NetWorthWidget.swift */; };
 		A01B000002000088 /* WidgetQuoteStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000088 /* WidgetQuoteStore.swift */; };
 		A01B000001001547 /* WidgetFinanceBuilder.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001547 /* WidgetFinanceBuilder.swift */; };
+		A01B000001001690 /* WidgetLargeExtras.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001690 /* WidgetLargeExtras.swift */; };
 		A01B000002000089 /* DayTimelineToggleIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000089 /* DayTimelineToggleIntent.swift */; };
 		A01B000002000099 /* DayTimelineToggleIntent.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000089 /* DayTimelineToggleIntent.swift */; };
 		A01B000002000090 /* TeamWidget.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000090 /* TeamWidget.swift */; };
@@ -805,6 +806,7 @@
 		A01A000002000087 /* NetWorthWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = NetWorthWidget.swift; sourceTree = "<group>"; };
 		A01A000002000088 /* WidgetQuoteStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetQuoteStore.swift; sourceTree = "<group>"; };
 		A01A000001001547 /* WidgetFinanceBuilder.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetFinanceBuilder.swift; sourceTree = "<group>"; };
+		A01A000001001690 /* WidgetLargeExtras.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = WidgetLargeExtras.swift; sourceTree = "<group>"; };
 		A01A000002000089 /* DayTimelineToggleIntent.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DayTimelineToggleIntent.swift; sourceTree = "<group>"; };
 		A01A000002000090 /* TeamWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamWidget.swift; sourceTree = "<group>"; };
 		A01A000001001548 /* TeamDay.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = TeamDay.swift; sourceTree = "<group>"; };
@@ -1146,6 +1148,7 @@
 				A01A000001001668 /* UtilityHighNotice.swift */,
 				A01A000001001669 /* UtilityHighNoticeCenter.swift */,
 				A01A000001001547 /* WidgetFinanceBuilder.swift */,
+				A01A000001001690 /* WidgetLargeExtras.swift */,
 				A01A000001001548 /* TeamDay.swift */,
 				A01A000001001549 /* WidgetLifeExtras.swift */,
 				A01A000001001550 /* WorkoutFacts.swift */,
@@ -1893,6 +1896,7 @@
 				A01B000002000092 /* WidgetQuoteService.swift in Sources */,
 				A01B000002000093 /* WidgetMoneyFormat.swift in Sources */,
 				A01B000001001547 /* WidgetFinanceBuilder.swift in Sources */,
+				A01B000001001690 /* WidgetLargeExtras.swift in Sources */,
 				A01B000002000099 /* DayTimelineToggleIntent.swift in Sources */,
 				A01B000001001548 /* TeamDay.swift in Sources */,
 				A01B000001001549 /* WidgetLifeExtras.swift in Sources */,
