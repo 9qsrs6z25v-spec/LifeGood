@@ -147,6 +147,8 @@ struct PeoplePickerSheet: View {
                 selection.remove(name)
             }
         } else {
+            // [v25.635] 名單裡不合格的名字（有「、」逗號分號換行、超過 20 字）不能勾（列本身也灰掉）；不幫使用者改名
+            guard PersonLedger.canPick(name) else { return }
             selection.insert(name)
         }
     }
@@ -188,7 +190,7 @@ struct PeoplePickerSheet: View {
                     Section("已選（\(selection.count)）") {
                         ForEach(selection.sorted(), id: \.self) { name in
                             PeoplePickerRow(title: name, detail: "", picked: true, locked: isLocked(name),
-                                            onToggle: { toggle(name) })
+                                            blocked: !PersonLedger.canPick(name), onToggle: { toggle(name) })
                         }
                     }
                 }
@@ -201,7 +203,7 @@ struct PeoplePickerSheet: View {
             if showMe, let m = me {
                 Section {
                     PeoplePickerRow(title: ExpenseSplitText.meLabel(m), detail: "", picked: selection.contains(m),
-                                    locked: isLocked(m), onToggle: { toggle(m) })
+                                    locked: isLocked(m), blocked: !PersonLedger.canPick(m), onToggle: { toggle(m) })
                 }
             }
             if searching && shown.isEmpty && !showMe && adding == nil {
@@ -212,7 +214,8 @@ struct PeoplePickerSheet: View {
                 Section(g.title) {
                     ForEach(g.people) { c in
                         PeoplePickerRow(title: c.name, detail: c.detail, picked: selection.contains(c.name),
-                                        locked: isLocked(c.name), onToggle: { toggle(c.name) })
+                                        locked: isLocked(c.name), blocked: !PersonLedger.canPick(c.name),
+                                        onToggle: { toggle(c.name) })
                     }
                 }
             }
@@ -237,11 +240,13 @@ struct PeoplePickerSheet: View {
 // MARK: - 列（純值＋closure）
 
 /// 一個人一列（從 AddExpenseView 的 SocialRecipientRow 搬過來；多一個 locked：已還錢的人旁邊一個鎖）
+/// [v25.635] blocked：名字不合格（PersonLedger.canPick 不過）→ 沒勾的灰掉、不能點、下面一行小字；已經勾著的舊資料照舊可以點掉
 fileprivate struct PeoplePickerRow: View {
     let title: String
     let detail: String
     let picked: Bool
     let locked: Bool
+    let blocked: Bool
     let onToggle: () -> Void
 
     var body: some View {
@@ -253,8 +258,12 @@ fileprivate struct PeoplePickerRow: View {
                     .foregroundStyle(picked ? Color.green : Color.secondary)
                 VStack(alignment: .leading, spacing: 1) {
                     Text(title)
+                        .foregroundStyle(blocked && !picked ? Color.secondary : Color.primary)
                     if !detail.isEmpty {
                         Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                    if blocked {
+                        Text(PersonLedgerText.pickerBlockedNote).font(.caption).foregroundStyle(.secondary)
                     }
                 }
                 Spacer()
@@ -265,6 +274,7 @@ fileprivate struct PeoplePickerRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        .disabled(blocked && !picked)
     }
 }
 

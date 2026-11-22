@@ -1581,7 +1581,8 @@ struct BusinessCardDetailView: View {
                     if hasContact {
                         AnyView(contactCard)
                     }
-                    metaCard
+                    // [v25.635] 往來卡（聯絡方式下面、收集日期上面；沒有往來＝只剩 metaCard，版面跟 25.634 一樣）
+                    AnyView(BusinessCardLedgerSlot(card: card, below: AnyView(metaCard)))
                     if !card.note.isEmpty {
                         noteCard
                     }
@@ -3051,5 +3052,106 @@ struct BusinessCardDuplicateReview: View {
         let report = lifeStore.mergeBusinessCardDuplicates(selected)
         resultText = report.summaryText
         excluded = []
+    }
+}
+
+// MARK: - [v25.635] 名片往來那一格（peoplehub1 G2；judge_peoplehub §C3）
+
+/// .task(id:) 的 key：記帳／分帳一變（modifyID）、卡名、連到的組織圖人員名、本人名字改了才重算
+fileprivate struct BusinessCardLedgerKey: Equatable {
+    let modifyID: UUID
+    let name: String
+    let linkedName: String
+    let meName: String
+}
+
+/// 名片詳情頁「聯絡方式」下面：往來卡＋原本的「收集日期」（below）。只讀；唯一會寫的是〔已還〕（SplitRepaySheet 自己 dismiss 後下一輪寫）
+fileprivate struct BusinessCardLedgerSlot: View {
+    let card: BusinessCard
+    let below: AnyView
+
+    @EnvironmentObject var store: ExpenseStore
+    @EnvironmentObject var lifeStore: LifeStore
+
+    @State private var snapshot = PersonLedgerSnapshot()
+    @State private var repayTarget: SplitRepayTarget? = nil
+    @State private var openCard: FinanceCardTarget? = nil
+    @State private var doneText: String? = nil
+
+    init(card: BusinessCard, below: AnyView) {
+        self.card = card
+        self.below = below
+    }
+
+    private var linkedName: String {
+        guard let pid = card.linkedOrgPersonId else { return "" }
+        return lifeStore.orgPeople.first { p in p.id == pid }?.name ?? ""
+    }
+
+    private var meName: String {
+        lifeStore.profile.chineseName + "|" + lifeStore.profile.englishName
+    }
+
+    private var ledgerKey: BusinessCardLedgerKey {
+        BusinessCardLedgerKey(modifyID: store.modifyID, name: card.name, linkedName: linkedName, meName: meName)
+    }
+
+    var body: some View {
+        VStack(spacing: 16) {
+            if snapshot.shows {
+                AnyView(PersonLedgerCard(snapshot: snapshot, onOpenExpense: { id in open(id) },
+                                         onRepay: { eid, sid in repay(eid, sid) })
+                    .padding(.horizontal))
+            }
+            if let t = doneText {
+                BusinessCardLedgerDone(text: t)
+            }
+            below
+        }
+        .task(id: ledgerKey) { reload() }
+        .task(id: doneText) {
+            guard doneText != nil else { return }
+            try? await Task.sleep(nanoseconds: 2_500_000_000)
+            if Task.isCancelled { return }
+            doneText = nil
+        }
+        .sheet(item: $repayTarget) { t in
+            SplitRepaySheet(expenseId: t.expenseId, shareId: t.shareId, onDone: { msg in doneText = msg })
+                .appStores()
+        }
+        .sheet(item: $openCard) { t in
+            FinanceItemCard(target: t)
+                .appStores()
+        }
+    }
+
+    /// 只讀：記帳＋分帳＋名單 → @State（照 OwedListView.reload）
+    private func reload() {
+        snapshot = PersonLedger.cardSnapshot(card: card, life: lifeStore, expenses: store.expenses,
+                                             index: ExpenseSplitStore.shared.index)
+    }
+
+    /// 那筆還在才開（在記帳卡刪掉那頓：modifyID 跳 → 重算 → 那列不見）
+    private func open(_ id: UUID) {
+        guard store.expenses.contains(where: { e in e.id == id }) else { return }
+        openCard = .variableExpense(id)
+    }
+
+    private func repay(_ eid: UUID, _ sid: UUID) {
+        guard store.expenses.contains(where: { e in e.id == eid }) else { return }
+        repayTarget = SplitRepayTarget(expenseId: eid, shareId: sid)
+    }
+}
+
+/// 〔已還〕完成提示「記好了：國泰世華 ＋NT$375」（2.5 秒自己消失）
+fileprivate struct BusinessCardLedgerDone: View {
+    let text: String
+
+    var body: some View {
+        Text(text)
+            .font(.footnote.weight(.semibold))
+            .foregroundStyle(.green)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.horizontal)
     }
 }
