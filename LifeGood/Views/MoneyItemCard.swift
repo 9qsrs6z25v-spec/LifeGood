@@ -873,6 +873,11 @@ extension MoneyItem {
         if let m = e.diningMember?.moneyTrimmed, !m.isEmpty {
             chips.append(MoneyItemChip(icon: "person.2.fill", text: m))
         }
+        // [v25.634] 分帳膠囊：有人還沒還＝橘「2 人要還」、全部還清＝綠「已還清」、全部我請＝不加（不寫金額；index 查表）
+        if let sc = ExpenseSplitStore.shared.index.chip(e) {
+            chips.append(MoneyItemChip(icon: sc == .settled ? "checkmark.circle.fill" : "hourglass",
+                                       text: sc.text, tone: sc == .settled ? .good : .warn))
+        }
         if e.variableCategory == .social, let r = e.socialRecipient?.moneyTrimmed, !r.isEmpty {
             chips.append(MoneyItemChip(icon: "gift.fill", text: r))
         }

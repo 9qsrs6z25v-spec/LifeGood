@@ -52,6 +52,9 @@ struct VariableExpenseView: View {
     @State private var listRowsAppeared = false
     /// [v25.526] 最上面的看板（天空＋市集）。放在 .task(id: store.modifyID) 裡算
     @State private var board = VariableBoardData()
+    /// [v25.634] 誰還欠我入口（只有還沒還的總額大於 0 才出現）。跟看板一樣在 .task(id: store.modifyID) 裡算
+    @State private var owed = SplitOwedSummary()
+    @State private var owedSheet: SplitSheetToken? = nil
     @State private var debouncedSearchText: String = ""
     @State private var searchDebounceTask: Task<Void, Never>?
     @State private var cachedFilteredExpenses: [Expense] = []
@@ -134,6 +137,24 @@ struct VariableExpenseView: View {
                         .listRowInsets(EdgeInsets())
                         .listRowBackground(Color.clear)
                         .listRowSeparator(.hidden)
+                    // [v25.634] 有分帳的飯只算自己那份：這個月扣了多少（G4 在 VariableBoardData.build 算；沒扣＝nil 不顯示）
+                    if let note = board.splitNote {
+                        Text(note)
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(.horizontal, 20)
+                            .padding(.bottom, 6)
+                            .listRowInsets(EdgeInsets())
+                            .listRowBackground(Color.clear)
+                            .listRowSeparator(.hidden)
+                    }
+                }
+                // [v25.634] 誰還欠我（看板和分類中間；只有欠款時出現）
+                if owed.showsEntry {
+                    Section {
+                        OwedEntryRow(summary: owed, onTap: { owedSheet = SplitSheetToken() })
+                    }
                 }
                 Section {
                     categoryFilter
@@ -197,10 +218,8 @@ struct VariableExpenseView: View {
                 AddExpenseView(expenseType: .variable, editingExpense: expense)
                     .appStores()
             }
-            .sheet(item: $previewExpense) { expense in
-                FinanceItemCard(target: .variableExpense(expense.id))
-                    .appStores()
-            }
+            // [v25.634] 詳情卡＋誰還欠我兩個 sheet 收成一個修飾器（body 25.633 是 19 層，多掛一個 .sheet 會變 20）
+            .modifier(VariableCardSheets(previewExpense: $previewExpense, owedSheet: $owedSheet))
             .searchable(
                 text: $searchText,
                 placement: .navigationBarDrawer(displayMode: .always),
@@ -218,6 +237,7 @@ struct VariableExpenseView: View {
             .task(id: store.modifyID) {
                 // .task 每次出現都會重跑（切回這頁、跨過午夜再打開），日期相關的數字跟著更新
                 board = VariableBoardData.build(store: store)
+                owed = ExpenseSplitStore.shared.index.owedSummary(expenses: store.expenses, now: Date(), calendar: .current)
             }
             .task(id: "\(store.modifyID)-\(selectedCategory?.rawValue ?? "")-\(debouncedSearchText)") {
                 cachedFilteredExpenses = buildFilteredExpenses()
@@ -575,6 +595,7 @@ struct VariableExpenseView: View {
         copy.evKwh = expense.evKwh
         // [v25.539] 公升數跟度數一樣帶（同一家加油站加滿，量通常差不多，不同再改）；里程錶照舊不帶
         copy.fuelLiters = expense.fuelLiters
+        // [v25.634] 分帳不複製（新的那筆照全額算；名字照舊帶在 diningMember）
         store.add(copy)
         // [v25.616] 複製帶細項（原本那筆有細項才寫；推的不寫）
         ExpenseKindStore.shared.recordCopy(from: expense, to: copy)
@@ -633,6 +654,72 @@ struct VariableExpenseView: View {
 
     private func formatCurrency(_ value: Double) -> String {
         value.ntdWanString
+    }
+}
+
+// MARK: - 詳情卡、誰還欠我（v25.634）
+
+/// 點列開詳情卡（原本掛在 body 上那個 sheet 搬進來，內容一字沒改）＋誰還欠我清單（點一頓開詳情卡）
+fileprivate struct VariableCardSheets: ViewModifier {
+    @Binding var previewExpense: Expense?
+    @Binding var owedSheet: SplitSheetToken?
+
+    func body(content: Content) -> some View {
+        content
+            .sheet(item: $previewExpense) { expense in
+                FinanceItemCard(target: .variableExpense(expense.id))
+                    .appStores()
+            }
+            .sheet(item: $owedSheet) { _ in
+                OwedListView(opensCards: true)
+                    .appStores()
+            }
+    }
+}
+
+// MARK: - 誰還欠我入口（v25.634）
+
+/// 變動支出頁「誰還欠我　2 人・NT$750 ›」；有一筆超過 30 天時下一行橘字「有 1 筆等了 35 天」
+fileprivate struct OwedEntryRow: View {
+    let summary: SplitOwedSummary
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 10) {
+                Image(systemName: "person.2.fill")
+                    .font(.subheadline)
+                    .foregroundStyle(.orange)
+                OwedEntryTitle(late: ExpenseSplitText.owedLate(summary))
+                Spacer(minLength: 8)
+                Text(ExpenseSplitText.owedEntryValue(summary))
+                    .font(.subheadline.weight(.semibold))
+                    .foregroundStyle(.primary)
+                    .lineLimit(1)
+                    .minimumScaleFactor(0.8)
+                Image(systemName: "chevron.right")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+            }
+            .contentShape(Rectangle())
+        }
+    }
+}
+
+fileprivate struct OwedEntryTitle: View {
+    let late: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            Text(ExpenseSplitText.owedTitle)
+                .font(.subheadline.weight(.semibold))
+                .foregroundStyle(.primary)
+            if let l = late {
+                Text(l)
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+            }
+        }
     }
 }
 

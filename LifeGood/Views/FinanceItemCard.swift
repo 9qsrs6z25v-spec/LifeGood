@@ -31,6 +31,12 @@ struct FinanceItemCard: View {
 
     @State private var showEdit = false
     @State private var shareItem: FinanceCardSharePayload?
+    // [v25.634] 分帳區（〔已還〕、〔改成還沒還〕、〔看誰還欠我〕）、分享前提醒、完成提示
+    @State private var repayTarget: SplitRepayTarget?
+    @State private var undoAsk: SplitUndoAsk?
+    @State private var owedSheet: SplitSheetToken?
+    @State private var shareAsk: FinanceShareAsk?
+    @State private var splitToast: String?
 
     private static let dateFmt: DateFormatter = {
         let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d"; return f
@@ -120,20 +126,8 @@ struct FinanceItemCard: View {
 
     var body: some View {
         NavigationStack {
-            Group {
-                if exists {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 16) {
-                            cardBody(forExport: false)
-                            if let e = expense { photoSection(e) }
-                        }
-                        .padding()
-                    }
-                } else {
-                    // 在編輯表單裡被刪除 → 自動關閉卡片
-                    Color.clear.onAppear { dismiss() }
-                }
-            }
+            // [v25.634] 原本的 Group { … } 切成 AnyView 段（舊帳 33，這版加分帳區不准變深）
+            AnyView(cardScroll)
             .background(Color(.systemGroupedBackground))
             .navigationTitle(navTitle)
             .navigationBarTitleDisplayMode(.inline)
@@ -143,7 +137,8 @@ struct FinanceItemCard: View {
                     HStack(spacing: 16) {
                         Menu {
                             let photoCount = expense?.photoFileNames.count ?? 0
-                            Button { shareJPG() } label: {
+                            // [v25.634] 有同行成員／社交對象先問要不要拿掉名字（askShare）
+                            Button { askShare(.image) } label: {
                                 Label(photoCount > 0 ? "匯出圖片（含帳單照片 \(photoCount) 張）" : "匯出圖片",
                                       systemImage: "photo")
                             }
@@ -152,14 +147,93 @@ struct FinanceItemCard: View {
                                     Label("只匯出帳單照片（\(photoCount) 張）", systemImage: "photo.stack")
                                 }
                             }
-                            Button { shareText() } label: { Label("匯出文字", systemImage: "text.alignleft") }
+                            Button { askShare(.text) } label: { Label("匯出文字", systemImage: "text.alignleft") }
                         } label: { Image(systemName: "square.and.arrow.up") }
                         Button("編輯") { showEdit = true }.bold().foregroundStyle(.green)
                     }
                 }
             }
+            // [v25.634] 分帳的 sheet／dialog、分享前提醒、完成提示收成一個修飾器（body 不變深）
+            .modifier(FinanceSplitModifiers(repayTarget: $repayTarget, undoAsk: $undoAsk, owedSheet: $owedSheet,
+                                            shareAsk: $shareAsk, splitToast: $splitToast, lifeStore: lifeStore,
+                                            onShare: { k, hide in runShare(k, hideNames: hide) }))
             .sheet(isPresented: $showEdit) { editorSheet.appStores() }
             .sheet(item: $shareItem) { item in ShareSheet(items: item.items).appStores() }
+        }
+    }
+
+    @ViewBuilder
+    private var cardScroll: some View {
+        if exists {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 16) {
+                    cardBody(forExport: false)
+                    // [v25.634] 分帳區放在 cardBody 外面：匯出圖、分享文字永遠不會有分帳
+                    splitSection
+                    if let e = expense { photoSection(e) }
+                }
+                .padding()
+            }
+        } else {
+            // 在編輯表單裡被刪除 → 自動關閉卡片
+            Color.clear.onAppear { dismiss() }
+        }
+    }
+
+    // MARK: 分帳（v25.634；只在畫面上，不進分享）
+
+    /// 有分帳紀錄才出現（index 查表，不掃整本）
+    @ViewBuilder
+    private var splitSection: some View {
+        if let e = expense, let s = ExpenseSplitStore.shared.index.split(for: e) {
+            SplitDetailSection(
+                expense: e,
+                split: s,
+                changed: ExpenseSplitStore.shared.index.amountChanged(e),
+                accountNames: splitAccountNames(),
+                onRepay: { sid in repayTarget = SplitRepayTarget(expenseId: e.id, shareId: sid) },
+                // Menu 收起來那一輪先過，下一輪才開 dialog（25.614）；split 在按下去那時才從 index 拿現值（跟 OwedListView 一樣）
+                onUndo: { sid in
+                    let eid = e.id
+                    DispatchQueue.main.async {
+                        guard let cur = ExpenseSplitStore.shared.index.split(eid) else { return }
+                        undoAsk = SplitUndoAsk.make(split: cur, shareId: sid, calendar: .current)
+                    }
+                },
+                onReSplit: { showEdit = true },
+                onOpenOwed: { owedSheet = SplitSheetToken() }
+            )
+        }
+    }
+
+    /// 還款進了哪個帳戶：id → 名字（bankName ?? title）。同一個 id 兩筆留第一筆（不准 uniqueKeysWithValues：重複會閃退）
+    private func splitAccountNames() -> [UUID: String] {
+        let pairs: [(UUID, String)] = lifeStore.milestones.map { m in (m.id, ExpenseSplitRepay.accountName(m)) }
+        return Dictionary(pairs, uniquingKeysWith: { a, _ in a })
+    }
+
+    /// 這筆有名字（同行成員或社交對象）嗎：有才在分享前問
+    private var shareHasNames: Bool {
+        guard let e = expense else { return false }
+        let m = (e.diningMember ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        let r = (e.socialRecipient ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
+        return !m.isEmpty || !r.isEmpty
+    }
+
+    /// 工具列〔匯出圖片〕〔匯出文字〕：有名字 → 下一輪開提醒（Menu 收起來那一輪先過）；沒有 → 照舊直接分享
+    private func askShare(_ k: FinanceShareAsk) {
+        if shareHasNames {
+            DispatchQueue.main.async { shareAsk = k }
+        } else {
+            runShare(k, hideNames: false)
+        }
+    }
+
+    @MainActor
+    private func runShare(_ k: FinanceShareAsk, hideNames: Bool) {
+        switch k {
+        case .image: shareJPG(hideNames: hideNames)
+        case .text: shareText(hideNames: hideNames)
         }
     }
 
@@ -174,10 +248,11 @@ struct FinanceItemCard: View {
 
     // MARK: 卡片內容（畫面與匯出共用；forExport＝靜態分享版）
 
+    /// [v25.634] hideNames＝分享前選了〔拿掉名字再分享〕：不畫同行成員、社交對象
     @ViewBuilder
-    private func cardBody(forExport: Bool) -> some View {
+    private func cardBody(forExport: Bool, hideNames: Bool = false) -> some View {
         titleBlock
-        infoCard
+        infoCard(hideNames: hideNames)
         // [v25.328] 電動車充電支出：卡片顯示充電資訊與該車的每度電價走勢
         if let e = expense, isEVCharge(e) {
             evChargeBlock(e, forExport: forExport)
@@ -216,7 +291,7 @@ struct FinanceItemCard: View {
         }
     }
 
-    private var infoCard: some View {
+    private func infoCard(hideNames: Bool) -> some View {
         VStack(spacing: 0) {
             field("類別", categoryText)
             if let inc = income {
@@ -234,11 +309,11 @@ struct FinanceItemCard: View {
             if let e = expense {
                 Divider().padding(.leading, 14)
                 field("日期", Self.dateFmt.string(from: e.date))
-                if let member = e.diningMember, !member.isEmpty {
+                if !hideNames, let member = e.diningMember, !member.isEmpty {
                     Divider().padding(.leading, 14)
                     field("同行成員", member)
                 }
-                if let recipient = e.socialRecipient, !recipient.isEmpty {
+                if !hideNames, let recipient = e.socialRecipient, !recipient.isEmpty {
                     Divider().padding(.leading, 14)
                     field("社交對象", recipient)
                 }
@@ -318,10 +393,11 @@ struct FinanceItemCard: View {
 
     // MARK: 分享
 
+    /// [v25.634] hideNames：〔拿掉名字再分享〕時卡片圖不畫同行成員、社交對象
     @MainActor
-    private func shareJPG() {
+    private func shareJPG(hideNames: Bool) {
         guard exists else { return }
-        let content = VStack(alignment: .leading, spacing: 16) { cardBody(forExport: true) }
+        let content = VStack(alignment: .leading, spacing: 16) { cardBody(forExport: true, hideNames: hideNames) }
             .frame(width: 420)
             .padding(20)
             .background(Color(.systemGroupedBackground))
@@ -362,7 +438,8 @@ struct FinanceItemCard: View {
         shareItem = FinanceCardSharePayload(items: urls)
     }
 
-    private func shareText() {
+    /// [v25.634] hideNames：〔拿掉名字再分享〕時不放同行成員、社交對象那兩行
+    private func shareText(hideNames: Bool) {
         guard exists else { return }
         var lines: [String] = []
         lines.append("\(isIncome ? "💰 收入" : "🧾 變動支出")｜\(titleText)")
@@ -378,8 +455,8 @@ struct FinanceItemCard: View {
         }
         if let e = expense {
             lines.append("🗓 日期：\(Self.dateFmt.string(from: e.date))")
-            if let member = e.diningMember, !member.isEmpty { lines.append("👥 同行成員：\(member)") }
-            if let recipient = e.socialRecipient, !recipient.isEmpty { lines.append("🎁 社交對象：\(recipient)") }
+            if !hideNames, let member = e.diningMember, !member.isEmpty { lines.append("👥 同行成員：\(member)") }
+            if !hideNames, let recipient = e.socialRecipient, !recipient.isEmpty { lines.append("🎁 社交對象：\(recipient)") }
             if let place = e.placeName, !place.isEmpty { lines.append("📍 地點：\(place)") }
             if let addr = e.placeAddress, !addr.isEmpty {
                 lines.append(e.placeName == nil ? "📍 店家地址：\(addr)" : "🗺 地址：\(addr)")
@@ -503,5 +580,202 @@ extension FinanceItemCard {
                 && $0.vehicleExpenseCategory == .electricity
                 && ($0.evKwh ?? 0) > 0 }
             .sorted { $0.date < $1.date }
+    }
+}
+
+// MARK: - 分帳區、分享前提醒（v25.634 companions1；judge_companions C9／C10／C13）
+//
+// 分帳區只在詳情卡畫面上（cardBody 外面）：匯出圖片、匯出文字一個分帳的字都沒有。
+// 寫 store 一律經 OwedListView.swift 的 SplitRepaySheet／SplitUndoDialog（dismiss 後下一個 runloop 才寫）。
+// 名字、欠款只在 App 裡：不上通知、小工具、手錶、鎖定畫面。
+
+/// 分享前問的是哪一種分享
+fileprivate enum FinanceShareAsk: String, Identifiable {
+    case image, text
+    var id: String { rawValue }
+}
+
+/// 詳情卡分帳那幾個 sheet／dialog＋分享前提醒＋完成提示（收成一個修飾器，FinanceItemCard body 才不會變深）
+fileprivate struct FinanceSplitModifiers: ViewModifier {
+    @Binding var repayTarget: SplitRepayTarget?
+    @Binding var undoAsk: SplitUndoAsk?
+    @Binding var owedSheet: SplitSheetToken?
+    @Binding var shareAsk: FinanceShareAsk?
+    @Binding var splitToast: String?
+    let lifeStore: LifeStore
+    /// (哪一種, 要不要拿掉名字)
+    let onShare: (FinanceShareAsk, Bool) -> Void
+
+    private var shareShown: Binding<Bool> {
+        Binding(get: { shareAsk != nil }, set: { v in if !v { shareAsk = nil } })
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .sheet(item: $repayTarget) { t in
+                SplitRepaySheet(expenseId: t.expenseId, shareId: t.shareId, onDone: { msg in splitToast = msg }).appStores()
+            }
+            .sheet(item: $owedSheet) { _ in OwedListView(opensCards: false).appStores() }
+            .modifier(SplitUndoDialog(ask: $undoAsk, life: lifeStore))
+            .confirmationDialog(ExpenseSplitText.shareAskTitle, isPresented: shareShown,
+                                titleVisibility: .visible, presenting: shareAsk) { k in
+                Button(ExpenseSplitText.shareDropNames) { run(k, true) }
+                Button(ExpenseSplitText.shareAsIs) { run(k, false) }
+                Button("取消", role: .cancel) {}
+            }
+            .overlay(alignment: .bottom) { FinanceSplitToast(text: splitToast) }
+            .task(id: splitToast) {
+                guard splitToast != nil else { return }
+                try? await Task.sleep(nanoseconds: 2_500_000_000)
+                if Task.isCancelled { return }
+                splitToast = nil
+            }
+    }
+
+    /// dialog 收起來那一輪先過，下一輪才分享（分享 sheet 才開得起來）
+    private func run(_ k: FinanceShareAsk, _ hide: Bool) {
+        let share = onShare
+        DispatchQueue.main.async { share(k, hide) }
+    }
+}
+
+/// 完成提示小橫條（「記好了：國泰世華 ＋NT$375」；2.5 秒自己消失）
+fileprivate struct FinanceSplitToast: View {
+    let text: String?
+
+    @ViewBuilder
+    var body: some View {
+        if let t = text {
+            Text(t)
+                .font(.subheadline.weight(.semibold))
+                .lineLimit(2)
+                .padding(.horizontal, 16).padding(.vertical, 10)
+                .background(.regularMaterial, in: Capsule())
+                .padding(.horizontal, 16).padding(.bottom, 16)
+        }
+    }
+}
+
+/// 詳情卡分帳區（純值；按鈕只回呼，不寫 store）
+fileprivate struct SplitDetailSection: View {
+    let expense: Expense
+    let split: ExpenseSplit
+    /// 金額改過了（分的時候跟現在差 ≥ 1 元）
+    let changed: Bool
+    /// 帳戶 id → 名字
+    let accountNames: [UUID: String]
+    let onRepay: (UUID) -> Void
+    let onUndo: (UUID) -> Void
+    let onReSplit: () -> Void
+    let onOpenOwed: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            ForEach(split.liveShares) { s in
+                SplitDetailRow(name: s.name, text: statusText(s),
+                               canRepay: s.owes && !s.isSettled && s.outstanding >= 0.5,
+                               canUndo: s.hasRepayment, settled: s.isSettled,
+                               onRepay: { onRepay(s.id) }, onUndo: { onUndo(s.id) })
+            }
+            Divider().padding(.leading, 14)
+            Text(ExpenseSplitText.detailOwn(split, amount: expense.amount))
+                .font(.subheadline.weight(.semibold))
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.horizontal, 14).padding(.vertical, 10)
+            if changed { changedBlock }
+            owedButton
+        }
+        .background(Color(.secondarySystemGroupedBackground))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+    }
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            Capsule()
+                .fill(Color.orange)
+                .frame(width: 4, height: 16)
+            Image(systemName: "person.2.fill")
+                .font(.system(size: 12, weight: .semibold)).foregroundStyle(.orange)
+            Text(ExpenseSplitText.detailTitle)
+                .font(.subheadline.weight(.bold))
+            Spacer()
+        }
+        .padding(.horizontal, 14).padding(.top, 12).padding(.bottom, 4)
+    }
+
+    /// 金額改過：黃字一行＋〔重新分〕（打開編輯表單）
+    private var changedBlock: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text(ExpenseSplitText.amountChanged(base: split.baseAmount, now: expense.amount))
+                .font(.footnote)
+                .foregroundStyle(.orange)
+                .fixedSize(horizontal: false, vertical: true)
+            Button(ExpenseSplitText.reSplitButton, action: onReSplit)
+                .font(.footnote.weight(.semibold))
+                .buttonStyle(.borderless)
+        }
+        .padding(.horizontal, 14).padding(.bottom, 10)
+    }
+
+    private var owedButton: some View {
+        Button(action: onOpenOwed) {
+            Label(ExpenseSplitText.owedOpenButton, systemImage: "list.bullet.rectangle")
+                .font(.subheadline.weight(.medium))
+        }
+        .buttonStyle(.borderless)
+        .padding(.horizontal, 14).padding(.top, 2).padding(.bottom, 12)
+    }
+
+    /// 那一列右邊的字（已還的帶最後一筆還款的帳戶名；現金＝nil）
+    private func statusText(_ s: SplitShare) -> String {
+        ExpenseSplitText.detailShare(s, accountName: accountName(s), calendar: .current)
+    }
+
+    private func accountName(_ s: SplitShare) -> String? {
+        guard let id = s.lastRepayment?.accountId else { return nil }
+        // 帳戶後來刪掉了：寫「帳戶」，不要寫成「現金」
+        return accountNames[id] ?? "帳戶"
+    }
+}
+
+/// 分帳區一個人一列：名字＋狀態；要還我還沒還的〔已還〕，有還款的〔…〕→〔改成還沒還〕
+fileprivate struct SplitDetailRow: View {
+    let name: String
+    let text: String
+    let canRepay: Bool
+    let canUndo: Bool
+    let settled: Bool
+    let onRepay: () -> Void
+    let onUndo: () -> Void
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(name)
+                .font(.subheadline.weight(.medium))
+                .lineLimit(1)
+            Spacer(minLength: 8)
+            Text(text)
+                .font(.subheadline)
+                .foregroundStyle(settled ? Color.green : Color.secondary)
+                .multilineTextAlignment(.trailing)
+            if canRepay { repayButton }
+            if canUndo { undoMenu }
+        }
+        .padding(.horizontal, 14).padding(.vertical, 8)
+    }
+
+    private var repayButton: some View {
+        Button(ExpenseSplitText.repayButton, action: onRepay)
+            .font(.subheadline.weight(.semibold))
+            .buttonStyle(.borderless)
+    }
+
+    private var undoMenu: some View {
+        Menu {
+            Button(ExpenseSplitText.undoButton, action: onUndo)
+        } label: {
+            Image(systemName: "ellipsis.circle")
+        }
     }
 }

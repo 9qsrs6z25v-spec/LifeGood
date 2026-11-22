@@ -85,13 +85,22 @@ struct AddExpenseView: View {
     @State private var selectedSocialSubCategory: SocialSubCategory = .birthdayGift
     /// 社交禮金收受人（家人 + 人際關係多選）
     @State private var selectedSocialRecipients: Set<String> = []
-    @State private var showSocialRecipientPopover: Bool = false
-    /// [v25.537] 收受人名單的搜尋字
-    @State private var socialRecipientQuery = ""
     /// 固定支出：列入節稅追蹤；nil 採自動推斷
     @State private var taxDeductibleOverride: Bool? = nil
     @State private var selectedDiningMembers: Set<String> = []
-    @State private var showDiningMemberPopover: Bool = false
+    /// [v25.634] 同行人員／收受人共用的選人清單（PeoplePickerSheet；sheet(item:)）
+    @State private var peoplePicker: PeoplePickerKind?
+    /// [v25.634] 「誰付多少」編輯器交回來的草稿（nil＝沒打開過：存檔照預設角色＋平分，ExpenseSplitMath.resolve）
+    @State private var splitDraft: ExpenseSplitDraft?
+    /// [v25.634] 「誰付多少」編輯器（sheet(item:)）
+    @State private var splitEditor: SplitSheetToken?
+    /// [v25.634] 打開舊的那筆時的分帳（ExpenseSplitStore.shared.index；Expense 一個欄位都沒加）
+    @State private var loadedSplit: ExpenseSplit?
+    /// [v25.634] 「最近一起吃過」：打開同行人員選單時算一次（不放 computed property 一直重算；不存新資料）
+    @State private var recentCompanions: [String] = []
+    /// [v25.634] 換成不能分帳的分類、有人還沒還：存檔前先問（SplitDropDialog）
+    @State private var splitDropAsk: SplitDropAsk?
+    @State private var splitDropResolved = false
 
     /// 支援「人員多選」的變動支出分類
     private static let memberCategories: Set<VariableCategory> = [
@@ -1000,9 +1009,20 @@ struct AddExpenseView: View {
                         Button(isEditing ? "儲存" : "新增") { saveExpense() }
                             .bold().foregroundStyle(.green)
                             .disabled(isSaving)
+                            // [v25.634] 換成不能分帳的分類、有人還沒還：存檔前先問（掛在這顆按鈕上：body 外層不加修飾器；Form 的列會被 List 回收）
+                            .modifier(SplitDropDialog(ask: $splitDropAsk, onConfirm: { splitDropResolved = true; saveExpense() }))
                     }
                 }
-            })
+            }
+            // [v25.634] 同行人員／收受人選單、誰付多少編輯器：兩個 sheet(item:) 掛在 Form 根層（掛在 Section 上 List 重建時
+            // 會把剛打開的 sheet 收掉，見 CompanySiteSection.swift、SettingsView.swift 的註解）；拆成 modifier、內容包 AnyView
+            .modifier(AddExpenseSplitSheets(
+                peoplePicker: $peoplePicker, splitEditor: $splitEditor,
+                pickerContent: { k in AnyView(peoplePickerContent(k)) },
+                editorContent: {
+                    AnyView(ExpenseSplitEditor(meName: splitMeName, initial: currentSplit, paidInfo: splitPaidInfo,
+                                               onDone: { d in splitDraft = d }))
+                })))
             .onAppear {
                 loadEditing()
                 applyPreset()
@@ -2305,83 +2325,11 @@ struct AddExpenseView: View {
         }
     }
 
-    /// 飲食人員多選清單（popover 內容，可連續勾選不會關閉）
-    private var diningMemberSelectorList: some View {
-        VStack(spacing: 0) {
-            // v4：ZStack 置中標題 + 置左「完成」鈕，對齊 NavigationStack toolbar 版面，
-            // 與同一元件的 socialRecipientSelectorList 視覺語言一致。
-            ZStack {
-                HStack(spacing: 6) {
-                    Text("選擇人員")
-                        .font(.headline)
-                    if !selectedDiningMembers.isEmpty {
-                        Text("已選 \(selectedDiningMembers.count)")
-                            .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.green)
-                            .padding(.horizontal, 7).padding(.vertical, 2.5)
-                            .background(Color.green.opacity(0.12))
-                            .clipShape(Capsule())
-                    }
-                }
-                HStack {
-                    Button("完成") { showDiningMemberPopover = false }
-                        .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.green)
-                    Spacer()
-                }
-            }
-            .padding(.horizontal, 16).padding(.vertical, 12)
-            .background(Color(.secondarySystemBackground))
-
-            ScrollView {
-                VStack(spacing: 0) {
-                    diningMemberRow(name: nil, label: "不指定")
-                    Divider()
-                    ForEach(familyNames, id: \.self) { name in
-                        diningMemberRow(name: name, label: name)
-                        if name != familyNames.last { Divider() }
-                    }
-                }
-            }
-        }
-    }
-
-    private func diningMemberRow(name: String?, label: String) -> some View {
-        // name == nil 代表「不指定」
-        let isSelected: Bool = {
-            if let n = name { return selectedDiningMembers.contains(n) }
-            return selectedDiningMembers.isEmpty
-        }()
-        return Button {
-            if let n = name {
-                if selectedDiningMembers.contains(n) {
-                    selectedDiningMembers.remove(n)
-                } else {
-                    selectedDiningMembers.insert(n)
-                }
-            } else {
-                selectedDiningMembers.removeAll()
-            }
-        } label: {
-            HStack {
-                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(isSelected ? .green : .secondary)
-                Text(label)
-                    .foregroundStyle(.primary)
-                Spacer()
-            }
-            .padding(.horizontal, 16).padding(.vertical, 10)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
     /// 依目前家人清單排序已選人員，並保留清單中已找不到（改名／被刪除）的舊名字，
     /// 避免編輯既有記帳時因為家人名單變動而把舊的用餐人員資料整批洗掉
+    /// [v25.634] 本人 → 家人順序 → 其他名字（排序後）；名單外的舊名字照留（SplitPeople.ordered，sim 守）
     private var orderedSelectedDiningMembers: [String] {
-        let known = familyNames.filter { selectedDiningMembers.contains($0) }
-        let stale = selectedDiningMembers.subtracting(familyNames).sorted()
-        return known + stale
+        SplitPeople.ordered(selectedDiningMembers, familyOrder: familyNames)
     }
 
     /// 多選人員的顯示文字：未選 / 1 人 / N 人
@@ -2408,20 +2356,121 @@ struct AddExpenseView: View {
         return names
     }
 
+    // MARK: - [v25.634] 誰付多少（分帳存在 lifegood_expense_splits_v1；ExpenseSplits.swift。Expense 一個欄位都沒加）
+
+    /// 本人的名字（去空白；「我（張家瑋）」那一列）
+    private var splitMeName: String {
+        lifeStore.profile.chineseName.trimmingCharacters(in: .whitespaces)
+    }
+
+    /// 家人的中文名（不含本人）：預設角色「我請」（ExpenseSplitMath.defaultRole）
+    private var splitFamily: Set<String> {
+        var out = Set<String>()
+        for m in lifeStore.familyMembers {
+            let n = m.chineseName.trimmingCharacters(in: .whitespaces)
+            if !n.isEmpty { out.insert(n) }
+        }
+        out.remove(splitMeName)
+        return out
+    }
+
+    /// 選了的人裡「我」以外的（照存檔順序）
+    private var splitOthers: [String] {
+        let me = splitMeName
+        return orderedSelectedDiningMembers.filter { $0 != me }
+    }
+
+    /// 這次存的還能不能分帳（變動支出＋有同行人員的分類）
+    private var splitCanSplit: Bool {
+        expenseType == .variable && Self.memberCategories.contains(selectedVariableCategory)
+    }
+
+    /// 這頓的台幣金額（跟存檔同一條 amountForSave）
+    private var splitTotal: Double {
+        amountForSave(Double(amountText) ?? 0, finalAmountText: amountText)
+    }
+
+    /// 表單現在的分帳：改過的草稿優先，沒有就用打開時那一包；照現在的人、現在的金額對一次
+    private var currentSplit: ExpenseSplitDraft {
+        ExpenseSplitMath.resolve(edited: splitDraft, loaded: loadedSplit, names: splitOthers, family: splitFamily,
+                                 total: splitTotal)
+    }
+
+    /// 「誰付多少」那一列：進階模式、能分帳、選了至少一個「我」以外的人
+    private var showsSplitRow: Bool {
+        advancedMode && splitCanSplit && !splitOthers.isEmpty
+    }
+
+    /// 已還錢的人：選單裡不能取消
+    private var splitLockedNames: Set<String> {
+        var out = Set<String>()
+        for s in loadedSplit?.liveShares ?? [] where s.hasRepayment {
+            out.insert(s.name)
+        }
+        return out
+    }
+
+    /// 已還的人那一列右邊的字（share.id → 「已還 11/22・國泰世華 ✓」）
+    private var splitPaidInfo: [UUID: String] {
+        guard let split = loadedSplit else { return [:] }
+        let paid = split.liveShares.filter { $0.hasRepayment }
+        guard !paid.isEmpty else { return [:] }
+        let accountNames: [UUID: String] = Dictionary(
+            lifeStore.milestones.map { m in (m.id, ExpenseSplitRepay.accountName(m)) },
+            uniquingKeysWith: { first, _ in first })
+        var out: [UUID: String] = [:]
+        for s in paid {
+            guard let r = s.lastRepayment else { continue }
+            let name: String? = r.accountId.flatMap { accountNames[$0] }
+            out[s.id] = ExpenseSplitText.paidLine(date: r.date, accountName: name, calendar: .current)
+        }
+        return out
+    }
+
+    /// 換分類 alert 的字：換成哪裡
+    private var splitDropTarget: String {
+        expenseType == .fixed ? "固定支出" : selectedVariableCategory.rawValue
+    }
+
+    /// 同行人員的名單：「最近一起吃過」（有才有）＋收受人那份名單（家人、人際關係、部屬、公司、名片）
+    private var diningGroups: [PeopleGroup] {
+        let base = socialRecipientGroups
+        guard !recentCompanions.isEmpty else { return base }
+        let recent = PeopleGroup(title: ExpenseSplitText.recentGroupTitle,
+                                 people: recentCompanions.map { n in PeopleCandidate(name: n, detail: "") })
+        return [recent] + base
+    }
+
+    /// 打開選人清單（同行人員那邊先算一次「最近一起吃過」）
+    private func openPeoplePicker(_ k: PeoplePickerKind) {
+        if k == .dining {
+            recentCompanions = SplitPeople.recentCompanions(expenses: store.expenses, meName: splitMeName,
+                                                            now: Date(), calendar: .current)
+        }
+        peoplePicker = k
+    }
+
+    @ViewBuilder
+    private func peoplePickerContent(_ k: PeoplePickerKind) -> some View {
+        switch k {
+        case .dining:
+            PeoplePickerSheet(title: ExpenseSplitText.pickerTitle, prompt: ExpenseSplitText.pickerPrompt,
+                              subtitle: ExpenseSplitText.pickerSubtitle, groups: diningGroups,
+                              selection: $selectedDiningMembers, meName: splitMeName,
+                              lockedNames: splitLockedNames, allowTyping: true, accent: .green)
+        case .social:
+            PeoplePickerSheet(title: "收受人", prompt: "搜尋姓名、部門、公司、職稱", subtitle: nil,
+                              groups: socialRecipientGroups, selection: $selectedSocialRecipients, meName: nil,
+                              lockedNames: [], allowTyping: true, accent: .pink)
+        }
+    }
+
     // MARK: - 社交禮金收受人選單
 
     /// [v25.537] 收受人名單的一個人：名字（存檔就是存名字）＋一行小字（部門、職稱、公司）
-    private struct RecipientCandidate: Identifiable {
-        let name: String
-        let detail: String
-        var id: String { name }
-    }
-
-    private struct RecipientGroup: Identifiable {
-        let title: String
-        let people: [RecipientCandidate]
-        var id: String { title }
-    }
+    /// [v25.634] 型別搬到 PeoplePickerSheet.swift（同行人員、收受人共用一個選單）；組名單的程式一個字都沒動
+    private typealias RecipientCandidate = PeopleCandidate
+    private typealias RecipientGroup = PeopleGroup
 
     /// 候選人來源：家人、人際關係（朋友／同事／客戶…），
     /// [v25.537] 再加上公司的人：部屬（依課別）、組織圖的同事（依部門）、名片
@@ -2539,19 +2588,6 @@ struct AddExpenseView: View {
             .map { RecipientCandidate(name: $0.name, detail: Self.joinedDetail([$0.company, $0.jobTitle])) }
     }
 
-    /// 搜尋：姓名、小字（部門、職稱、公司）、組名都能打
-    private var filteredRecipientGroups: [RecipientGroup] {
-        let q = socialRecipientQuery.trimmingCharacters(in: .whitespaces).lowercased()
-        guard !q.isEmpty else { return socialRecipientGroups }
-        return socialRecipientGroups.compactMap { g in
-            let groupHit = g.title.lowercased().contains(q)
-            let people = groupHit ? g.people : g.people.filter {
-                $0.name.lowercased().contains(q) || $0.detail.lowercased().contains(q)
-            }
-            return people.isEmpty ? nil : RecipientGroup(title: g.title, people: people)
-        }
-    }
-
     private var socialRecipientLabel: String {
         if selectedSocialRecipients.isEmpty { return "選擇收受人" }
         return selectedSocialRecipients.sorted().joined(separator: "、")
@@ -2560,99 +2596,6 @@ struct AddExpenseView: View {
     private var socialRecipientString: String {
         guard !selectedSocialRecipients.isEmpty else { return "" }
         return selectedSocialRecipients.sorted().joined(separator: "、")
-    }
-
-    private func toggleSocialRecipient(_ name: String) {
-        if selectedSocialRecipients.contains(name) {
-            selectedSocialRecipients.remove(name)
-        } else {
-            selectedSocialRecipients.insert(name)
-        }
-    }
-
-    private func socialRecipientRow(name: String, detail: String) -> SocialRecipientRow {
-        SocialRecipientRow(name: name, detail: detail,
-                           picked: selectedSocialRecipients.contains(name),
-                           onToggle: { toggleSocialRecipient(name) })
-    }
-
-    /// 最上面：不指定，以及已經選的人（名單很長時不用捲下去找；舊紀錄裡、名單已經沒有的名字也能取消）
-    @ViewBuilder
-    private var socialRecipientTopSections: some View {
-        Section {
-            Button {
-                selectedSocialRecipients.removeAll()
-            } label: {
-                HStack {
-                    Image(systemName: selectedSocialRecipients.isEmpty
-                          ? "checkmark.circle.fill" : "circle")
-                        .foregroundStyle(selectedSocialRecipients.isEmpty ? Color.green : Color.secondary)
-                    Text("不指定")
-                    Spacer()
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-        }
-        if !selectedSocialRecipients.isEmpty {
-            Section("已選") {
-                ForEach(selectedSocialRecipients.sorted(), id: \.self) { name in
-                    socialRecipientRow(name: name, detail: "")
-                }
-            }
-        }
-    }
-
-    private var socialRecipientSelectorList: some View {
-        let groups = filteredRecipientGroups
-        let searching = !socialRecipientQuery.trimmingCharacters(in: .whitespaces).isEmpty
-        return NavigationStack {
-            List {
-                if !searching {
-                    socialRecipientTopSections
-                }
-                if searching && groups.isEmpty {
-                    Text("找不到符合「\(socialRecipientQuery)」的人")
-                        .font(.callout).foregroundStyle(.secondary)
-                }
-                ForEach(groups) { group in
-                    Section(group.title) {
-                        ForEach(group.people) { c in
-                            socialRecipientRow(name: c.name, detail: c.detail)
-                        }
-                    }
-                }
-            }
-            .searchable(text: $socialRecipientQuery,
-                        placement: .navigationBarDrawer(displayMode: .always),
-                        prompt: "搜尋姓名、部門、公司、職稱")
-            .navigationTitle("收受人")
-            .navigationBarTitleDisplayMode(.inline)
-            .toolbar { socialRecipientToolbar }
-        }
-    }
-
-    @ToolbarContentBuilder
-    private var socialRecipientToolbar: some ToolbarContent {
-        // v4：從 topBarTrailing 修正為 topBarLeading，對齊全 App 關閉鈕一律置左規則
-        ToolbarItem(placement: .topBarLeading) {
-            Button("完成") { showSocialRecipientPopover = false }
-                .bold().foregroundStyle(.green)
-        }
-        // v4：已選人數提示膠囊，取代 navigationTitle 靜態標題（僅在有選取時顯示）
-        if !selectedSocialRecipients.isEmpty {
-            ToolbarItem(placement: .principal) {
-                HStack(spacing: 6) {
-                    Text("收受人").font(.headline)
-                    Text("已選 \(selectedSocialRecipients.count)")
-                        .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.pink)
-                        .padding(.horizontal, 7).padding(.vertical, 2.5)
-                        .background(Color.pink.opacity(0.12))
-                        .clipShape(Capsule())
-                }
-            }
-        }
     }
 
     private var categorySection: some View {
@@ -2665,39 +2608,18 @@ struct AddExpenseView: View {
                     .listRowSeparator(.hidden)
 
                 // [v3] 人員多選移至獨立行（進階模式，支援多選）
-                if advancedMode && Self.memberCategories.contains(selectedVariableCategory) && !familyNames.isEmpty {
-                    Button {
-                        showDiningMemberPopover = true
-                    } label: {
-                        HStack(spacing: 8) {
-                            ZStack {
-                                Circle()
-                                    .fill(Color(.secondarySystemFill))
-                                    .frame(width: 28, height: 28)
-                                Image(systemName: "person.2.fill")
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundStyle(.secondary)
-                            }
-                            Text("同行人員")
-                                .font(.subheadline)
-                                .foregroundStyle(.primary)
-                            Spacer()
-                            Text(diningMembersLabel)
-                                .font(.subheadline)
-                                .foregroundStyle(selectedDiningMembers.isEmpty ? .secondary : .primary)
-                                .lineLimit(1)
-                            Image(systemName: "chevron.right")
-                                .font(.caption2)
-                                .foregroundStyle(.tertiary)
-                        }
-                    }
-                    .buttonStyle(.plain)
-                    .sheet(isPresented: $showDiningMemberPopover) {
-                        diningMemberSelectorList
-                            .presentationDetents([.height(380), .medium])
-                            .presentationDragIndicator(.visible)
-                            .appStores()
-                    }
+                // [v25.634] 不再要求有家人（沒家人也選得到同事、部屬、直接打名字）；選單是 PeoplePickerSheet（sheet 在 Form 根層，AddExpenseSplitSheets）
+                if advancedMode && Self.memberCategories.contains(selectedVariableCategory) {
+                    DiningMemberRow(label: diningMembersLabel, picked: !selectedDiningMembers.isEmpty,
+                                    onTap: { openPeoplePicker(.dining) })
+                }
+
+                // [v25.634] 誰付多少：選了「我」以外的人才有；金額還是 0 寫「先填金額」、點了沒反應
+                if showsSplitRow {
+                    AnyView(SplitSummaryRow(title: ExpenseSplitText.rowTitle,
+                                            value: splitTotal > 0 ? ExpenseSplitText.summaryValue(currentSplit) : ExpenseSplitText.zeroAmount,
+                                            enabled: splitTotal > 0,
+                                            onTap: { splitEditor = SplitSheetToken() }))
                 }
 
                 // 節稅子分類（連動到稅務頁）
@@ -2722,27 +2644,19 @@ struct AddExpenseView: View {
                         }
                         .frame(maxWidth: .infinity)
 
-                        if !socialRecipientGroups.isEmpty {
-                            Divider()
-                            Button {
-                                socialRecipientQuery = ""
-                                showSocialRecipientPopover = true
-                            } label: {
-                                HStack(spacing: 2) {
-                                    Image(systemName: "gift.fill").font(.caption)
-                                    Text(socialRecipientLabel).lineLimit(1)
-                                    Image(systemName: "chevron.down").font(.caption2)
-                                }
-                                .foregroundStyle(.pink)
+                        // [v25.634] 名單是空的也能打名字（PeoplePickerSheet allowTyping）：不再要求有名單；sheet 在 Form 根層
+                        Divider()
+                        Button {
+                            openPeoplePicker(.social)
+                        } label: {
+                            HStack(spacing: 2) {
+                                Image(systemName: "gift.fill").font(.caption)
+                                Text(socialRecipientLabel).lineLimit(1)
+                                Image(systemName: "chevron.down").font(.caption2)
                             }
-                            .buttonStyle(.plain)
-                            .sheet(isPresented: $showSocialRecipientPopover) {
-                                AnyView(socialRecipientSelectorList)
-                                    .presentationDetents([.medium, .large])
-                                    .presentationDragIndicator(.visible)
-                                    .appStores()
-                            }
+                            .foregroundStyle(.pink)
                         }
+                        .buttonStyle(.plain)
                     }
                 }
             } else {
@@ -4191,6 +4105,13 @@ struct AddExpenseView: View {
             return
         }
 
+        // [v25.634] 有分帳的那頓換成不能分帳的分類（交通、固定支出…）而且有人還沒還：先問一次；選〔還是換〕再叫一次這裡
+        if !splitDropResolved,
+           let ask = SplitDropAsk.make(loaded: loadedSplit, canSplit: splitCanSplit, target: splitDropTarget) {
+            splitDropAsk = ask
+            return
+        }
+
         isSaving = true
 
         // 自訂幣別換算為 NT$（儲蓄險不適用，使用其自身幣別欄位）
@@ -4411,6 +4332,13 @@ struct AddExpenseView: View {
         let kindChosen = savedKind
         // [v25.617] v3 規則（墓碑多管房子變動「稅費」）：recordFormSaveV3
         DispatchQueue.main.async { ExpenseKindStore.shared.recordFormSaveV3(kindSaved, kind: kindChosen) }
+        // [v25.634] 分帳存在另一個鍵（ExpenseSplits.swift；Expense 一個欄位都沒加）：先 dismiss，下一個 runloop 才寫。每次存檔都叫（不能分帳／沒有別人＝nil，它自己判斷要不要拿掉沒還過的人）
+        let splitStore = ExpenseSplitStore.shared
+        let splitId = expense.id
+        let splitSaved: ExpenseSplitDraft? = splitCanSplit
+            ? ExpenseSplitMath.resolve(edited: splitDraft, loaded: loadedSplit, names: splitOthers, family: splitFamily, total: amount)
+            : nil
+        DispatchQueue.main.async { splitStore.recordSave(expenseId: splitId, draft: splitSaved) }
         syncBankWithdrawal(for: expense, previous: editingExpense)
         // [v25.567] 改了一筆保費：連著它的財富保單照寫一份舊欄位（里程碑保費、帳本繳法／從哪扣／下次；給醫療地圖、舊 iPad、網頁版）。
         // 先 dismiss，下一個 runloop 才寫（store 先抓進區域常數）；沒連保單的 policyExpenseChanged 自己什麼都不做
@@ -4929,7 +4857,7 @@ struct AddExpenseView: View {
 
         // 編輯既有的變動支出且包含進階欄位時，自動展開進階模式讓使用者看到完整資訊
         if expense.expenseType == .variable {
-            let hasAdvancedFields = expense.linkedRealEstateId != nil
+            let hasAdvancedFields: Bool = expense.linkedRealEstateId != nil
                 || expense.linkedVehicleId != nil
                 || mirrorVehicle(variableExpenseId: expense.id) != nil
                 || expense.linkedStockId != nil
@@ -4940,6 +4868,8 @@ struct AddExpenseView: View {
                 // 那一區（showTripLinkSection，同樣綁 advancedMode）會不見，
                 // 使用者看得到備註欄，卻看不到自己改的是哪一站。
                 || expense.linkedTripPlanId != nil
+                // [v25.634] 有分帳的也算進階：不展開的話「誰付多少」那一列看不到
+                || ExpenseSplitStore.shared.index.split(for: expense) != nil
             if hasAdvancedFields { advancedMode = true }
         }
 
@@ -4996,12 +4926,10 @@ struct AddExpenseView: View {
         if let sub = expense.insuranceSubCategory { selectedInsuranceSubCategory = sub }
         if let sub = expense.loanSubCategory { selectedLoanSubCategory = sub }
         // 多選人員：以「、」分隔；向下相容單名格式（split 仍會回傳一個元素）
-        if let raw = expense.diningMember, !raw.isEmpty {
-            let parts = raw.split(separator: "、").map { $0.trimmingCharacters(in: .whitespaces) }
-            selectedDiningMembers = Set(parts.filter { !$0.isEmpty })
-        } else {
-            selectedDiningMembers = []
-        }
+        // [v25.634] 先拿分帳，再用 `,、，` 切名字、把分帳裡還在的人補回來（更舊的 iPad 洗掉名字時，這次存檔就補回來）
+        //（固定支出那筆 split(for:) 一律 nil：用 id 再拿一次，換成固定支出時留下的「還過錢的人」才不會在改回變動支出、再選同一人時多一列）
+        loadedSplit = ExpenseSplitStore.shared.index.split(for: expense) ?? ExpenseSplitStore.shared.index.split(expense.id)
+        selectedDiningMembers = SplitPeople.loadedMembers(diningMember: expense.diningMember, split: loadedSplit)
         if let lt = expense.loanTotalAmount, lt > 0 { loanTotalAmountText = String(format: "%.0f", lt) }
         if let ly = expense.loanYears, ly > 0 { loanYearsText = String(format: "%g", ly) }
         // [v25.347] 停止（結束日／原因）
@@ -5601,31 +5529,107 @@ fileprivate struct PlaceSuggestionRow: View {
     }
 }
 
-/// [v25.618] 收受人清單的一列（獨立 struct，理由同 PlaceSuggestionRow）
-fileprivate struct SocialRecipientRow: View {
-    let name: String
-    let detail: String
+// MARK: - [v25.634] 同行人員、誰付多少（拆成小 View／modifier：記帳表單 body 很長；judge_companions §C6–C7、§C14）
+
+/// 「同行人員　王小明 ›」那一列（舊的 Button 搬進來，純值＋closure）
+fileprivate struct DiningMemberRow: View {
+    let label: String
     let picked: Bool
-    let onToggle: () -> Void
+    let onTap: () -> Void
 
     var body: some View {
         Button {
-            onToggle()
+            onTap()
         } label: {
-            HStack(spacing: 10) {
-                Image(systemName: picked ? "checkmark.circle.fill" : "circle")
-                    .foregroundStyle(picked ? Color.green : Color.secondary)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text(name)
-                    if !detail.isEmpty {
-                        Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                    }
-                }
+            HStack(spacing: 8) {
+                SplitRowIcon(systemName: "person.2.fill", size: 12)
+                Text(ExpenseSplitText.pickerTitle)
+                    .font(.subheadline)
+                    .foregroundStyle(.primary)
                 Spacer()
+                Text(label)
+                    .font(.subheadline)
+                    .foregroundStyle(picked ? .primary : .secondary)
+                    .lineLimit(1)
+                Image(systemName: "chevron.right")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
             }
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+    }
+}
+
+/// 「誰付多少　2 人要還我・NT$750 ›」；enabled false（金額還是 0）時按了沒反應、整列灰
+fileprivate struct SplitSummaryRow: View {
+    let title: String
+    let value: String
+    let enabled: Bool
+    let onTap: () -> Void
+
+    var body: some View {
+        Button {
+            if enabled { onTap() }
+        } label: {
+            HStack(spacing: 8) {
+                SplitRowIcon(systemName: "divide.circle", size: 13)
+                Text(title)
+                    .font(.subheadline)
+                    .foregroundStyle(enabled ? .primary : .secondary)
+                Spacer()
+                Text(value)
+                    .font(.subheadline)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                Image(systemName: "chevron.right")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// 上面兩列左邊的灰色圓圈圖示（拆出來：列的型別才不會疊太深）
+fileprivate struct SplitRowIcon: View {
+    let systemName: String
+    let size: CGFloat
+
+    var body: some View {
+        ZStack {
+            Circle()
+                .fill(Color(.secondarySystemFill))
+                .frame(width: 28, height: 28)
+            Image(systemName: systemName)
+                .font(.system(size: size, weight: .semibold))
+                .foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// 同行人員／收受人選單、誰付多少編輯器的兩個 sheet(item:)（掛在 Form 根層；內容由表單給、已經包好 AnyView）
+fileprivate struct AddExpenseSplitSheets: ViewModifier {
+    @Binding var peoplePicker: PeoplePickerKind?
+    @Binding var splitEditor: SplitSheetToken?
+    let pickerContent: (PeoplePickerKind) -> AnyView
+    let editorContent: () -> AnyView
+
+    func body(content: Content) -> some View {
+        content
+            .sheet(item: $peoplePicker) { k in
+                pickerContent(k)
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+                    .appStores()
+            }
+            .sheet(item: $splitEditor) { _ in
+                editorContent()
+                    .presentationDetents([.medium, .large])
+                    .presentationDragIndicator(.visible)
+                    .appStores()
+            }
     }
 }
 

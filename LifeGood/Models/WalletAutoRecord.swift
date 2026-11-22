@@ -854,6 +854,8 @@ enum WalletImport {
         e.fromQuickRecord = true
         // [learn] 同行人員照上一次（設定頁開關；只帶進有同行人員欄位的分類）。不在 memberwise init 的順序裡找位置，存檔前指派
         e.diningMember = WalletAutoRecord.carriedMember(memory, enabled: WalletPrefs.memberFromLast)
+        // [v25.634] C12：帶過來的名字只留本人＋家人（朋友、同事、部屬不自動帶）；自動記帳永遠不產生分帳
+        e.diningMember = SplitPeople.familyOnly(e.diningMember, allowed: life.map { SplitPeople.meAndFamily($0) } ?? Set<String>())
         return e
     }
 

@@ -198,10 +198,10 @@ struct OverviewView: View {
         for e in store.expenses where e.expenseType == .variable {
             let c = e.variableCategory ?? .other
             if cal.isDate(e.date, equalTo: now, toGranularity: .month) {
-                amount[c, default: 0] += e.amount
+                amount[c, default: 0] += store.ownAmount(e)
                 count[c, default: 0] += 1
             } else if e.date >= lastStart && e.date < lastCut {
-                last[c, default: 0] += e.amount
+                last[c, default: 0] += store.ownAmount(e)
             }
         }
         return amount

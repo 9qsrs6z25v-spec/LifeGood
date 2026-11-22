@@ -119,10 +119,10 @@ extension OverviewBoardData {
         // 本月每天的變動支出
         var daily = Array(repeating: 0.0, count: d.daysInMonth)
         for e in variables where cal.isDate(e.date, equalTo: now, toGranularity: .month) {
-            d.variable += e.amount
+            d.variable += store.ownAmount(e)
             if cal.isDate(e.date, inSameDayAs: now) { d.todayCount += 1 }
             let i = cal.component(.day, from: e.date) - 1
-            if daily.indices.contains(i) { daily[i] += e.amount }
+            if daily.indices.contains(i) { daily[i] += store.ownAmount(e) }
         }
         if daily.indices.contains(d.day - 1) { d.todayVariable = daily[d.day - 1] }
         d.daily = Array(daily.prefix(d.day))
@@ -142,7 +142,7 @@ extension OverviewBoardData {
             let cutDay = min(d.day, lastDays)
             if let cutoff = cal.date(byAdding: .day, value: cutDay, to: lastStart) {
                 let lv = variables.filter { $0.date >= lastStart && $0.date < cutoff }
-                    .reduce(0) { $0 + $1.amount }
+                    .reduce(0) { $0 + store.ownAmount($1) }
                 let sameDayLastMonth = cal.date(byAdding: .month, value: -1, to: now) ?? lastStart
                 let lf = store.fixedMonthlyTotal(for: sameDayLastMonth)
                 let total = lv + lf
@@ -156,7 +156,7 @@ extension OverviewBoardData {
         for back in 1...3 {
             guard let m = cal.date(byAdding: .month, value: -back, to: monthStart),
                   let next = cal.date(byAdding: .month, value: 1, to: m) else { continue }
-            let t = variables.filter { $0.date >= m && $0.date < next }.reduce(0) { $0 + $1.amount }
+            let t = variables.filter { $0.date >= m && $0.date < next }.reduce(0) { $0 + store.ownAmount($1) }
             if t > 0 {
                 prevSum += t
                 prevDays += cal.range(of: .day, in: .month, for: m)?.count ?? 30

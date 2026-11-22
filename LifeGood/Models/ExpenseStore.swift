@@ -41,6 +41,15 @@ class ExpenseStore: ObservableObject {
             name: .expenseKindsDidChange,
             object: nil
         )
+        // [v25.634] 分帳（我請／要還我）存在另一個鍵（ExpenseSplits.swift）：那一包變了只跳 modifyID（統計、列上的膠囊重算）。
+        // 不指派 expenses、不存、不推
+        _ = ExpenseSplitStore.shared
+        NotificationCenter.default.addObserver(
+            self,
+            selector: #selector(splitBookChanged(_:)),
+            name: .expenseSplitsDidChange,
+            object: nil
+        )
     }
 
     deinit {
@@ -95,6 +104,17 @@ class ExpenseStore: ObservableObject {
         modifyID = UUID()
     }
 
+    /// [v25.634] 分帳那一包變了：只讓畫面重算（不指派 expenses、不 save、不推）
+    @objc private func splitBookChanged(_ note: Notification) {
+        modifyID = UUID()
+    }
+
+    /// [v25.634] 這筆算你自己的錢（統計一律用這個加，不要直接加 e.amount）：變動支出有分帳＝amount − 要還我（已還、沒還都扣），
+    /// 最少 0；沒有分帳、或不是變動支出＝原樣 e.amount（ExpenseSplitIndex.ownAmount；O(1) 查表）
+    func ownAmount(_ e: Expense) -> Double {
+        ExpenseSplitStore.shared.index.ownAmount(e)
+    }
+
     // MARK: - 支出 CRUD
 
     func add(_ expense: Expense) {
@@ -121,6 +141,8 @@ class ExpenseStore: ObservableObject {
         VehicleMirrors.removeMirrors(of: [expense.id])
         // [v25.615] 有細項的寫墓碑（另一台還沒同步的舊細項不會長回來）
         ExpenseKindStore.shared.recordDelete(ids: [expense.id])
+        // [v25.634] 有分帳的寫墓碑（存摺上已經入帳的還款留著）
+        ExpenseSplitStore.shared.recordDelete(ids: [expense.id])
     }
 
     func delete(at offsets: IndexSet, from list: [Expense]) {
@@ -133,6 +155,8 @@ class ExpenseStore: ObservableObject {
         VehicleMirrors.removeMirrors(of: idsToDelete)
         // [v25.615] 有細項的寫墓碑
         ExpenseKindStore.shared.recordDelete(ids: idsToDelete)
+        // [v25.634] 有分帳的寫墓碑
+        ExpenseSplitStore.shared.recordDelete(ids: idsToDelete)
     }
 
     // MARK: - 收入 CRUD
@@ -342,7 +366,7 @@ class ExpenseStore: ObservableObject {
     var currentMonthVariableTotal: Double {
         currentMonthExpenses
             .filter { $0.expenseType == .variable }
-            .reduce(0) { $0 + $1.amount }
+            .reduce(0) { $0 + ownAmount($1) }
     }
 
     /// 本月固定支出：所有建立日期 <= 本月的固定支出，依週期換算為月金額
@@ -365,7 +389,7 @@ class ExpenseStore: ObservableObject {
         // 變動支出：只計今天實際紀錄的
         let variableToday = expenses
             .filter { $0.expenseType == .variable && calendar.isDateInToday($0.date) }
-            .reduce(0) { $0 + $1.amount }
+            .reduce(0) { $0 + ownAmount($1) }
 
         // 固定支出：依週期換算每日金額
         let fixedDaily = projectedFixedTotal(for: today, period: .daily, calendar: calendar)
@@ -386,7 +410,7 @@ class ExpenseStore: ObservableObject {
         var totals: [VariableCategory: Double] = [:]
         for expense in filtered {
             if let cat = expense.variableCategory {
-                totals[cat, default: 0] += expense.amount
+                totals[cat, default: 0] += ownAmount(expense)
             }
         }
 
@@ -571,7 +595,7 @@ class ExpenseStore: ObservableObject {
         return monthlyHeroSeries(firstDate: variable.map(\.date).min()) { monthStart, _ in
             variable
                 .filter { cal.isDate($0.date, equalTo: monthStart, toGranularity: .month) }
-                .reduce(0) { $0 + $1.amount }
+                .reduce(0) { $0 + ownAmount($1) }
         }
     }
 
@@ -655,7 +679,7 @@ class ExpenseStore: ObservableObject {
         var dict: [VariableCategory: Double] = [:]
         for e in expenses where e.expenseType == .variable && e.date >= start && e.date <= now {
             guard let cat = e.variableCategory else { continue }
-            dict[cat, default: 0] += e.amount
+            dict[cat, default: 0] += ownAmount(e)
         }
         return dict.map { ($0.key, $0.value) }.sorted { $0.1 > $1.1 }
     }
@@ -692,7 +716,7 @@ class ExpenseStore: ObservableObject {
         var variableByDay: [Date: Double] = [:]
         for e in expenses where e.expenseType == .variable {
             let day = calendar.startOfDay(for: e.date)
-            if day >= cutoff { variableByDay[day, default: 0] += e.amount }
+            if day >= cutoff { variableByDay[day, default: 0] += ownAmount(e) }
         }
 
         var results: [ChartDataPoint] = []
@@ -731,7 +755,7 @@ class ExpenseStore: ObservableObject {
                       let dayOffset = calendar.dateComponents([.day], from: cutoff, to: eDay).day else { continue }
                 let weekIndex = dayOffset / 7
                 guard weekIndex < weekRanges.count else { continue }
-                variableByWeek[weekRanges[weekIndex].start, default: 0] += e.amount
+                variableByWeek[weekRanges[weekIndex].start, default: 0] += ownAmount(e)
             }
         }
 
@@ -763,7 +787,7 @@ class ExpenseStore: ObservableObject {
         var variableByMonth: [Int: Double] = [:]
         for e in expenses where e.expenseType == .variable {
             let k = calendar.component(.year, from: e.date) * 100 + calendar.component(.month, from: e.date)
-            if validKeys.contains(k) { variableByMonth[k, default: 0] += e.amount }
+            if validKeys.contains(k) { variableByMonth[k, default: 0] += ownAmount(e) }
         }
 
         var results: [ChartDataPoint] = []
@@ -796,7 +820,7 @@ class ExpenseStore: ObservableObject {
             let y = calendar.component(.year, from: e.date)
             let q = (calendar.component(.month, from: e.date) - 1) / 3 + 1
             let k = y * 10 + q
-            if validKeys.contains(k) { variableByQuarter[k, default: 0] += e.amount }
+            if validKeys.contains(k) { variableByQuarter[k, default: 0] += ownAmount(e) }
         }
 
         var results: [ChartDataPoint] = []
@@ -825,7 +849,7 @@ class ExpenseStore: ObservableObject {
         var variableByYear: [Int: Double] = [:]
         for e in expenses where e.expenseType == .variable {
             let y = calendar.component(.year, from: e.date)
-            if validYears.contains(y) { variableByYear[y, default: 0] += e.amount }
+            if validYears.contains(y) { variableByYear[y, default: 0] += ownAmount(e) }
         }
 
         var results: [ChartDataPoint] = []
@@ -1047,5 +1071,7 @@ class ExpenseStore: ObservableObject {
         saveCurrencyRates()
         // [v25.615] 細項那一包一起清（寫一包空的推上去）
         ExpenseKindStore.shared.clearAll()
+        // [v25.634] 分帳那一包一起清（寫一包空的推上去）
+        ExpenseSplitStore.shared.clearAll()
     }
 }

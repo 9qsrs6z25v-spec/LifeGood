@@ -95,6 +95,9 @@ struct UnifiedExport: Codable {
         /// [v25.615] 記帳那筆的細項（ExpenseKindBook；同步鍵 lifegood_expense_kinds_v1）。舊備份沒有，所以是 Optional；
         /// 只帶這份檔案裡那幾筆支出的（照定期轉帳跟著帳本走）
         var expenseKinds: ExpenseKindBook?
+        /// [v25.634] 分帳（ExpenseSplitBook；同步鍵 lifegood_expense_splits_v1）。舊備份沒有，所以是 Optional；
+        /// 只帶這份檔案裡那幾筆支出的
+        var expenseSplits: ExpenseSplitBook?
     }
 
     struct FinanceBundle: Codable {
@@ -196,7 +199,9 @@ struct UnifiedExport: Codable {
                 incomes: scope.ownsAllExpenses ? expense.incomes : [],
                 currencyRates: scope.ownsAllExpenses ? expense.currencyRates : nil,
                 // [v25.615] 細項只帶這份檔案裡那幾筆支出的；一筆支出都沒帶就不帶
-                expenseKinds: expenses.isEmpty ? nil : ExpenseKindStore.shared.exportBook(for: Set(expenses.map(\.id)))),
+                expenseKinds: expenses.isEmpty ? nil : ExpenseKindStore.shared.exportBook(for: Set(expenses.map(\.id))),
+                // [v25.634] 分帳只帶這份檔案裡那幾筆支出的；一筆支出都沒帶就不帶
+                expenseSplits: expenses.isEmpty ? nil : ExpenseSplitStore.shared.exportBook(for: Set(expenses.map(\.id)))),
             finance: FinanceBundle(
                 insurances: scope.carriesFinance ? finance.insurances : [],
                 stocks: scope.carriesFinance ? finance.stocks : [],
@@ -311,8 +316,10 @@ enum UnifiedExporter {
         csv += "## 支出 (Expenses)\n"
         // [v25.539] 加 fuelLiters（加油加了幾公升，選填；JSON 是 Expense 整筆編碼，自動帶上）
         // [v25.617] 最後多一欄「細項」（地價稅、罰款…；舊欄位一字不變、位置不變）
-        csv += "id,title,amount,date,type,category,recurrence,fuelLiters,note,細項\n"
+        // [v25.634] 最後再多兩欄「自己那份」「要還我還沒還」（只有數字、沒有名字；沒分帳＝amount、0；舊欄位一字不變、位置不變）
+        csv += "id,title,amount,date,type,category,recurrence,fuelLiters,note,細項,自己那份,要還我還沒還\n"
         let kinds = ExpenseKindIndex(book: expense.expenseKinds ?? ExpenseKindBook())
+        let splitIndex = ExpenseSplitIndex(book: expense.expenseSplits ?? ExpenseSplitBook())
         for e in expense.expenses.sorted(by: { $0.date < $1.date }) {
             let fields: [String] = [
                 e.id.uuidString,
@@ -324,7 +331,9 @@ enum UnifiedExporter {
                 e.recurrence?.rawValue ?? "",
                 e.fuelLiters.map { String(format: "%.2f", $0) } ?? "",
                 esc(e.note),
-                esc(kinds.kind(of: e)?.kind.raw ?? "")
+                esc(kinds.kind(of: e)?.kind.raw ?? ""),
+                String(format: "%.2f", splitIndex.ownAmount(e)),
+                String(format: "%.2f", splitIndex.outstanding(e))
             ]
             csv += fields.joined(separator: ",") + "\n"
         }
@@ -964,6 +973,14 @@ enum UnifiedImporter {
                     ExpenseKindStore.shared.importReplacing(ids: Set(payload.expense.expenses.map(\.id)), with: kb)
                 }
             }
+            // [v25.634] 分帳：同上（備份裡有才換；整批記帳歸這份檔案管才整包換；旅遊那幾筆照 id 換）
+            if let sb = payload.expense.expenseSplits {
+                if scope.ownsAllExpenses {
+                    ExpenseSplitStore.shared.importReplacingAll(sb)
+                } else if scope.carriesSomeExpenses {
+                    ExpenseSplitStore.shared.importReplacing(ids: Set(payload.expense.expenses.map(\.id)), with: sb)
+                }
+            }
             if scope.carriesFinance {
                 finance.insurances = payload.finance.insurances
                 finance.stocks = payload.finance.stocks
@@ -1089,6 +1106,10 @@ enum UnifiedImporter {
             // [v25.615] 細項：照 id 合併（同一筆取後改的、墓碑勝過比它舊的；一樣新留本機的）
             if let kb = payload.expense.expenseKinds {
                 ExpenseKindStore.shared.importMerging(kb)
+            }
+            // [v25.634] 分帳：一個人一個人合（還款聯集；一樣新留本機的）
+            if let sb = payload.expense.expenseSplits {
+                ExpenseSplitStore.shared.importMerging(sb)
             }
 
             life.withBatch {

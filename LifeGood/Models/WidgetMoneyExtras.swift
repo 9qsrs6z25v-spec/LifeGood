@@ -282,10 +282,10 @@ enum WidgetMoneyExtras {
         var daily = Array(repeating: 0.0, count: b.daysInMonth)
         for e in expense.expenses where e.expenseType == .variable
             && cal.isDate(e.date, equalTo: day, toGranularity: .month) {
-            b.variable += e.amount
+            b.variable += expense.ownAmount(e)
             if cal.isDate(e.date, inSameDayAs: day) { b.todayCount += 1 }
             let i = cal.component(.day, from: e.date) - 1
-            if daily.indices.contains(i) { daily[i] += e.amount }
+            if daily.indices.contains(i) { daily[i] += expense.ownAmount(e) }
         }
         if daily.indices.contains(b.day - 1) { b.todayVariable = daily[b.day - 1] }
         b.daily = Array(daily.prefix(b.day))

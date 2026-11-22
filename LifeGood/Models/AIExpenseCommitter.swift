@@ -63,6 +63,7 @@ enum AIExpenseCommitter {
                        finance: FinanceStore, id: UUID? = nil, date: Date? = nil,
                        trip: AIExpenseTripLink? = nil) async -> AIExpenseOutcome {
         do {
+            // [v25.634] 只送本人＋家人：朋友、同事、部屬的名字不送給 AI（隱私；同行人員名單這版擴大了，這裡刻意不跟著擴）
             // 把家庭成員姓名與本人名字一起送給 AI，讓它從固定清單選同行者
             // 優先用中文姓名，沒填才用英文姓名
             func memberName(_ chinese: String, _ english: String) -> String {

@@ -141,6 +141,8 @@ struct ChartView: View {
     /// 快取圓餅圖資料，避免 chartCarousel 與隱藏量測層各算一次（每次都是 O(n) 掃描）
     @State private var variableBreakdownCache: [(category: VariableCategory, amount: Double)] = []
     @State private var fixedBreakdownCache: [(group: FixedGroup, amount: Double)] = []
+    /// [v25.634] C8：這個月有分帳的飯扣掉多少的說明小字（變動支出圓餅那張卡最下面；沒扣＝nil）
+    @State private var splitNote: String?
     @State private var typeBreakdownAppeared = false
     // 各圖表空白態脈衝動畫獨立管理，避免量測層同時渲染三個圖表時共用旗標造成動畫互搶與閃爍
     @State private var trendEmptyPulse = false
@@ -329,6 +331,8 @@ struct ChartView: View {
         chartData = store.chartData(for: period)
         variableBreakdownCache = store.variableBreakdown(for: period)
         fixedBreakdownCache = store.fixedBreakdown(for: period)
+        // [v25.634] 只有總數、沒有名字；ExpenseStore 的統計已經只算自己那份，這裡只是說明扣了多少
+        splitNote = ExpenseSplitText.statsNote(ExpenseSplitStore.shared.index.deducted(expenses: store.expenses, month: Date(), calendar: .current))
         isLoading = false
     }
 
@@ -687,6 +691,10 @@ struct ChartView: View {
                 // [v3] 傳入 rowsAppearedBinding 控制圖例行交錯進場
                 pieChartBody(entries: entries.map { ($0.category.rawValue, MoneyArtTheme.of($0.category), $0.amount) },
                              total: total, rowsAppeared: rowsAppearedBinding)
+            }
+            // [v25.634] C8 說明小字（這個月有扣才出現）
+            if let n = splitNote {
+                Text(n).font(.caption2).foregroundStyle(.secondary)
             }
         }
         .frame(maxWidth: .infinity)))

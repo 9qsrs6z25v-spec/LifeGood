@@ -200,6 +200,9 @@ struct VariableBoardData: Equatable {
     var topPlaceCount = 0
     /// 這個月一毛都沒花的天數（從開始記帳那天起算到昨天；今天還沒過完不算）
     var noSpendDays = 0
+    /// [v25.634] 有分帳的飯這個月扣掉多少的說明小字（「有分帳的飯只算你自己那份：…」）；沒扣＝nil。
+    /// 只有總數、沒有名字（變動支出頁看板下面顯示）
+    var splitNote: String? = nil
 
     var dailyAvg: Double { total / Double(max(day, 1)) }
 
@@ -218,14 +221,14 @@ struct VariableBoardData: Equatable {
         var places: [String: Int] = [:]
         var largest: Expense? = nil
         for e in variables where cal.isDate(e.date, equalTo: now, toGranularity: .month) {
-            d.total += e.amount
+            d.total += store.ownAmount(e)
             d.count += 1
             if cal.isDate(e.date, inSameDayAs: now) {
-                d.today += e.amount
+                d.today += store.ownAmount(e)
                 d.todayCount += 1
             }
             spentDays.insert(cal.component(.day, from: e.date))
-            byCategory[e.variableCategory ?? .other, default: 0] += e.amount
+            byCategory[e.variableCategory ?? .other, default: 0] += store.ownAmount(e)
             if let p = e.placeName?.trimmingCharacters(in: .whitespacesAndNewlines), !p.isEmpty {
                 places[p, default: 0] += 1
             }
@@ -275,9 +278,11 @@ struct VariableBoardData: Equatable {
                   let firstEver, firstEver <= m else { continue }
             let mDays = cal.range(of: .day, in: .month, for: m)?.count ?? 30
             guard let cut = cal.date(byAdding: .day, value: min(d.day, mDays), to: m) else { continue }
-            sums.append(variables.filter { $0.date >= m && $0.date < cut }.reduce(0) { $0 + $1.amount })
+            sums.append(variables.filter { $0.date >= m && $0.date < cut }.reduce(0) { $0 + store.ownAmount($1) })
         }
         d.samePeriodAvg = sums.isEmpty ? nil : sums.reduce(0, +) / Double(sums.count)
+        // [v25.634] C8：這個月因為分帳扣掉的（要還我，已還、沒還都算）；沒用分帳＝0 → nil
+        d.splitNote = ExpenseSplitText.statsNote(ExpenseSplitStore.shared.index.deducted(expenses: variables, month: now, calendar: cal))
         return d
     }
 }
@@ -422,7 +427,7 @@ struct IncomeBoardData: Equatable {
             if lastIncome > 0 {
                 let lastVariable = store.expenses
                     .filter { $0.expenseType == .variable && $0.date >= lastStart && $0.date < monthStart }
-                    .reduce(0) { $0 + $1.amount }
+                    .reduce(0) { $0 + store.ownAmount($1) }
                 let lastFixed = store.fixedMonthlyTotal(for: monthStart.addingTimeInterval(-1))
                 let saved = lastIncome - lastVariable - lastFixed
                 d.lastMonthSaving = saved / lastIncome
