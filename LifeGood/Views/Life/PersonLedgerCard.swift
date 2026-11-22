@@ -2,8 +2,9 @@ import SwiftUI
 
 // [v25.635] 往來卡 PersonLedgerCard（peoplehub1 G1；judge_peoplehub §C2）
 //
-// 名片詳情頁用（25.636 起家人頁、朋友頁也用同一個）。全部是純值＋closure：卡片本身不讀 store、不寫任何東西、沒有分享鈕。
-// - 預設收合（展開狀態只放 @State，不記住）：一行「一起吃飯 6 頓・最近 11/18」＋「還有 1 頓沒還」，收合時看不到任何金額。
+// 名片詳情頁用（25.636 起家人頁、朋友頁也用同一個，經 PersonLedgerSlot.swift）。全部是純值＋closure：卡片本身不讀 store、不寫任何東西、沒有分享鈕。
+// - [v25.636] 使用者選「預設打開」：每次打開都是展開的（展開狀態只放 @State，不記住）；按收合那一行可以收起來，
+//   收起來只剩「一起吃飯 6 頓・最近 11/18」＋「還有 1 頓沒還」，收合時看不到任何金額（照舊）。VoiceOver 會念「展開／收合」。
 // - 展開：摘要（0 的不顯示）→「還欠我」每列〔已還〕→「最近」先 5 筆〔看全部 N 筆〕→ 同名提醒 → 隱私小字。
 // - 是自己：整張卡只有一行「這是你自己的名片」。
 // - 卡內每段包 AnyView、每一列是 fileprivate struct（25.618 閃退教訓：型別不要疊太深）。
@@ -18,8 +19,8 @@ struct PersonLedgerCard: View {
     /// 〔已還〕：(expenseId, shareId)；寫入是呼叫端開的 SplitRepaySheet 自己做
     let onRepay: (UUID, UUID) -> Void
 
-    /// 預設收合（不記住；每次打開名片都是收起來的）
-    @State private var expanded = false
+    /// [v25.636] 預設打開（使用者 25.635 出貨後選的；不記住，每次打開都是展開的）
+    @State private var expanded = true
     /// 「最近」看全部（卡內展開，不另開頁）
     @State private var showAll = false
 
@@ -160,7 +161,7 @@ struct PersonLedgerCard: View {
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
             }
-            Text(PersonLedgerText.privacy)
+            Text(snapshot.privacyText)
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
@@ -195,6 +196,8 @@ fileprivate struct PersonLedgerHeaderRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
+        // [v25.636] VoiceOver 念出現在是展開還是收合（25.635 adjudicate §4）
+        .accessibilityValue(expanded ? PersonLedgerText.a11yExpanded : PersonLedgerText.a11yCollapsed)
     }
 }
 

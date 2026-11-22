@@ -13,6 +13,9 @@ import Foundation
 // - 還欠我＝跟「誰還欠我」同一條（要還我、還沒還清、還欠 ≥ 0.5 元）；已還算全部時間（不套「還清了」的 90 天）。
 // - 自己（個人資料的中文名；中文名空才用英文名）在名字組合裡 → 只寫「這是你自己的名片」，什麼都不算。
 // 名字、金額只在 App 內頁：不上通知、小工具、手錶、鎖定畫面、靈動島；名片 QR、vCard、匯出到聯絡人都不帶（複製出來的名片同名，改名前往來一樣）。
+// [v25.636] peoplehub2：同名提醒裡分組是「家人」的人際關係算「家人」（以前寫「朋友」）；多一支通用的 snapshot(subject:…)
+// 給家人頁、朋友頁用（PersonLedgerSubject；名片頁照舊用 cardSnapshot，一行沒改）；snapshot 多 privacyText（卡片最底下那行小字）。
+// 朋友（既有 Relationship，一個欄位都沒加）的純函式在 Models/FriendBook.swift。
 
 // MARK: - 值
 
@@ -164,6 +167,35 @@ struct PersonLedgerExclude: Equatable {
     }
 }
 
+/// [v25.636] 家人頁、朋友頁的往來卡要算誰（名字組合、數同名時不算的那一筆、是自己時那一行字）
+struct PersonLedgerSubject: Equatable {
+    let primary: String
+    let extra: [String]
+    let exclude: PersonLedgerExclude
+    let selfText: String
+
+    init(primary: String, extra: [String], exclude: PersonLedgerExclude, selfText: String) {
+        self.primary = primary
+        self.extra = extra
+        self.exclude = exclude
+        self.selfText = selfText
+    }
+
+    /// 朋友：Relationship.name（v3 才加別名）
+    static func friend(_ r: Relationship) -> PersonLedgerSubject {
+        PersonLedgerSubject(primary: r.name, extra: [], exclude: PersonLedgerExclude(relationshipId: r.id),
+                            selfText: PersonLedgerText.selfPerson)
+    }
+
+    /// 家人：中文名；中文名空才用英文名（跟 SplitPeople.meAndFamily 一致）
+    static func family(_ m: FamilyMember) -> PersonLedgerSubject {
+        let c = m.chineseName.trimmingCharacters(in: .whitespaces)
+        return PersonLedgerSubject(primary: c.isEmpty ? m.englishName : c, extra: [],
+                                   exclude: PersonLedgerExclude(familyMemberId: m.id),
+                                   selfText: PersonLedgerText.selfPerson)
+    }
+}
+
 /// 往來卡要的全部（畫面只拿這個；@State 放一份）
 struct PersonLedgerSnapshot: Equatable {
     var entries: [PersonLedgerEntry] = []
@@ -172,6 +204,8 @@ struct PersonLedgerSnapshot: Equatable {
     var sameNameText: String? = nil
     /// 是自己＝「這是你自己的名片」（其他都不算）
     var selfText: String? = nil
+    /// [v25.636] 卡片最底下那行隱私小字（名片頁照舊；家人頁、朋友頁用 PersonLedgerText.privacyPerson）
+    var privacyText: String = PersonLedgerText.privacy
 
     init() {}
 
@@ -320,7 +354,8 @@ enum PersonLedger {
             add(.family, c.isEmpty ? m.englishName : c)
         }
         for r in life.relationships where r.id != exclude.relationshipId {
-            add(.relationship, r.name)
+            // [v25.636] 分組是「家人」的算家人（同名提醒寫「家人」不寫「朋友」）
+            add(r.group == .family ? .family : .relationship, r.name)
         }
         for s in life.subordinates where s.id != exclude.subordinateId {
             add(.subordinate, s.name)
@@ -374,6 +409,29 @@ enum PersonLedger {
         return snap
     }
 
+    /// [v25.636] 家人頁、朋友頁的往來卡（.task(id:) 裡叫；只讀）。規則跟 cardSnapshot 一樣，只是名字組合、
+    /// 不算同名的那一筆、是自己時那一行字由 subject 給；隱私小字換成 privacyPerson
+    static func snapshot(subject: PersonLedgerSubject, life: LifeStore, expenses: [Expense],
+                         index: ExpenseSplitIndex) -> PersonLedgerSnapshot {
+        let keys = names(primary: subject.primary, extra: subject.extra)
+        var snap = PersonLedgerSnapshot()
+        snap.privacyText = PersonLedgerText.privacyPerson
+        guard !keys.isEmpty else { return snap }
+        let me = meKeys(life.profile)
+        if isSelf(keys: keys, meKeys: me) {
+            snap.selfText = subject.selfText
+            return snap
+        }
+        let list = entries(expenses: expenses, index: index, keys: keys, meKeys: me)
+        guard !list.isEmpty else { return snap }
+        snap.entries = list
+        snap.summary = summary(list)
+        let hits = sameNameHits(keys: keys, life: life, exclude: subject.exclude)
+        snap.sameNameText = PersonLedgerText.sameName(names: displayNames(primary: subject.primary, extra: subject.extra),
+                                                      hits: hits)
+        return snap
+    }
+
     /// C4 選人單：名單裡的名字能不能勾（有「、」逗號分號換行、超過 20 字、空的都不行；不幫使用者改名）
     static func canPick(_ name: String) -> Bool {
         switch SplitPeople.checkName(name) {
@@ -398,6 +456,13 @@ enum PersonLedgerText {
     static let collapseAll = "收起來"
     static let privacy = "照記帳時選的名字算；只在 App 裡看得到，名片 QR、匯出到聯絡人都不會帶到。複製出來的名片改名之前，往來會跟原本那張一樣。"
     static let pickerBlockedNote = "名字裡有逗號或太長，請先到名片改名"
+    /// [v25.636] 家人頁、朋友頁往來卡最底下那行
+    static let privacyPerson = "照記帳時選的名字算；只在 App 裡看得到，不會上通知、小工具、手錶、鎖定畫面。"
+    /// [v25.636] 家人頁、朋友頁：名字跟個人資料一樣
+    static let selfPerson = "名字跟你自己的一樣，往來不另外算"
+    /// [v25.636] 往來卡收合那一行的 VoiceOver 值
+    static let a11yExpanded = "展開"
+    static let a11yCollapsed = "收合"
 
     /// 收合那一行：「一起吃飯 6 頓・一起出去 2 次・最近 11/18」（沒有金額）
     static func header(_ s: PersonLedgerSummary, calendar: Calendar) -> String {

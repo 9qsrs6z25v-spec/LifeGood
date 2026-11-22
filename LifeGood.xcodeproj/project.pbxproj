@@ -297,6 +297,10 @@
 		A01B000001001683 /* OwedListView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001683 /* OwedListView.swift */; };
 		A01B000001001684 /* PersonLedger.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001684 /* PersonLedger.swift */; };
 		A01B000001001685 /* PersonLedgerCard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001685 /* PersonLedgerCard.swift */; };
+		A01B000001001686 /* FriendBook.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001686 /* FriendBook.swift */; };
+		A01B000001001687 /* PersonLedgerSlot.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001687 /* PersonLedgerSlot.swift */; };
+		A01B000001001688 /* FriendsResumeView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001688 /* FriendsResumeView.swift */; };
+		A01B000001001689 /* FriendDetailView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001689 /* FriendDetailView.swift */; };
 		A01B000001001619 /* OrgMoveCardParts.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001619 /* OrgMoveCardParts.swift */; };
 		A01B000001001621 /* OrgMoveWizardRows.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001621 /* OrgMoveWizardRows.swift */; };
 		A01B000001001623 /* OrgMoveDueViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001623 /* OrgMoveDueViews.swift */; };
@@ -723,6 +727,10 @@
 		A01A000001001683 /* OwedListView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OwedListView.swift; sourceTree = "<group>"; };
 		A01A000001001684 /* PersonLedger.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonLedger.swift; sourceTree = "<group>"; };
 		A01A000001001685 /* PersonLedgerCard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonLedgerCard.swift; sourceTree = "<group>"; };
+		A01A000001001686 /* FriendBook.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendBook.swift; sourceTree = "<group>"; };
+		A01A000001001687 /* PersonLedgerSlot.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = PersonLedgerSlot.swift; sourceTree = "<group>"; };
+		A01A000001001688 /* FriendsResumeView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendsResumeView.swift; sourceTree = "<group>"; };
+		A01A000001001689 /* FriendDetailView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = FriendDetailView.swift; sourceTree = "<group>"; };
 		A01A000001001619 /* OrgMoveCardParts.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveCardParts.swift; sourceTree = "<group>"; };
 		A01A000001001621 /* OrgMoveWizardRows.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveWizardRows.swift; sourceTree = "<group>"; };
 		A01A000001001623 /* OrgMoveDueViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = OrgMoveDueViews.swift; sourceTree = "<group>"; };
@@ -1133,6 +1141,7 @@
 				A01A000001001665 /* UtilityReadings.swift */,
 				A01A000001001680 /* ExpenseSplits.swift */,
 				A01A000001001684 /* PersonLedger.swift */,
+				A01A000001001686 /* FriendBook.swift */,
 				A01A000001001666 /* UtilityBillOCR.swift */,
 				A01A000001001668 /* UtilityHighNotice.swift */,
 				A01A000001001669 /* UtilityHighNoticeCenter.swift */,
@@ -1270,6 +1279,9 @@
 				A01A000001000099 /* SubordinateOverviewView.swift */,
 				A01A00000100009A /* BusinessCardView.swift */,
 				A01A000001001685 /* PersonLedgerCard.swift */,
+				A01A000001001687 /* PersonLedgerSlot.swift */,
+				A01A000001001688 /* FriendsResumeView.swift */,
+				A01A000001001689 /* FriendDetailView.swift */,
 				A01A00000100009B /* TaxOverviewView.swift */,
 				A01A000001001661 /* TaxPaidSections.swift */,
 				A01A000001000035 /* GradeTitleView.swift */,
@@ -1965,6 +1977,10 @@
 				A01B000001001683 /* OwedListView.swift in Sources */,
 				A01B000001001684 /* PersonLedger.swift in Sources */,
 				A01B000001001685 /* PersonLedgerCard.swift in Sources */,
+				A01B000001001686 /* FriendBook.swift in Sources */,
+				A01B000001001687 /* PersonLedgerSlot.swift in Sources */,
+				A01B000001001688 /* FriendsResumeView.swift in Sources */,
+				A01B000001001689 /* FriendDetailView.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
