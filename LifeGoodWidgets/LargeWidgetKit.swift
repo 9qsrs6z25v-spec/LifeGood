@@ -1297,3 +1297,322 @@ enum LedgerDeskTodayLayout {
         }
     }
 }
+
+// MARK: - [v25.638 large4] 第四版共用：一按就記（大）、部屬今天（大，只放數字）
+//
+// 規格見 scratchpad/radar/build/large4/brief.md（主控定案）；judge_largewidgets.md §C 第四版。
+// **上面第一、二、三版的部分一個字都不改**（keycheck_large4 檢查 a306017 的這個檔是現在這個檔的開頭）。
+// 總設計先做好，G1（一按就記）、G2（部屬今天）只呼叫、不改。sim_large4.py 一個函式一個函式對照。
+//
+// 這一段提供：
+//   • QuickRecordLargeLayout   一按就記・大：畫幾個範本（最多 8）、最後一格「＋ 記一筆」、幾排、按鈕多高、頁腳畫不畫
+//   • TeamLargeLayout          部屬今天・大：明天那一行畫不畫、各廠區表放幾列
+//   • TeamLargeCell／TeamLargePlantRow／TeamLargeModel
+//                              部屬今天・大要畫的東西：**只有數字**（人數、件數）與 App 寫的班別字、日期字、廠區字。
+//                              沒有任何名字、假別、事由、生日、分數、評價、任務主題；不讀「顯示名字」「顯示假別」
+//                              （make 根本不拿設定，只拿快照、時間、廠區）
+
+// MARK: 一按就記（大）的格子與高度
+
+/// ① 表頭（「一按就記」＋右邊「待入帳 2 筆」；剛記完換成既有的「✓ 已記…・復原」）→ ② 2×4 範本按鈕
+///（範本不滿 8 個時最後一格「＋ 記一筆」，其餘格子不畫）→ ③ 頁腳「打開 LifeGood 就會記進帳本」。
+/// 放不下照順序砍：按鈕 60 → 52 → 46pt（都 ≥ 44pt）、先帶頁腳再不帶。字級不變、格數不變
+enum QuickRecordLargeLayout {
+    /// 表頭一行（字 12pt；剛記完的橫幅也在這一行）
+    static let headerHeight: CGFloat = 28
+    /// 表頭和第一排按鈕之間
+    static let gridTopGap: CGFloat = 8
+    /// 按鈕左右、上下的間距
+    static let tileSpacing: CGFloat = 8
+    /// 一排幾格
+    static let columns = 2
+    /// 最多幾格（App 最多寫 8 個範本：WidgetMoneyExtras.templateMaxCount）
+    static let maxTiles = 8
+    /// 按鈕高（依序試）；最矮的也 ≥ 44pt
+    static let tallTileHeight: CGFloat = 60
+    static let tileHeight: CGFloat = 52
+    static let compactTileHeight: CGFloat = 46
+    /// 頁腳（LargeWidgetFooterLine：字貼底）
+    static let footerHeight: CGFloat = 20
+
+    struct Plan: Equatable {
+        let tileHeight: CGFloat
+        let showsFooter: Bool
+    }
+
+    /// 畫幾個範本（大型最多 8；小型、中型照舊只畫前 4 個，不經過這裡）
+    static func templateLimit(_ templateCount: Int) -> Int {
+        min(maxTiles, max(0, templateCount))
+    }
+
+    /// 最後一格放不放「＋ 記一筆」：有範本、而且不滿 8 個（0 個範本畫一句說明，不畫格子）
+    static func showsAddTile(templateCount: Int) -> Bool {
+        let n: Int = templateLimit(templateCount)
+        return n > 0 && n < maxTiles
+    }
+
+    /// 一共幾格（範本＋「＋ 記一筆」）：0 → 0、1 → 2、4 → 5、7 → 8、8 → 8、9 → 8
+    static func cellCount(templateCount: Int) -> Int {
+        let n: Int = templateLimit(templateCount)
+        return showsAddTile(templateCount: n) ? n + 1 : n
+    }
+
+    /// 幾排（一排 2 格；最多 4 排）
+    static func rows(cellCount: Int) -> Int {
+        let n: Int = min(maxTiles, max(0, cellCount))
+        return (n + columns - 1) / columns
+    }
+
+    /// 照 2 格一排切（最多 8 格）；最後一排只有 1 格時右邊由畫面補空白（按鈕大小不變）
+    static func chunked<T>(_ cells: [T]) -> [[T]] {
+        let n: Int = min(maxTiles, cells.count)
+        var out: [[T]] = []
+        var i: Int = 0
+        while i < n {
+            let end: Int = min(i + columns, n)
+            out.append(Array(cells[i..<end]))
+            i = end
+        }
+        return out
+    }
+
+    static func height(_ plan: Plan, rows: Int) -> CGFloat {
+        let stack: CGFloat = LargeWidgetFit.stack(rows: rows, rowHeight: plan.tileHeight, spacing: tileSpacing)
+        let grid: CGFloat = rows > 0 ? gridTopGap + stack : 0
+        let footer: CGFloat = plan.showsFooter ? footerHeight : 0
+        return headerHeight + grid + footer
+    }
+
+    /// 先帶頁腳試按鈕 60 → 52 → 46，再不帶頁腳試一次；都放不下＝46、不帶頁腳
+    static func plan(available: CGFloat, rows: Int) -> Plan {
+        let heights: [CGFloat] = [tallTileHeight, tileHeight, compactTileHeight]
+        let footers: [Bool] = [true, false]
+        for footer in footers {
+            for h in heights {
+                let p = Plan(tileHeight: h, showsFooter: footer)
+                if LargeWidgetFit.fits(height(p, rows: rows), in: available) { return p }
+            }
+        }
+        return Plan(tileHeight: compactTileHeight, showsFooter: false)
+    }
+
+    static func candidates(rows: Int) -> [Plan] {
+        LargeWidgetFit.candidates { (h: CGFloat) -> Plan in
+            plan(available: h, rows: rows)
+        }
+    }
+}
+
+// MARK: 部屬今天（大）的高度
+
+/// ① 表頭「部屬」（選了廠區「部屬 A」）＋右邊「10/13 週二」→ ② 今天三格（請假一定第一格）→ ③「明天 10/14 週三
+/// 請假 1・大夜 3・小夜 2」→ ④「任務」區標＋四格件數（逾期、今天到期、未完成、週報逾期）→ ⑤「各廠區」表（2 個以上廠區才畫）。
+/// 放不下照順序砍：⑤ 6 → 5 → 4 → 3 → 2 列（超過的併成「其他 N 區」）→ 不畫 ⑤ → 不畫 ③。字級不變
+enum TeamLargeLayout {
+    static let headerHeight: CGFloat = 28
+    /// ② 上面空 8＋格子 60（班別字 12pt＋大數字 28pt）
+    static let cellsTopGap: CGFloat = 8
+    static let cellHeight: CGFloat = 60
+    static let cellSpacing: CGFloat = 8
+    /// ③ 上面空 8＋一行 18
+    static let tomorrowHeight: CGFloat = 26
+    /// ④ 區標（上面空 10＋字 14）＋四格
+    static let taskLabelHeight: CGFloat = 24
+    static let taskTileHeight: CGFloat = 46
+    static let taskTileSpacing: CGFloat = 6
+    /// ⑤ 區標那一行（「各廠區」＋欄名「逾期 今天到期 未完成 週報逾期」）＋每列
+    static let plantLabelHeight: CGFloat = 24
+    static let plantRowHeight: CGFloat = 20
+    /// ⑤ 每個數字欄的寬（廠區字吃剩下的寬）
+    static let plantColumnWidth: CGFloat = 46
+    static let maxPlantRows = 6
+    /// 依序試的廠區列數（少於 2 列不畫表）
+    static let plantLimits: [Int] = [6, 5, 4, 3, 2]
+
+    struct Plan: Equatable {
+        /// 畫不畫 ③ 明天那一行
+        let showsTomorrow: Bool
+        /// ⑤ 放幾列（0＝整塊不畫，連區標）
+        let plantRows: Int
+    }
+
+    /// ①②④ 一定有的那幾塊多高
+    static var fixedHeight: CGFloat {
+        headerHeight + cellsTopGap + cellHeight + taskLabelHeight + taskTileHeight
+    }
+
+    /// ⑤ n 列多高（少於 2 列 0）
+    static func plantHeight(rows n: Int) -> CGFloat {
+        guard n >= 2 else { return 0 }
+        return plantLabelHeight + CGFloat(n) * plantRowHeight
+    }
+
+    static func height(_ plan: Plan) -> CGFloat {
+        let tomorrow: CGFloat = plan.showsTomorrow ? tomorrowHeight : 0
+        return fixedHeight + tomorrow + plantHeight(rows: plan.plantRows)
+    }
+
+    /// hasTomorrow：快照有明天那一份；plantCount：要列的廠區數（選了廠區、只有一個廠區時 0）
+    static func plan(available: CGFloat, hasTomorrow: Bool, plantCount: Int) -> Plan {
+        let count: Int = min(maxPlantRows, max(0, plantCount))
+        if count >= 2 {
+            var tried: [Int] = []
+            for limit in plantLimits {
+                let rows: Int = min(limit, count)
+                if tried.contains(rows) { continue }
+                tried.append(rows)
+                let p = Plan(showsTomorrow: hasTomorrow, plantRows: rows)
+                if LargeWidgetFit.fits(height(p), in: available) { return p }
+            }
+        }
+        let noTable = Plan(showsTomorrow: hasTomorrow, plantRows: 0)
+        if LargeWidgetFit.fits(height(noTable), in: available) { return noTable }
+        return Plan(showsTomorrow: false, plantRows: 0)
+    }
+
+    static func candidates(hasTomorrow: Bool, plantCount: Int) -> [Plan] {
+        LargeWidgetFit.candidates { (h: CGFloat) -> Plan in
+            plan(available: h, hasTomorrow: hasTomorrow, plantCount: plantCount)
+        }
+    }
+}
+
+// MARK: 部屬今天（大）要畫的東西（只有數字）
+
+/// 今天的一格：班別字（App 寫的「請假」「大夜」）＋人數。**沒有名字**
+struct TeamLargeCell: Equatable, Identifiable {
+    /// 「leave」「shift-大夜」（WidgetTeamCell.id）
+    let id: String
+    let label: String
+    let count: Int
+}
+
+/// 各廠區表的一列：廠區字＋四個件數。**沒有名字**
+struct TeamLargePlantRow: Equatable, Identifiable {
+    /// 「p:A」；未分廠區「p:」；併起來的那一列「more」
+    let id: String
+    /// 「A」「未分廠區」「其他 3 區」
+    let area: String
+    let overdue: Int
+    let dueToday: Int
+    let open: Int
+    let reports: Int
+}
+
+/// 部屬今天・大。make 只拿快照、時間、廠區（**不拿「顯示名字」「顯示假別」**），
+/// 只抄人數、件數、App 寫的班別字與日期字；名字、假別、事由、生日、任務主題一個都不存
+struct TeamLargeModel: Equatable {
+    /// 「未分廠區」（廠區是空字串的那一筆）
+    static let unassignedText = "未分廠區"
+
+    /// 沒快照、沒有部屬、過期：只寫一句話
+    var isMessage = true
+    var message = ""
+    var hint = ""
+    /// 「部屬」；選了廠區「部屬 A」
+    var title = ""
+    /// 「10/13 週二」
+    var dateText = ""
+    /// 今天最多三格：請假一定第一格（0 人也有），再來人數多的班別（同中型 WidgetTeamSummary.cells）
+    var cells: [TeamLargeCell] = []
+    /// 今天有沒有排班（只有請假那一格時右邊寫「今天沒有排班」）
+    var hasShifts = false
+    /// 「10/14 週三」；沒有明天那一份（過了午夜 App 沒開）是空字串
+    var tomorrowDate = ""
+    /// 「請假 1・大夜 3・小夜 2」；沒有明天那一份是空字串
+    var tomorrowLine = ""
+    var overdueTasks = 0
+    var dueTodayTasks = 0
+    var openTasks = 0
+    var overdueReports = 0
+    /// 四個件數都是 0（區標右邊寫「都完成了」）
+    var allDone = false
+    /// 各廠區（App 的順序：廠區清單排好、未分廠區最後）；2 個以上才有，選了廠區時空的
+    var plants: [TeamLargePlantRow] = []
+
+    var hasTomorrow: Bool { !tomorrowLine.isEmpty }
+
+    static func make(snapshot: WidgetLifeSnapshot?, date: Date, plantArea: String?) -> TeamLargeModel {
+        var m = TeamLargeModel()
+        guard let snap = snapshot else {
+            m.message = "打開 LifeGood 一次，這裡就會出現部屬今天"
+            return m
+        }
+        guard snap.hasTeam == true else {
+            m.message = "還沒有部屬資料"
+            m.hint = "在 App 的部屬管理加入"
+            return m
+        }
+        guard !snap.isExpired(at: date), let day = snap.teamDay(at: date) else {
+            m.message = "打開 LifeGood 更新"
+            return m
+        }
+        m.isMessage = false
+        fillToday(&m, day: day, plantArea: plantArea)
+        fillTomorrow(&m, snap: snap, today: day, plantArea: plantArea)
+        m.plants = plantList(day.counts, plantArea: plantArea)
+        return m
+    }
+
+    /// 標題、三格、四個件數（只抄 label 與人數；cells 的 people 不碰名字）
+    private static func fillToday(_ m: inout TeamLargeModel, day: WidgetTeamDay, plantArea: String?) {
+        let summary: WidgetTeamSummary = day.summary(plantArea: plantArea)
+        if let plant = plantArea, !plant.isEmpty {
+            m.title = "部屬 " + plant
+        } else {
+            m.title = "部屬"
+        }
+        m.dateText = summary.dateText
+        m.cells = summary.cells.map { (c: WidgetTeamCell) -> TeamLargeCell in
+            TeamLargeCell(id: c.id, label: c.label, count: c.count)
+        }
+        m.hasShifts = summary.cells.contains { (c: WidgetTeamCell) -> Bool in !c.isLeave }
+        m.overdueTasks = summary.overdueTasks
+        m.dueTodayTasks = summary.dueTodayTasks
+        m.openTasks = summary.openTasks
+        m.overdueReports = summary.overdueReports
+        m.allDone = summary.overdueTasks == 0 && summary.dueTodayTasks == 0
+            && summary.openTasks == 0 && summary.overdueReports == 0
+    }
+
+    /// 明天那一份（今天那一份結束那一刻的那一份）；沒有、或跟今天是同一份就不畫
+    private static func fillTomorrow(_ m: inout TeamLargeModel, snap: WidgetLifeSnapshot, today: WidgetTeamDay,
+                                     plantArea: String?) {
+        guard let next = snap.teamDay(at: today.dayEnd), next.dayKey != today.dayKey else { return }
+        let summary: WidgetTeamSummary = next.summary(plantArea: plantArea)
+        m.tomorrowDate = next.dateText
+        m.tomorrowLine = summary.countsLine()
+    }
+
+    /// 各廠區：選了廠區、或只有一個廠區（含只有未分廠區）時空的
+    private static func plantList(_ counts: [WidgetTeamCounts], plantArea: String?) -> [TeamLargePlantRow] {
+        if let plant = plantArea, !plant.isEmpty { return [] }
+        guard counts.count >= 2 else { return [] }
+        return counts.map { (c: WidgetTeamCounts) -> TeamLargePlantRow in
+            let area: String = c.plantArea.isEmpty ? unassignedText : c.plantArea
+            return TeamLargePlantRow(id: "p:" + c.plantArea, area: area, overdue: c.overdueTasks,
+                                     dueToday: c.dueTodayTasks, open: c.openTasks, reports: c.overdueReports)
+        }
+    }
+
+    /// 表上要畫的列：放得下就全部；放不下時前 limit − 1 個廠區＋「其他 N 區」（四個件數加起來）。limit < 2 回空的
+    func plantRows(limit: Int) -> [TeamLargePlantRow] {
+        guard limit >= 2, plants.count >= 2 else { return [] }
+        if plants.count <= limit { return plants }
+        let shown: [TeamLargePlantRow] = Array(plants.prefix(limit - 1))
+        let rest: [TeamLargePlantRow] = Array(plants.dropFirst(limit - 1))
+        var overdue: Int = 0
+        var dueToday: Int = 0
+        var open: Int = 0
+        var reports: Int = 0
+        for p in rest {
+            overdue += p.overdue
+            dueToday += p.dueToday
+            open += p.open
+            reports += p.reports
+        }
+        let more = TeamLargePlantRow(id: "more", area: "其他 " + String(rest.count) + " 區", overdue: overdue,
+                                     dueToday: dueToday, open: open, reports: reports)
+        return shown + [more]
+    }
+}

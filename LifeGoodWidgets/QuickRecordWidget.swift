@@ -28,11 +28,11 @@ import AppIntents
 struct QuickRecordWidget: Widget {
     var body: some WidgetConfiguration {
         StaticConfiguration(kind: WidgetKind.quickRecord, provider: QuickRecordWidgetProvider()) { entry in
-            QuickRecordWidgetEntryView(entry: entry)
+            QuickRecordRootView(entry: entry)
         }
         .configurationDisplayName("一按就記")
-        .description("常記的東西按一下就記好，不用開 App")
-        .supportedFamilies([.systemSmall, .systemMedium])
+        .description("常記的東西按一下就記好，不用開 App；大的一次放 8 個")
+        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge])
     }
 }
 
@@ -53,12 +53,19 @@ struct QuickRecordWidgetEntry: TimelineEntry {
 
 struct QuickRecordWidgetProvider: TimelineProvider {
     func placeholder(in context: Context) -> QuickRecordWidgetEntry {
-        QuickRecordWidgetSample.entry(now: Date())
+        if context.family == .systemLarge {
+            return QuickRecordLargeSample.entry(now: Date())
+        }
+        return QuickRecordWidgetSample.entry(now: Date())
     }
 
     func getSnapshot(in context: Context, completion: @escaping (QuickRecordWidgetEntry) -> Void) {
         if context.isPreview {
-            completion(QuickRecordWidgetSample.entry(now: Date()))
+            if context.family == .systemLarge {
+                completion(QuickRecordLargeSample.entry(now: Date()))
+            } else {
+                completion(QuickRecordWidgetSample.entry(now: Date()))
+            }
             return
         }
         let entry = QuickRecordWidgetEntry(date: Date(),
@@ -562,5 +569,431 @@ private struct QuickRecordWidgetPendingLine: View {
             .font(.system(size: 10, weight: .semibold))
             .foregroundStyle(palette.inkDate)
             .lineLimit(1)
+    }
+}
+
+// MARK: - 大型（v25.638 large4）
+//
+// judge_largewidgets.md §C 第四版 C1、brief §2 G1。同一個 kind、同一個 timeline（getTimeline 一字不動），
+// QuickRecordRootView 依尺寸分：大型 → QuickRecordLargeEntryView，其他（小型、中型）→ 既有 QuickRecordWidgetEntryView（一字不動）。
+// • ① 表頭：「一按就記」＋右邊「待入帳 2 筆」；剛記完（最新一筆 10 分鐘內）整行換成既有的 QuickRecordWidgetBanner
+//   （「✓ 已記 早餐 NT$65」＋〔復原〕＝既有 UndoQuickRecordIntent）。
+// • ② 2×4 範本按鈕（一排 2 格、間距 8）：每顆 Button(intent: QuickRecordIntent(template:))，按了直接記、不開 App；
+//   範本 1–7 個時最後一格「＋ 記一筆」（Link → 新增支出），其餘格子不畫；8 個以上只畫前 8 個。
+// • ③ 頁腳「打開 LifeGood 就會記進帳本」（剛記完、表頭被橫幅佔走時改寫「待入帳 N 筆・打開 LifeGood 就會記進帳本」）。
+// • 沒有範本／舊快照／沒快照：表頭＋既有 QuickRecordWidgetEmpty（字跟中型一樣），不畫格子。
+// • 放不下只砍按鈕高（60 → 52 → 46）、再拿掉頁腳，字級不變（QuickRecordLargeLayout.candidates，ViewThatFits 4 個候選）。
+// • 隱藏金額只用 entry.hidesAmounts（provider 既有那一次）：價目換 mask、範本名稱照常。不放還能花（左半面板）。
+// • 整塊 widgetURL＝收支總覽（按鈕以外的地方）。
+//
+// 型別：QuickRecordRootView、QuickRecordLargeSample（internal）；model 與畫面零件 private。
+
+/// 依尺寸分：大型 → QuickRecordLargeEntryView；其他 → 既有 QuickRecordWidgetEntryView（小型、中型原封不動）
+struct QuickRecordRootView: View {
+    let entry: QuickRecordWidgetEntry
+
+    @Environment(\.widgetFamily) private var family
+
+    var body: some View {
+        if family == .systemLarge {
+            QuickRecordLargeEntryView(entry: entry)
+        } else {
+            QuickRecordWidgetEntryView(entry: entry)
+        }
+    }
+}
+
+/// 一格：範本按鈕，或「＋ 記一筆」（item 是 nil）
+private struct QuickRecordLargeCell: Identifiable {
+    let id: String
+    let item: QuickRecordWidgetItem?
+}
+
+/// 一排（最多 2 格；id＝第幾排）
+private struct QuickRecordLargeRow: Identifiable {
+    let id: Int
+    let cells: [QuickRecordLargeCell]
+}
+
+/// 一個候選（id 0…3，大到小）
+private struct QuickRecordLargeCandidate: Identifiable {
+    let id: Int
+    let plan: QuickRecordLargeLayout.Plan
+}
+
+/// 大型要的東西：只挑字、不算錢（sim qr_large_make）。表頭、橫幅、待入帳用既有 QuickRecordWidgetModel（同小型中型）
+private struct QuickRecordLargeModel {
+    let base: QuickRecordWidgetModel
+    let rows: [QuickRecordLargeRow]
+    /// 表頭右邊：沒有橫幅時「待入帳 N 筆」（沒有待入帳是空字串）；有橫幅時空字串
+    let trailing: String
+    /// 頁腳：有橫幅而且有待入帳時「待入帳 N 筆・打開 LifeGood 就會記進帳本」，否則「打開 LifeGood 就會記進帳本」
+    let footer: String
+    /// 固定 4 個（大到小）
+    let candidates: [QuickRecordLargeCandidate]
+
+    var interactive: Bool { !base.isSample }
+
+    /// 安全取值：index 夾在 0...count-1；沒有候選回最矮、不帶頁腳
+    func candidate(at index: Int) -> QuickRecordLargeCandidate {
+        let i: Int = max(index, 0)
+        if let picked = candidates.dropFirst(i).first {
+            return picked
+        }
+        if let last = candidates.last {
+            return last
+        }
+        let plan = QuickRecordLargeLayout.Plan(tileHeight: QuickRecordLargeLayout.compactTileHeight,
+                                               showsFooter: false)
+        return QuickRecordLargeCandidate(id: 0, plan: plan)
+    }
+
+    static func make(entry: QuickRecordWidgetEntry) -> QuickRecordLargeModel {
+        let base: QuickRecordWidgetModel = QuickRecordWidgetModel.make(entry: entry)
+        var items: [QuickRecordWidgetItem] = []
+        if base.kind == .buttons {
+            let templates: [WidgetQuickTemplate] = entry.snapshot?.templates ?? []
+            items = largeItems(templates, hidden: entry.hidesAmounts)
+        }
+        var cells: [QuickRecordLargeCell] = items.map { (it: QuickRecordWidgetItem) -> QuickRecordLargeCell in
+            QuickRecordLargeCell(id: it.id, item: it)
+        }
+        if QuickRecordLargeLayout.showsAddTile(templateCount: items.count) {
+            cells.append(QuickRecordLargeCell(id: "+add", item: nil))
+        }
+        let chunks: [[QuickRecordLargeCell]] = QuickRecordLargeLayout.chunked(cells)
+        var rows: [QuickRecordLargeRow] = []
+        for (i, chunk) in chunks.enumerated() {
+            rows.append(QuickRecordLargeRow(id: i, cells: chunk))
+        }
+        let plans: [QuickRecordLargeLayout.Plan] = QuickRecordLargeLayout.candidates(rows: rows.count)
+        var candidates: [QuickRecordLargeCandidate] = []
+        for (i, plan) in plans.enumerated() {
+            candidates.append(QuickRecordLargeCandidate(id: i, plan: plan))
+        }
+        let trailing: String = base.undoId == nil ? base.pendingShort : ""
+        let showsPendingFooter: Bool = base.undoId != nil && base.pendingCount > 0
+        let footer: String = showsPendingFooter ? base.pendingLong : "打開 LifeGood 就會記進帳本"
+        return QuickRecordLargeModel(base: base, rows: rows, trailing: trailing, footer: footer,
+                                     candidates: candidates)
+    }
+
+    /// 最多 maxTiles 顆、id 不重複（同 buttonItems 的寫法；App 已經排好：次數多到少）
+    private static func largeItems(_ templates: [WidgetQuickTemplate], hidden: Bool) -> [QuickRecordWidgetItem] {
+        var seen = Set<String>()
+        var out: [QuickRecordWidgetItem] = []
+        for t in templates where !seen.contains(t.id) {
+            seen.insert(t.id)
+            let amount: String = hidden ? WidgetHideAmounts.mask : t.amountText
+            out.append(QuickRecordWidgetItem(id: t.id, template: t, title: t.title, amountText: amount,
+                                             icon: t.icon, top: t.top, bottom: t.bottom))
+            if out.count >= QuickRecordLargeLayout.maxTiles { break }
+        }
+        return out
+    }
+}
+
+/// 大型：palette／surface 同 QuickRecordWidgetEntryView；右上有字，天空不放月牙
+private struct QuickRecordLargeEntryView: View {
+    let entry: QuickRecordWidgetEntry
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.widgetRenderingMode) private var renderingMode
+    @Environment(\.showsWidgetContainerBackground) private var showsBackground
+
+    private var surface: WidgetPalette.Surface {
+        WidgetPalette.Surface(renderingMode: renderingMode, showsBackground: showsBackground)
+    }
+
+    private var palette: WidgetPalette {
+        WidgetPalette(colorScheme, mono: surface.isMono)
+    }
+
+    private var model: QuickRecordLargeModel {
+        QuickRecordLargeModel.make(entry: entry)
+    }
+
+    var body: some View {
+        QuickRecordLargeContent(model: model, palette: palette)
+            .containerBackground(for: .widget) {
+                backgroundView
+            }
+            .widgetURL(WidgetLink.expenseOverview)
+    }
+
+    /// 著色不畫天空
+    @ViewBuilder
+    private var backgroundView: some View {
+        if surface.drawsSky {
+            WidgetSky(palette: palette, moon: WidgetSkyMoon.none)
+        } else {
+            Color.clear
+        }
+    }
+}
+
+/// 有範本 → 格子；沒有（0 個、舊快照、沒快照）→ 表頭＋一句說明（同中型的字）
+private struct QuickRecordLargeContent: View {
+    let model: QuickRecordLargeModel
+    let palette: WidgetPalette
+
+    var body: some View {
+        if model.base.kind == .buttons {
+            QuickRecordLargeBoard(model: model, palette: palette)
+        } else {
+            emptyColumn
+        }
+    }
+
+    private var emptyColumn: some View {
+        VStack(spacing: 0) {
+            QuickRecordLargeHeader(model: model, palette: palette)
+                .frame(height: QuickRecordLargeLayout.headerHeight)
+            QuickRecordWidgetEmpty(message: model.base.message, sub: model.base.messageSub, palette: palette)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+}
+
+/// 4 個候選由上往下挑（字級不變、只砍按鈕高與頁腳；不巢狀 ViewThatFits）
+private struct QuickRecordLargeBoard: View {
+    let model: QuickRecordLargeModel
+    let palette: WidgetPalette
+
+    var body: some View {
+        ViewThatFits(in: .vertical) {
+            QuickRecordLargeColumn(model: model, candidate: model.candidate(at: 0), palette: palette)
+            QuickRecordLargeColumn(model: model, candidate: model.candidate(at: 1), palette: palette)
+            QuickRecordLargeColumn(model: model, candidate: model.candidate(at: 2), palette: palette)
+            QuickRecordLargeColumn(model: model, candidate: model.candidate(at: 3), palette: palette)
+        }
+    }
+}
+
+/// 表頭（固定高）→ 格子（上面空 gridTopGap）→ Spacer →（候選帶的話）頁腳。QuickRecordLargeLayout.height 算的就是這一欄
+private struct QuickRecordLargeColumn: View {
+    let model: QuickRecordLargeModel
+    let candidate: QuickRecordLargeCandidate
+    let palette: WidgetPalette
+
+    private var plan: QuickRecordLargeLayout.Plan { candidate.plan }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            QuickRecordLargeHeader(model: model, palette: palette)
+                .frame(height: QuickRecordLargeLayout.headerHeight)
+            QuickRecordLargeGrid(rows: model.rows, tileHeight: plan.tileHeight,
+                                 interactive: model.interactive, palette: palette)
+                .padding(.top, QuickRecordLargeLayout.gridTopGap)
+            Spacer(minLength: 0)
+            footer
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    @ViewBuilder
+    private var footer: some View {
+        if plan.showsFooter {
+            LargeWidgetFooterLine(text: model.footer, palette: palette, height: QuickRecordLargeLayout.footerHeight)
+        }
+    }
+}
+
+/// 表頭一行：剛記完 → 既有「✓ 已記…・復原」；否則「一按就記」＋右邊待入帳筆數
+private struct QuickRecordLargeHeader: View {
+    let model: QuickRecordLargeModel
+    let palette: WidgetPalette
+
+    var body: some View {
+        if let undoId = model.base.undoId {
+            QuickRecordWidgetBanner(text: model.base.bannerText, undoId: undoId,
+                                    interactive: !model.base.isSample, palette: palette)
+        } else {
+            titleRow
+        }
+    }
+
+    private var titleRow: some View {
+        HStack(spacing: 6) {
+            Text("一按就記")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(palette.ink)
+                .lineLimit(1)
+                .widgetAccentable()
+            Spacer(minLength: 4)
+            trailingText
+        }
+    }
+
+    @ViewBuilder
+    private var trailingText: some View {
+        if !model.trailing.isEmpty {
+            Text(model.trailing)
+                .font(.system(size: 11.5, weight: .semibold))
+                .monospacedDigit()
+                .foregroundStyle(palette.inkDate)
+                .lineLimit(1)
+        }
+    }
+}
+
+/// 最多 4 排、一排 2 格；最後一排只有 1 格時右半空白（按鈕寬不變）。每排高＝候選的按鈕高
+private struct QuickRecordLargeGrid: View {
+    let rows: [QuickRecordLargeRow]
+    let tileHeight: CGFloat
+    let interactive: Bool
+    let palette: WidgetPalette
+
+    var body: some View {
+        VStack(spacing: QuickRecordLargeLayout.tileSpacing) {
+            ForEach(rows) { (row: QuickRecordLargeRow) in
+                rowView(row)
+            }
+        }
+    }
+
+    private func rowView(_ row: QuickRecordLargeRow) -> some View {
+        HStack(spacing: QuickRecordLargeLayout.tileSpacing) {
+            ForEach(row.cells) { (cell: QuickRecordLargeCell) in
+                QuickRecordLargeTile(cell: cell, interactive: interactive, palette: palette)
+            }
+            if row.cells.count < QuickRecordLargeLayout.columns {
+                Color.clear
+            }
+        }
+        .frame(height: tileHeight)
+    }
+}
+
+/// 一格：範本 → 按了就記（不開 App；預覽只畫樣子）；「＋ 記一筆」→ 開新增支出
+private struct QuickRecordLargeTile: View {
+    let cell: QuickRecordLargeCell
+    let interactive: Bool
+    let palette: WidgetPalette
+
+    var body: some View {
+        if let item = cell.item {
+            templateTile(item)
+        } else {
+            Link(destination: WidgetDeskTile.addExpense.url) {
+                QuickRecordLargeAddFace(palette: palette)
+            }
+        }
+    }
+
+    @ViewBuilder
+    private func templateTile(_ item: QuickRecordWidgetItem) -> some View {
+        if interactive {
+            Button(intent: QuickRecordIntent(template: item.template)) {
+                QuickRecordLargeFace(item: item, palette: palette)
+            }
+            .buttonStyle(.plain)
+        } else {
+            QuickRecordLargeFace(item: item, palette: palette)
+        }
+    }
+}
+
+/// 範本按鈕的樣子：範本的兩色漸層、第一行「☕ 7-11 咖啡」、第二行價目（著色模式外框）
+private struct QuickRecordLargeFace: View {
+    let item: QuickRecordWidgetItem
+    let palette: WidgetPalette
+
+    private var ink: Color { palette.isMono ? palette.ink : palette.tileInk }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 3) {
+            titleRow
+            amountText
+        }
+        .foregroundStyle(ink)
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .background {
+            LedgerDeskCardBackground(top: item.top, bottom: item.bottom, plain: false,
+                                     palette: palette, cornerRadius: 14)
+        }
+    }
+
+    private var titleRow: some View {
+        HStack(spacing: 4) {
+            Image(systemName: item.icon)
+                .font(.system(size: 13, weight: .bold))
+                .widgetAccentable()
+            Text(item.title)
+                .font(.system(size: 13.5, weight: .bold))
+                .lineLimit(1)
+                .minimumScaleFactor(0.7)
+        }
+    }
+
+    private var amountText: some View {
+        Text(item.amountText)
+            .font(.system(size: 12.5, weight: .semibold))
+            .monospacedDigit()
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+    }
+}
+
+/// 「＋ 記一筆」的樣子：淺底、App 藍圖示（著色模式外框＋重點色圖示）
+private struct QuickRecordLargeAddFace: View {
+    let palette: WidgetPalette
+
+    private var iconColor: Color { palette.isMono ? palette.ink : palette.deskAddIcon }
+
+    var body: some View {
+        HStack(spacing: 5) {
+            Image(systemName: WidgetDeskTile.addExpense.icon)
+                .font(.system(size: 14, weight: .bold))
+                .foregroundStyle(iconColor)
+                .widgetAccentable()
+            Text(WidgetDeskTile.addExpense.title)
+                .font(.system(size: 13.5, weight: .bold))
+                .foregroundStyle(palette.ink)
+                .lineLimit(1)
+        }
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .background {
+            LedgerDeskCardBackground(top: WidgetDeskTile.addExpense.top, bottom: WidgetDeskTile.addExpense.bottom,
+                                     plain: true, palette: palette, cornerRadius: 14)
+        }
+    }
+}
+
+/// 大型的小工具庫預覽與 placeholder：7 個寫死的展示範本（看得到最後一格「＋ 記一筆」）；按鈕畫成不能按的樣子
+enum QuickRecordLargeSample {
+    static func entry(now: Date) -> QuickRecordWidgetEntry {
+        var snap = LedgerDeskSample.snapshot(at: now)
+        snap.templates = templates
+        return QuickRecordWidgetEntry(date: now, snapshot: snap, pending: [],
+                                      hidesAmounts: false, isSample: true)
+    }
+
+    private static var templates: [WidgetQuickTemplate] {
+        [
+            WidgetQuickTemplate(id: "sample-1", title: "7-11 咖啡", amount: 65, amountText: "NT$65",
+                                categoryKey: "sample-food", icon: "cup.and.saucer.fill",
+                                top: 0xFFB45E, bottom: 0xEE5E3B, tint: 0xEE5E3B, count: 14),
+            WidgetQuickTemplate(id: "sample-2", title: "早餐", amount: 85, amountText: "NT$85",
+                                categoryKey: "sample-food", icon: "fork.knife",
+                                top: 0xFFB45E, bottom: 0xEE5E3B, tint: 0xEE5E3B, count: 9),
+            WidgetQuickTemplate(id: "sample-3", title: "停車", amount: 60, amountText: "NT$60",
+                                categoryKey: "sample-car", icon: "parkingsign",
+                                top: 0x7FE3D0, bottom: 0x1A9C8C, tint: 0x138A7E, count: 6),
+            WidgetQuickTemplate(id: "sample-4", title: "全家", amount: 39, amountText: "NT$39",
+                                categoryKey: "sample-shopping", icon: "cart.fill",
+                                top: 0xFF9CBB, bottom: 0xE0457A, tint: 0xE0457A, count: 4),
+            WidgetQuickTemplate(id: "sample-5", title: "午餐", amount: 150, amountText: "NT$150",
+                                categoryKey: "sample-food", icon: "fork.knife",
+                                top: 0xFFB45E, bottom: 0xEE5E3B, tint: 0xEE5E3B, count: 4),
+            WidgetQuickTemplate(id: "sample-6", title: "捷運", amount: 35, amountText: "NT$35",
+                                categoryKey: "sample-transport", icon: "tram.fill",
+                                top: 0x7FE3D0, bottom: 0x1A9C8C, tint: 0x138A7E, count: 3),
+            WidgetQuickTemplate(id: "sample-7", title: "加油", amount: 1200, amountText: "NT$1,200",
+                                categoryKey: "sample-car", icon: "fuelpump.fill",
+                                top: 0x7FE3D0, bottom: 0x1A9C8C, tint: 0x138A7E, count: 3)
+        ]
     }
 }

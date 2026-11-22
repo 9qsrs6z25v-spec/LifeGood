@@ -229,6 +229,10 @@ enum WatchPackageBuilder {
 
     // MARK: 錢
 
+    /// [large4 v25.638] 手錶包只抄前幾個範本。App 從 v25.638 起寫最多 8 個（一按就記・大），
+    /// 手錶照舊只要前 4 個：**先取前 4 個、再拿掉手錶上不給的分類**（跟 4 個上限時一模一樣，手錶包一個位元組都不變）
+    static let watchTemplateMax = 4
+
     static func watchMoney(_ s: WidgetMoneySnapshot) -> WatchMoney {
         let days: [WidgetMoneyDay] = s.days.map { d in
             var out = d
@@ -238,7 +242,7 @@ enum WatchPackageBuilder {
         var m = WatchMoney(generatedAt: s.generatedAt, dataDay: s.dataDay, month: s.month, days: days)
         // [v2] 記帳台：一欄一欄抄，手錶上不給的分類拿掉
         m.templates = s.templates.map { list in
-            list.filter { WatchCategoryRule.isAllowed($0.categoryKey) }.map { watchTemplate($0) }
+            Array(list.prefix(watchTemplateMax)).filter { WatchCategoryRule.isAllowed($0.categoryKey) }.map { watchTemplate($0) }
         }
         m.topCategoryKeys = s.topCategoryKeys.map { keys in
             keys.filter { WatchCategoryRule.isAllowed($0) }

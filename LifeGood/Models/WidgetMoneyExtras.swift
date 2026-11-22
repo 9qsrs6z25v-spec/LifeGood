@@ -9,6 +9,8 @@ import Foundation
 //   • topCategoryKeys：近 60 天記最多次的分類（記帳台第 1、2 張卡；沒車時第 3 張）
 //   • vehicleCard：記帳台第 3 張「⚡ Taycan 電費」
 //   • templates：一按就記的常記範本（同名稱＋同金額＋同分類〔＋同車〕近 60 天 ≥3 次，最多 4 個）
+//     [large4 v25.638] 最多 8 個（一按就記・大 2×4）；小型、中型照舊只畫前 4 個（QuickRecordWidget buttonItems），
+//     手錶包照舊只抄前 4 個（WatchPackageBuilder.watchTemplateMax）：同樣的資料，手錶包一個位元組都不變
 //   • nextMonthBoard：月底之後接的下個月 1–7 號，那一天打開 App 會算出來的 OverviewBoardData
 //   • decorate：每一天補上 todayText、todayCount、incomeText、masked（隱藏金額版）、lock（鎖定畫面版）
 //   • [v3] vehicleOptions：沒賣掉的車＋各自的車子分類（記帳台按鈕、控制項「記到…」的選單，v3 brief G1-5）
@@ -26,8 +28,8 @@ enum WidgetMoneyExtras {
     static let lookbackDays = 60
     /// 常記範本至少要出現幾次
     static let templateMinCount = 3
-    /// 常記範本最多幾個（小工具 2×2）
-    static let templateMaxCount = 4
+    /// 常記範本最多幾個（[large4 v25.638] 一按就記・大 2×4＝8；小型、中型 2×2 照舊取前 4 個，手錶包也只取前 4 個）
+    static let templateMaxCount = 8
     /// 月底之後接下個月幾天（主控定案 4：每次都寫 1–7 號）
     static let nextMonthDays = 7
     /// 最常記的分類至少要有幾個（記帳台：前兩張＋沒車時的第三張）
@@ -187,7 +189,8 @@ enum WidgetMoneyExtras {
 
     /// 近 60 天、變動支出、金額 > 0、名稱去頭尾空白非空、台幣（NT$／TWD／空字串）、沒連股票／房子／保單的支出，
     /// 依「名稱＋金額（四捨五入到分）＋分類＋車＋車子分類」分組，≥3 次的才算；連車的那台必須還在而且沒賣，
-    /// 否則整組丟掉。排序：次數多到少 → 最近一筆新的優先 → id。最多 4 個。
+    /// 否則整組丟掉。排序：次數多到少 → 最近一筆新的優先 → id。最多 templateMaxCount（8）個；
+    /// 排序跟以前一樣，所以前 4 個跟 4 個上限時一模一樣（小型、中型、手錶包都只取前 4 個）。
     /// 一按記的支出（Expense.fromQuickRecord）照樣算次數：那也是真的消費。
     static func templates(expense: ExpenseStore, finance: FinanceStore,
                           now: Date, calendar cal: Calendar) -> [WidgetQuickTemplate] {

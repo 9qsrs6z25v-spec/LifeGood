@@ -36,11 +36,11 @@ struct TeamWidget: Widget {
     var body: some WidgetConfiguration {
         AppIntentConfiguration(kind: WidgetKind.team, intent: TeamConfigIntent.self,
                                provider: TeamWidgetProvider()) { entry in
-            TeamWidgetEntryView(entry: entry)
+            TeamWidgetRootView(entry: entry)
         }
         .configurationDisplayName("部屬今天")
-        .description("今天誰請假、各班幾個人、哪些任務逾期")
-        .supportedFamilies([.systemSmall, .systemMedium, .accessoryRectangular, .accessoryInline])
+        .description("今天誰請假、各班幾個人、哪些任務逾期；大的只放人數和件數，多了明天和各廠區")
+        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge, .accessoryRectangular, .accessoryInline])
     }
 }
 
@@ -96,12 +96,19 @@ struct TeamWidgetEntry: TimelineEntry {
 /// 不上網：只讀 life 快照。00:00 換到明天那一份、validUntil 之後寫「打開 LifeGood 更新」
 struct TeamWidgetProvider: AppIntentTimelineProvider {
     func placeholder(in context: Context) -> TeamWidgetEntry {
-        TeamWidgetSample.entry(now: Date())
+        if context.family == .systemLarge {
+            return TeamLargeSample.entry(now: Date())
+        }
+        return TeamWidgetSample.entry(now: Date())
     }
 
     func snapshot(for configuration: TeamConfigIntent, in context: Context) async -> TeamWidgetEntry {
         let now = Date()
         if context.isPreview {
+            if context.family == .systemLarge {
+                // 大型的預覽另一份樣本：沒有任何名字、假別、生日、任務列（v25.638 large4）
+                return TeamLargeSample.entry(now: now)
+            }
             // 小工具庫裡的預覽：契約的樣本（WidgetLifeSample.teamDay，人名都是假的）
             return TeamWidgetSample.entry(now: now)
         }
@@ -813,5 +820,497 @@ private struct TeamWidgetRect: View {
                 .lineLimit(1)
                 .minimumScaleFactor(0.75)
         }
+    }
+}
+
+// MARK: - 大型（v25.638 large4）
+//
+// 部屬今天・大（只放數字）。規格見 scratchpad/radar/build/large4/brief.md 的 G2；judge_largewidgets.md「備選」第一條、§C 第四版 C2。
+// ① 表頭「部屬」（選了廠區「部屬 A」）＋右邊「10/13 週二」
+// ② 今天三格（請假一定第一格、0 也寫；再來人數多的班別）；沒排班右邊寫「今天沒有排班」
+// ③「明天 10/14 週三　請假 1・大夜 3・小夜 2」（快照沒有明天那一份就不畫）
+// ④「任務」區標（四個都 0 右邊「都完成了」）＋四格：逾期／今天到期／未完成／週報逾期
+// ⑤「各廠區」表（2 個以上廠區、而且沒選廠區才畫）；放不下前 limit−1 個＋「其他 N 區」
+// • 隱私：這一段只用 kit 的 TeamLargeModel（make 只拿快照、時間、廠區），**不讀長按設定的名字與假別開關**；
+//   model 裡沒有名字、假別、生日、任務主題。中型、小型、鎖定畫面原封不動交給既有 TeamWidgetEntryView。
+// • 放不下只砍列數（TeamLargeLayout.candidates 固定 4 個，候選的列先切好），字級不變。
+// • 整塊點了開部屬總覽（WidgetLink.team）；沒有按鈕。
+
+/// 依尺寸分：大型 → TeamLargeEntryView；其他（小型、中型、鎖定畫面、StandBy）照舊 TeamWidgetEntryView
+struct TeamWidgetRootView: View {
+    let entry: TeamWidgetEntry
+
+    @Environment(\.widgetFamily) private var family
+
+    var body: some View {
+        if family == .systemLarge {
+            TeamLargeEntryView(entry: entry)
+        } else {
+            TeamWidgetEntryView(entry: entry)
+        }
+    }
+}
+
+// MARK: 大型要畫的東西（sim team_large_make）
+
+/// ViewThatFits 的一個候選：畫不畫明天那一行、各廠區放哪幾列（列先切好，View 不切陣列）
+private struct TeamLargeCandidate: Identifiable {
+    let id: Int
+    let plan: TeamLargeLayout.Plan
+    let plants: [TeamLargePlantRow]
+}
+
+private struct TeamLargeBoardModel {
+    let model: TeamLargeModel
+    /// 固定 4 個（大到小）
+    let candidates: [TeamLargeCandidate]
+
+    /// 安全取值：index 夾在 0…count-1；沒有候選回一個沒有明天、沒有廠區表的
+    func candidate(at index: Int) -> TeamLargeCandidate {
+        let list: [TeamLargeCandidate] = candidates
+        guard !list.isEmpty else {
+            let plan = TeamLargeLayout.Plan(showsTomorrow: false, plantRows: 0)
+            return TeamLargeCandidate(id: 0, plan: plan, plants: [])
+        }
+        let i: Int = min(max(0, index), list.count - 1)
+        return list[i]
+    }
+
+    /// 只拿快照、時間、廠區（不拿名字、假別的設定）
+    static func make(entry: TeamWidgetEntry) -> TeamLargeBoardModel {
+        let model = TeamLargeModel.make(snapshot: entry.snapshot, date: entry.date, plantArea: entry.plantArea)
+        let plans: [TeamLargeLayout.Plan] = TeamLargeLayout.candidates(hasTomorrow: model.hasTomorrow,
+                                                                       plantCount: model.plants.count)
+        var list: [TeamLargeCandidate] = []
+        for (i, plan) in plans.enumerated() {
+            let rows: [TeamLargePlantRow] = model.plantRows(limit: plan.plantRows)
+            list.append(TeamLargeCandidate(id: i, plan: plan, plants: rows))
+        }
+        return TeamLargeBoardModel(model: model, candidates: list)
+    }
+}
+
+/// 小工具庫預覽與 placeholder（大型）：**沒有任何名字**（name、detail 一律空字串）、沒有任務列、沒有生日。
+/// 今天請假 2、大夜 3、小夜 2；明天請假 1、大夜 3、小夜 2；A、B 兩廠；日期字寫死「10/13 週二」「10/14 週三」
+private enum TeamLargeSample {
+    static func entry(now: Date) -> TeamWidgetEntry {
+        let cal = Calendar.current
+        let today: Date = cal.startOfDay(for: now)
+        let tomorrow: Date = cal.date(byAdding: .day, value: 1, to: today) ?? today.addingTimeInterval(86_400)
+        let until: Date = cal.date(byAdding: .day, value: 2, to: today) ?? today.addingTimeInterval(2 * 86_400)
+        let todayCounts: [WidgetTeamCounts] = [
+            WidgetTeamCounts(plantArea: "A", overdueTasks: 1, dueTodayTasks: 2, openTasks: 5, overdueReports: 1),
+            WidgetTeamCounts(plantArea: "B", overdueTasks: 1, dueTodayTasks: 1, openTasks: 3, overdueReports: 0)
+        ]
+        let tomorrowCounts: [WidgetTeamCounts] = [
+            WidgetTeamCounts(plantArea: "A", overdueTasks: 1, dueTodayTasks: 0, openTasks: 5, overdueReports: 0),
+            WidgetTeamCounts(plantArea: "B", overdueTasks: 0, dueTodayTasks: 1, openTasks: 3, overdueReports: 0)
+        ]
+        let first: WidgetTeamDay = day(start: today, end: tomorrow, dateText: "10/13 週二", shortDateText: "10/13",
+                                       leaves: 2, counts: todayCounts)
+        let second: WidgetTeamDay = day(start: tomorrow, end: until, dateText: "10/14 週三", shortDateText: "10/14",
+                                        leaves: 1, counts: tomorrowCounts)
+        var snap = WidgetLifeSnapshot(generatedAt: now,
+                                      dataDay: WidgetDateText.dayKey(now),
+                                      validUntil: until,
+                                      days: [])
+        snap.hasTeam = true
+        snap.team = [first, second]
+        snap.plantAreas = ["A", "B"]
+        return TeamWidgetEntry(date: now, snapshot: snap, plantArea: nil,
+                               showsNames: false, showsLeaveTypes: false)
+    }
+
+    /// 一天：請假 leaves 人、大夜 3、小夜 2（人都沒有名字）；沒有任務列、沒有生日
+    private static func day(start: Date, end: Date, dateText: String, shortDateText: String,
+                            leaves: Int, counts: [WidgetTeamCounts]) -> WidgetTeamDay {
+        let shifts: [WidgetTeamShift] = [
+            WidgetTeamShift(label: "大夜", order: 0, people: people(3)),
+            WidgetTeamShift(label: "小夜", order: 1, people: people(2))
+        ]
+        return WidgetTeamDay(dayKey: WidgetDateText.dayKey(start),
+                             dayStart: start,
+                             dayEnd: end,
+                             dateText: dateText,
+                             shortDateText: shortDateText,
+                             leaves: people(leaves),
+                             shifts: shifts,
+                             tasks: [],
+                             counts: counts,
+                             birthdays: [])
+    }
+
+    /// count 個沒有名字的人（A、B 輪流）
+    private static func people(_ count: Int) -> [WidgetTeamPerson] {
+        var out: [WidgetTeamPerson] = []
+        var i: Int = 0
+        while i < count {
+            let plant: String = i % 2 == 0 ? "A" : "B"
+            out.append(WidgetTeamPerson(subId: UUID(), name: "", plantArea: plant, detail: ""))
+            i += 1
+        }
+        return out
+    }
+}
+
+// MARK: 大型畫面
+
+/// 內容＋背景＋整塊網址（部屬總覽）。顏色同 TeamWidgetEntryView（WidgetPalette.Surface）
+private struct TeamLargeEntryView: View {
+    let entry: TeamWidgetEntry
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.widgetRenderingMode) private var renderingMode
+    @Environment(\.showsWidgetContainerBackground) private var showsBackground
+
+    private var surface: WidgetPalette.Surface {
+        WidgetPalette.Surface(renderingMode: renderingMode, showsBackground: showsBackground)
+    }
+
+    private var palette: WidgetPalette {
+        WidgetPalette(colorScheme, mono: surface.isMono)
+    }
+
+    var body: some View {
+        TeamLargeContent(board: TeamLargeBoardModel.make(entry: entry), palette: palette)
+            .containerBackground(for: .widget) {
+                background
+            }
+            .widgetURL(WidgetLink.team)
+    }
+
+    /// 全彩畫天空（不放月牙：右上有日期字）；著色、透明 Color.clear
+    @ViewBuilder
+    private var background: some View {
+        if surface.drawsSky {
+            WidgetSky(palette: palette, moon: WidgetSkyMoon.none)
+        } else {
+            Color.clear
+        }
+    }
+}
+
+/// 一句話（沒快照、沒有部屬、過期）→ 既有 TeamWidgetMessage；有資料 → 4 個候選
+private struct TeamLargeContent: View {
+    let board: TeamLargeBoardModel
+    let palette: WidgetPalette
+
+    var body: some View {
+        if board.model.isMessage {
+            TeamWidgetMessage(text: board.model.message, hint: board.model.hint, palette: palette)
+        } else {
+            TeamLargeBoard(board: board, palette: palette)
+        }
+    }
+}
+
+/// 4 個候選由上往下挑（字級不變、只砍列數；不巢狀）
+private struct TeamLargeBoard: View {
+    let board: TeamLargeBoardModel
+    let palette: WidgetPalette
+
+    var body: some View {
+        ViewThatFits(in: .vertical) {
+            TeamLargeColumn(model: board.model, candidate: board.candidate(at: 0), palette: palette)
+            TeamLargeColumn(model: board.model, candidate: board.candidate(at: 1), palette: palette)
+            TeamLargeColumn(model: board.model, candidate: board.candidate(at: 2), palette: palette)
+            TeamLargeColumn(model: board.model, candidate: board.candidate(at: 3), palette: palette)
+        }
+    }
+}
+
+/// ① → ② → ③ → ④ → ⑤ → Spacer。每一塊固定高度（TeamLargeLayout.height 算的就是這一欄）
+private struct TeamLargeColumn: View {
+    let model: TeamLargeModel
+    let candidate: TeamLargeCandidate
+    let palette: WidgetPalette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            header
+            TeamLargeCellsRow(cells: model.cells, hasShifts: model.hasShifts, palette: palette)
+                .padding(.top, TeamLargeLayout.cellsTopGap)
+            tomorrow
+            TeamLargeTasks(model: model, palette: palette)
+            plants
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    private var header: some View {
+        LargeWidgetTitleLine(icon: "person.2.fill", iconColor: palette.label, title: model.title,
+                             trailing: model.dateText, trailingColor: palette.inkDate, palette: palette,
+                             titleSize: 17, height: TeamLargeLayout.headerHeight)
+    }
+
+    @ViewBuilder
+    private var tomorrow: some View {
+        if candidate.plan.showsTomorrow {
+            TeamLargeTomorrow(date: model.tomorrowDate, line: model.tomorrowLine, palette: palette)
+        }
+    }
+
+    @ViewBuilder
+    private var plants: some View {
+        if !candidate.plants.isEmpty {
+            TeamLargePlantTable(rows: candidate.plants, palette: palette)
+        }
+    }
+}
+
+/// ② 今天最多三格（平分寬度）；只有請假一格時右半寫「今天沒有排班」
+private struct TeamLargeCellsRow: View {
+    let cells: [TeamLargeCell]
+    let hasShifts: Bool
+    let palette: WidgetPalette
+
+    var body: some View {
+        HStack(spacing: TeamLargeLayout.cellSpacing) {
+            ForEach(cells) { cell in
+                TeamLargeCellTile(cell: cell, palette: palette)
+            }
+            noShifts
+        }
+        .frame(height: TeamLargeLayout.cellHeight)
+    }
+
+    @ViewBuilder
+    private var noShifts: some View {
+        if !hasShifts {
+            Text("今天沒有排班")
+                .font(.system(size: 12, weight: .medium))
+                .foregroundStyle(palette.label)
+                .lineLimit(1)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+/// 一格：「請假」12pt＋「2」28pt（著色模式染重點色）；只有數字，沒有名字
+private struct TeamLargeCellTile: View {
+    let cell: TeamLargeCell
+    let palette: WidgetPalette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            labelText
+            countText
+        }
+        .padding(.horizontal, 10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .background { LargeWidgetCardBackground(palette: palette) }
+    }
+
+    private var labelText: some View {
+        Text(cell.label)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(palette.label)
+            .lineLimit(1)
+    }
+
+    private var countText: some View {
+        Text(String(cell.count))
+            .font(.system(size: 28, weight: .bold, design: .rounded))
+            .monospacedDigit()
+            .foregroundStyle(palette.ink)
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+            .widgetAccentable()
+    }
+}
+
+/// ③「明天 10/14 週三」＋「請假 1・大夜 3・小夜 2」（字貼底；上面的空在這一塊的高度裡）
+private struct TeamLargeTomorrow: View {
+    let date: String
+    let line: String
+    let palette: WidgetPalette
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            dateText
+            lineText
+        }
+        .frame(maxWidth: .infinity, minHeight: TeamLargeLayout.tomorrowHeight,
+               maxHeight: TeamLargeLayout.tomorrowHeight, alignment: .bottomLeading)
+    }
+
+    private var dateText: some View {
+        Text("明天 " + date)
+            .font(.system(size: 11.5, weight: .semibold))
+            .foregroundStyle(palette.label)
+            .lineLimit(1)
+            .fixedSize()
+    }
+
+    private var lineText: some View {
+        Text(line)
+            .font(.system(size: 12.5, weight: .semibold))
+            .foregroundStyle(palette.ink)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+    }
+}
+
+/// ④「任務」區標（四個都 0 右邊「都完成了」）＋四格件數（逾期、週報逾期 > 0 紅；今天到期 > 0 橘）
+private struct TeamLargeTasks: View {
+    let model: TeamLargeModel
+    let palette: WidgetPalette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            label
+            tiles
+        }
+    }
+
+    private var label: some View {
+        HStack(spacing: 6) {
+            Text("任務")
+                .foregroundStyle(palette.label)
+            Spacer(minLength: 6)
+            doneText
+        }
+        .font(.system(size: 10.5, weight: .semibold))
+        .padding(.bottom, 3)
+        .frame(height: TeamLargeLayout.taskLabelHeight, alignment: .bottom)
+    }
+
+    @ViewBuilder
+    private var doneText: some View {
+        if model.allDone {
+            Text("都完成了")
+                .foregroundStyle(palette.good)
+                .lineLimit(1)
+        }
+    }
+
+    private var tiles: some View {
+        HStack(spacing: TeamLargeLayout.taskTileSpacing) {
+            TeamLargeTaskTile(title: "逾期", count: model.overdueTasks,
+                              color: model.overdueTasks > 0 ? palette.bad : palette.ink, palette: palette)
+            TeamLargeTaskTile(title: "今天到期", count: model.dueTodayTasks,
+                              color: model.dueTodayTasks > 0 ? palette.warn : palette.ink, palette: palette)
+            TeamLargeTaskTile(title: "未完成", count: model.openTasks, color: palette.ink, palette: palette)
+            TeamLargeTaskTile(title: "週報逾期", count: model.overdueReports,
+                              color: model.overdueReports > 0 ? palette.bad : palette.ink, palette: palette)
+        }
+        .frame(height: TeamLargeLayout.taskTileHeight)
+    }
+}
+
+/// 一格件數：標 10.5pt＋數字 20pt（著色模式染重點色；顏色被洗掉時靠標的字）
+private struct TeamLargeTaskTile: View {
+    let title: String
+    let count: Int
+    let color: Color
+    let palette: WidgetPalette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            titleText
+            countText
+        }
+        .padding(.horizontal, 8)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+        .background { LargeWidgetCardBackground(palette: palette) }
+    }
+
+    private var titleText: some View {
+        Text(title)
+            .font(.system(size: 10.5, weight: .semibold))
+            .foregroundStyle(palette.label)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+    }
+
+    private var countText: some View {
+        Text(String(count))
+            .font(.system(size: 20, weight: .bold, design: .rounded))
+            .monospacedDigit()
+            .foregroundStyle(color)
+            .lineLimit(1)
+            .minimumScaleFactor(0.7)
+            .widgetAccentable()
+    }
+}
+
+/// ⑤ 各廠區：區標列（欄名）＋每列（App 的順序；放不下最後一列是「其他 N 區」）
+private struct TeamLargePlantTable: View {
+    let rows: [TeamLargePlantRow]
+    let palette: WidgetPalette
+
+    var body: some View {
+        VStack(spacing: 0) {
+            TeamLargePlantHeader(palette: palette)
+            ForEach(rows) { row in
+                TeamLargePlantRowView(row: row, palette: palette)
+            }
+        }
+    }
+}
+
+/// 「各廠區」＋四個欄名（靠右、固定欄寬，跟每列的數字對齊）
+private struct TeamLargePlantHeader: View {
+    let palette: WidgetPalette
+
+    var body: some View {
+        HStack(spacing: 0) {
+            Text("各廠區")
+                .font(.system(size: 10.5, weight: .semibold))
+                .foregroundStyle(palette.label)
+                .lineLimit(1)
+            Spacer(minLength: 4)
+            column("逾期")
+            column("今天到期")
+            column("未完成")
+            column("週報逾期")
+        }
+        .padding(.bottom, 3)
+        .frame(height: TeamLargeLayout.plantLabelHeight, alignment: .bottom)
+    }
+
+    private func column(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: 10, weight: .semibold))
+            .foregroundStyle(palette.label)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .frame(width: TeamLargeLayout.plantColumnWidth, alignment: .trailing)
+    }
+}
+
+/// 一列：廠區字（不是人名）＋逾期、今天到期、未完成、週報逾期
+private struct TeamLargePlantRowView: View {
+    let row: TeamLargePlantRow
+    let palette: WidgetPalette
+
+    var body: some View {
+        HStack(spacing: 0) {
+            areaText
+            Spacer(minLength: 4)
+            number(row.overdue, color: row.overdue > 0 ? palette.bad : palette.ink)
+            number(row.dueToday, color: row.dueToday > 0 ? palette.warn : palette.ink)
+            number(row.open, color: palette.ink)
+            number(row.reports, color: row.reports > 0 ? palette.bad : palette.ink)
+        }
+        .frame(height: TeamLargeLayout.plantRowHeight)
+    }
+
+    private var areaText: some View {
+        Text(row.area)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundStyle(palette.ink)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+    }
+
+    private func number(_ value: Int, color: Color) -> some View {
+        Text(String(value))
+            .font(.system(size: 12, weight: .semibold))
+            .monospacedDigit()
+            .foregroundStyle(color)
+            .lineLimit(1)
+            .frame(width: TeamLargeLayout.plantColumnWidth, alignment: .trailing)
     }
 }
