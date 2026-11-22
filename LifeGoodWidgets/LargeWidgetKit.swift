@@ -545,3 +545,433 @@ struct LargeWidgetRing: View {
         .padding(lineWidth / 2)
     }
 }
+
+// MARK: - [v25.632 large2] 第二版共用：股票（6 檔）、淨資產、記帳台
+//
+// 規格見 scratchpad/radar/build/large2/brief.md（主控定案）；示意圖 scratchpad/largewidgets/{stocks,networth,ledgerdesk}.html。
+// **上面第一版的部分一個字都不改**（keycheck_large2 檢查 d6cfab9 的這個檔是現在這個檔的開頭）。
+// 總設計先做好，G1（股票）、G2（淨資產）、G3（記帳台）只呼叫、不改。sim_large2.py 一個函式一個函式對照。
+//
+// 這一段提供：
+//   • StocksLargeLayout／StocksLargePick／StocksLargeText   股票・大的高度與「放幾列、兩行還是一行」、挑 6 檔、表頭字
+//   • NetWorthLargeLayout                                      淨資產・大的高度與「兩欄各放幾類、列高」
+//   • LargeWidgetBandPart／LargeWidgetBandMath／LargeWidgetBand 組成色帶（照占比分段；著色模式留 2pt、畫外框）
+//   • LargeWidgetSwatch                                        兩欄每一列前面的小色塊
+//   • LedgerDeskLargeLayout                                    記帳台・大的高度與「卡片多高、畫不畫頁腳」
+
+// MARK: 股票（大）的高度
+
+/// 表頭（「股票　台股盤中・10:42」＋右上 ↻）→ 6 列（每列兩行；放不下改一行，再放不下少幾列）→ 頁腳「今年股利 …」
+enum StocksLargeLayout {
+    /// 表頭（↻ 是 36pt 的圓）
+    static let headerHeight: CGFloat = 36
+    /// 表頭下面空多少
+    static let listTopGap: CGFloat = 6
+    /// 一列兩行：「2330 台積電｜1,085」／「比均價 +18%・2 張・NT$217萬｜▲13（+1.2%）」
+    static let twoLineRowHeight: CGFloat = 38
+    /// 一列一行：「2330 台積電｜1,085｜▲1.2%」
+    static let oneLineRowHeight: CGFloat = 28
+    static let rowSpacing: CGFloat = 4
+    /// 頁腳：至少空 6＋一行 16；沒有股利那一行不畫
+    static let footerHeight: CGFloat = 22
+    /// ↻ 的圓
+    static let refreshSize: CGFloat = 36
+    /// 大型最多幾檔（上網多抓的上限：6 檔、每批 4 個＝2 批）
+    static let maxRows = 6
+
+    struct Plan: Equatable {
+        /// 畫前幾檔
+        let rows: Int
+        /// 每列兩行（false＝一行）
+        let twoLine: Bool
+    }
+
+    static func height(_ plan: Plan, hasFooter: Bool) -> CGFloat {
+        let row: CGFloat = plan.twoLine ? twoLineRowHeight : oneLineRowHeight
+        let list: CGFloat = LargeWidgetFit.stack(rows: max(0, plan.rows), rowHeight: row, spacing: rowSpacing)
+        let footer: CGFloat = hasFooter ? footerHeight : 0
+        return headerHeight + listTopGap + list + footer
+    }
+
+    /// 先試全部兩行、再試全部一行；都放不下才少一列（每一個列數先兩行再一行）
+    static func plan(available: CGFloat, count: Int, hasFooter: Bool) -> Plan {
+        let top: Int = min(maxRows, max(0, count))
+        guard top > 0 else { return Plan(rows: 0, twoLine: false) }
+        let fullTwo = Plan(rows: top, twoLine: true)
+        if LargeWidgetFit.fits(height(fullTwo, hasFooter: hasFooter), in: available) { return fullTwo }
+        let fullOne = Plan(rows: top, twoLine: false)
+        if LargeWidgetFit.fits(height(fullOne, hasFooter: hasFooter), in: available) { return fullOne }
+        for n in stride(from: top - 1, through: 1, by: -1) {
+            let two = Plan(rows: n, twoLine: true)
+            if LargeWidgetFit.fits(height(two, hasFooter: hasFooter), in: available) { return two }
+            let one = Plan(rows: n, twoLine: false)
+            if LargeWidgetFit.fits(height(one, hasFooter: hasFooter), in: available) { return one }
+        }
+        return Plan(rows: 1, twoLine: false)
+    }
+
+    /// ViewThatFits 的 4 個候選（大到小）
+    static func candidates(count: Int, hasFooter: Bool) -> [Plan] {
+        LargeWidgetFit.candidates { (h: CGFloat) -> Plan in
+            plan(available: h, count: count, hasFooter: hasFooter)
+        }
+    }
+}
+
+// MARK: 股票（大）挑哪幾檔
+
+enum StocksLargePick {
+    /// 前面照長按設定的第 1／2／3 檔（跳過找不到的與重複的），不夠的照 App 的市值大到小（items 的順序）補到 count 檔。
+    /// count 是 3 時跟 WidgetFinanceSnapshot.threeStocks(ids:) 一模一樣（中型不改，sim 逐筆比）
+    static func pick(_ all: [WidgetFinanceStock], ids: [String?], count: Int) -> [WidgetFinanceStock] {
+        let limit: Int = max(0, count)
+        var out: [WidgetFinanceStock] = []
+        var seen = Set<UUID>()
+        for raw in ids {
+            guard let raw, let hit = all.first(where: { $0.id.uuidString == raw }) else { continue }
+            if seen.insert(hit.id).inserted {
+                out.append(hit)
+            }
+        }
+        for s in all where out.count < limit {
+            if seen.insert(s.id).inserted {
+                out.append(s)
+            }
+        }
+        return Array(out.prefix(limit))
+    }
+}
+
+// MARK: 股票（大）表頭的字
+
+enum StocksLargeText {
+    /// 這個價是小工具今天盤中抓的：不是 App 的價、沒有日期、不是收盤、有時間
+    static func isLive(_ f: WidgetStockFigures) -> Bool {
+        if f.fromApp || f.datePrefix != nil || f.timeText.isEmpty { return false }
+        return !f.timeText.hasSuffix("收盤")
+    }
+
+    /// 表頭右邊：表頭用的那一檔（第一個有時間的）是台股、今天盤中抓的、現在台股盤中（台北平日 09:00–13:35）
+    /// →「台股盤中・10:42」；美股同理「美股盤中・23:55」；其他只寫時間「13:30 收盤」「10/13 收盤」「App 的價」；沒有時間 ""
+    static func header(time: String, isLive: Bool, isUS: Bool, now: Date) -> String {
+        guard !time.isEmpty else { return "" }
+        guard isLive else { return time }
+        if !isUS && WidgetQuoteSchedule.isTWSession(now) { return "台股盤中・" + time }
+        if isUS && WidgetQuoteSchedule.isUSSession(now) { return "美股盤中・" + time }
+        return time
+    }
+
+    /// 用「・」接起來，空字串跳過（「比均價 +18%」「2 張・NT$217萬」→「比均價 +18%・2 張・NT$217萬」）
+    static func dotJoined(_ parts: [String]) -> String {
+        let texts: [String] = parts.filter { !$0.isEmpty }
+        return texts.joined(separator: "・")
+    }
+}
+
+// MARK: 淨資產（大）的高度
+
+/// 「淨資產　11 月」→ 大字＋膠囊「比上月 ↑2%」→ App 寫好的那一句 → 資產色帶（＋貸款色帶）→
+/// 兩欄（資產最多 6 類｜貸款最多 4 類）→ 頁腳「股價 11/20 13:30」。12 個月走勢是第三版，這一版不畫、不留位置
+enum NetWorthLargeLayout {
+    /// 「淨資產　11 月」
+    static let titleHeight: CGFloat = 18
+    /// 大字 30pt＋膠囊
+    static let heroHeight: CGFloat = 40
+    /// 「總資產 NT$3795萬・貸款還欠 約 NT$2075萬」
+    static let lineHeight: CGFloat = 18
+    /// 色帶：上面空 10＋資產 12（＋空 4＋貸款 6）
+    static let bandTopGap: CGFloat = 10
+    static let assetBandHeight: CGFloat = 12
+    static let debtBandGap: CGFloat = 4
+    static let debtBandHeight: CGFloat = 6
+    /// 段與段之間的縫（著色模式改 2pt、畫外框）；有占比的段至少多寬
+    static let bandGap: CGFloat = 1.5
+    static let bandGapMono: CGFloat = 2
+    static let bandMinSegment: CGFloat = 3
+    /// 兩欄：上面空 14＋欄標「資產」「貸款」18＋每列（高的 26、矮的 22）
+    static let columnsTopGap: CGFloat = 14
+    static let sectionLabelHeight: CGFloat = 18
+    static let tallRowHeight: CGFloat = 26
+    static let rowHeight: CGFloat = 22
+    static let columnSpacing: CGFloat = 16
+    static let swatchSize: CGFloat = 7
+    /// 頁腳「股價 11/20 13:30」「11/19 的數字」：至少空 4＋一行 16；兩個都沒有不畫
+    static let footHeight: CGFloat = 20
+    static let maxAssets = 6
+    static let maxDebts = 4
+
+    /// 依序試的類別上限（資產、貸款）：(6／4)、(5／3)、(4／3)、(3／2)；每一組先試高的列再試矮的
+    static let assetLimits: [Int] = [6, 5, 4, 3]
+    static let debtLimits: [Int] = [4, 3, 3, 2]
+
+    struct Plan: Equatable {
+        let assetRows: Int
+        let debtRows: Int
+        let rowHeight: CGFloat
+    }
+
+    /// 色帶一塊多高（沒有貸款只有資產那一條）
+    static func bandsHeight(hasDebtBand: Bool) -> CGFloat {
+        let asset: CGFloat = bandTopGap + assetBandHeight
+        return hasDebtBand ? asset + debtBandGap + debtBandHeight : asset
+    }
+
+    static func height(_ plan: Plan, hasDebtBand: Bool, hasFoot: Bool) -> CGFloat {
+        let rows: Int = max(0, max(plan.assetRows, plan.debtRows))
+        let columns: CGFloat = rows > 0 ? columnsTopGap + sectionLabelHeight + CGFloat(rows) * plan.rowHeight : 0
+        let foot: CGFloat = hasFoot ? footHeight : 0
+        let top: CGFloat = titleHeight + heroHeight + lineHeight + bandsHeight(hasDebtBand: hasDebtBand)
+        return top + columns + foot
+    }
+
+    static func plan(available: CGFloat, assetCount: Int, debtCount: Int, hasFoot: Bool) -> Plan {
+        let a0: Int = max(0, assetCount)
+        let d0: Int = max(0, debtCount)
+        let hasDebtBand: Bool = d0 > 0
+        let heights: [CGFloat] = [tallRowHeight, rowHeight]
+        for i in 0..<assetLimits.count {
+            let a: Int = min(assetLimits[i], a0)
+            let d: Int = min(debtLimits[i], d0)
+            for rh in heights {
+                let p = Plan(assetRows: a, debtRows: d, rowHeight: rh)
+                if LargeWidgetFit.fits(height(p, hasDebtBand: hasDebtBand, hasFoot: hasFoot), in: available) {
+                    return p
+                }
+            }
+        }
+        let lastA: Int = min(assetLimits[assetLimits.count - 1], a0)
+        let lastD: Int = min(debtLimits[debtLimits.count - 1], d0)
+        return Plan(assetRows: lastA, debtRows: lastD, rowHeight: rowHeight)
+    }
+
+    static func candidates(assetCount: Int, debtCount: Int, hasFoot: Bool) -> [Plan] {
+        LargeWidgetFit.candidates { (h: CGFloat) -> Plan in
+            plan(available: h, assetCount: assetCount, debtCount: debtCount, hasFoot: hasFoot)
+        }
+    }
+}
+
+// MARK: 色帶
+
+/// 色帶的一段（淨資產的一類）：占多少、什麼顏色（App 給的兩個色碼）
+struct LargeWidgetBandPart: Identifiable, Equatable {
+    let id: String
+    let share: Double
+    let top: UInt32
+    let bottom: UInt32
+}
+
+enum LargeWidgetBandMath {
+    /// 每一段多寬：先塗 total × fraction，扣掉段與段之間的縫，照 share（加起來先當 1）分；
+    /// 有占比的段至少 minWidth（不夠的從比 minWidth 寬的段照多出來的比例扣回來，總長不變）；
+    /// 連每段 minWidth 都放不下就照比例。share 不是有限正數的段寬 0。回傳的總和＝塗的長度扣掉縫
+    static func widths(shares: [Double], fraction: Double, total: CGFloat, gap: CGFloat,
+                       minWidth: CGFloat) -> [CGFloat] {
+        let n: Int = shares.count
+        guard n > 0 else { return [] }
+        let f: Double = fraction.isFinite ? min(1, max(0, fraction)) : 0
+        let filled: CGFloat = max(0, total) * CGFloat(f)
+        let gaps: CGFloat = max(0, gap) * CGFloat(n - 1)
+        let usable: CGFloat = max(0, filled - gaps)
+        let clean: [Double] = shares.map { ($0.isFinite && $0 > 0) ? $0 : 0 }
+        let sum: Double = clean.reduce(0, +)
+        guard usable > 0, sum > 0 else { return Array(repeating: 0, count: n) }
+        var out: [CGFloat] = clean.map { usable * CGFloat($0 / sum) }
+        let positive: Int = clean.filter { $0 > 0 }.count
+        guard minWidth > 0, minWidth * CGFloat(positive) <= usable else { return out }
+        var extra: CGFloat = 0
+        for i in 0..<n where clean[i] > 0 && out[i] < minWidth {
+            extra += minWidth - out[i]
+            out[i] = minWidth
+        }
+        guard extra > 0 else { return out }
+        var room: CGFloat = 0
+        for w in out where w > minWidth {
+            room += w - minWidth
+        }
+        guard room > 0 else { return out }
+        let ratio: CGFloat = min(1, extra / room)
+        for i in 0..<n where out[i] > minWidth {
+            out[i] -= (out[i] - minWidth) * ratio
+        }
+        return out
+    }
+}
+
+/// 一段（GeometryReader 量到寬度之後算好）
+private struct LargeWidgetBandItem: Identifiable {
+    let id: String
+    let width: CGFloat
+    let top: UInt32
+    let bottom: UInt32
+}
+
+/// 組成色帶：照 parts 的 share 分段、各自的漸層，塗 fraction 那麼長（沒有底）。
+/// 著色模式（含 StandBy）段與段之間留 2pt、每段只畫外框。自己有一個 GeometryReader，外面不准再包
+struct LargeWidgetBand: View {
+    let parts: [LargeWidgetBandPart]
+    let fraction: Double
+    let height: CGFloat
+    let palette: WidgetPalette
+
+    private var gap: CGFloat {
+        palette.isMono ? NetWorthLargeLayout.bandGapMono : NetWorthLargeLayout.bandGap
+    }
+
+    var body: some View {
+        GeometryReader { geo in
+            LargeWidgetBandRow(items: items(total: geo.size.width), gap: gap, height: height, palette: palette)
+        }
+        .frame(height: height)
+    }
+
+    private func items(total: CGFloat) -> [LargeWidgetBandItem] {
+        let shares: [Double] = parts.map { $0.share }
+        let widths: [CGFloat] = LargeWidgetBandMath.widths(shares: shares, fraction: fraction, total: total,
+                                                           gap: gap, minWidth: NetWorthLargeLayout.bandMinSegment)
+        var out: [LargeWidgetBandItem] = []
+        for (part, w) in zip(parts, widths) {
+            out.append(LargeWidgetBandItem(id: part.id, width: w, top: part.top, bottom: part.bottom))
+        }
+        return out
+    }
+}
+
+/// 一排段（全彩：整排兩頭圓；著色：方的、外框）
+private struct LargeWidgetBandRow: View {
+    let items: [LargeWidgetBandItem]
+    let gap: CGFloat
+    let height: CGFloat
+    let palette: WidgetPalette
+
+    private var corner: CGFloat { palette.isMono ? 0 : height / 2 }
+
+    var body: some View {
+        HStack(spacing: gap) {
+            ForEach(items, id: \.id) { item in
+                LargeWidgetBandSegment(top: item.top, bottom: item.bottom, palette: palette)
+                    .frame(width: item.width, height: height)
+            }
+        }
+        .clipShape(RoundedRectangle(cornerRadius: corner, style: .continuous))
+    }
+}
+
+private struct LargeWidgetBandSegment: View {
+    let top: UInt32
+    let bottom: UInt32
+    let palette: WidgetPalette
+
+    private var gradient: LinearGradient {
+        LinearGradient(colors: [Color(widgetHex: top), Color(widgetHex: bottom)],
+                       startPoint: .top, endPoint: .bottom)
+    }
+
+    var body: some View {
+        if palette.isMono {
+            RoundedRectangle(cornerRadius: 2, style: .continuous)
+                .strokeBorder(palette.ink, lineWidth: 1)
+        } else {
+            Rectangle()
+                .fill(gradient)
+        }
+    }
+}
+
+/// 兩欄每一列前面的小色塊（深色用 top、淺色用 bottom；著色模式畫外框）
+struct LargeWidgetSwatch: View {
+    let top: UInt32
+    let bottom: UInt32
+    let palette: WidgetPalette
+    var size: CGFloat = 7
+
+    private var shape: RoundedRectangle {
+        RoundedRectangle(cornerRadius: 2, style: .continuous)
+    }
+
+    private var color: Color {
+        Color(widgetHex: palette.isDark ? top : bottom)
+    }
+
+    var body: some View {
+        if palette.isMono {
+            shape
+                .strokeBorder(palette.ink, lineWidth: 1)
+                .frame(width: size, height: size)
+        } else {
+            shape
+                .fill(color)
+                .frame(width: size, height: size)
+        }
+    }
+}
+
+// MARK: 記帳台（大）的高度
+
+/// 上半：整寬的還能花（日期 → 小標 → 大字＋「每天 NT$2,402」→ 橫條 → 「今天 …」｜「收入 …」→「已花 62%・還有 10 天」），
+/// 下半：2×2 大卡片。放不下時卡片變矮（76 → 68 → 60），再拿掉頁腳。「今天記的」是第三版
+enum LedgerDeskLargeLayout {
+    /// 「11 月・第 20 天」
+    static let captionHeight: CGFloat = 16
+    /// 「本月還能花」
+    static let titleHeight: CGFloat = 18
+    /// 大字 28pt＋「每天 NT$2,402」
+    static let heroHeight: CGFloat = 36
+    /// 橫條：上面空 6＋條 10
+    static let barHeight: CGFloat = 16
+    static let barTrackHeight: CGFloat = 10
+    /// 兩欄小字：上面空 6＋一行 14
+    static let twoColumnHeight: CGFloat = 20
+    /// 頁腳「已花 62%・還有 10 天」：上面空 3＋一行 14
+    static let footerHeight: CGFloat = 17
+    /// 卡片：上面至少空 12，兩排之間 8
+    static let gridTopGap: CGFloat = 12
+    static let tileSpacing: CGFloat = 8
+    static let tallTileHeight: CGFloat = 76
+    static let tileHeight: CGFloat = 68
+    static let compactTileHeight: CGFloat = 60
+    static let maxTiles = 4
+
+    struct Plan: Equatable {
+        let tileHeight: CGFloat
+        let showsFooter: Bool
+    }
+
+    /// 上半多高（頁腳畫不畫）
+    static func panelHeight(showsFooter: Bool) -> CGFloat {
+        let top: CGFloat = captionHeight + titleHeight + heroHeight + barHeight + twoColumnHeight
+        return showsFooter ? top + footerHeight : top
+    }
+
+    /// 卡片排幾排（1、2 張一排；3、4 張兩排；0 張 0 排）
+    static func tileRows(_ tileCount: Int) -> Int {
+        let n: Int = min(maxTiles, max(0, tileCount))
+        return (n + 1) / 2
+    }
+
+    static func height(_ plan: Plan, tileCount: Int) -> CGFloat {
+        let rows: Int = tileRows(tileCount)
+        let stack: CGFloat = LargeWidgetFit.stack(rows: rows, rowHeight: plan.tileHeight, spacing: tileSpacing)
+        let grid: CGFloat = rows > 0 ? gridTopGap + stack : 0
+        return panelHeight(showsFooter: plan.showsFooter) + grid
+    }
+
+    /// 有頁腳的字（hasFooter）時先試帶頁腳（卡片 76 → 60），再試不帶；沒有頁腳的字只試不帶
+    static func plan(available: CGFloat, tileCount: Int, hasFooter: Bool) -> Plan {
+        let heights: [CGFloat] = [tallTileHeight, tileHeight, compactTileHeight]
+        let footers: [Bool] = hasFooter ? [true, false] : [false]
+        for footer in footers {
+            for h in heights {
+                let p = Plan(tileHeight: h, showsFooter: footer)
+                if LargeWidgetFit.fits(height(p, tileCount: tileCount), in: available) { return p }
+            }
+        }
+        return Plan(tileHeight: compactTileHeight, showsFooter: false)
+    }
+
+    static func candidates(tileCount: Int, hasFooter: Bool) -> [Plan] {
+        LargeWidgetFit.candidates { (h: CGFloat) -> Plan in
+            plan(available: h, tileCount: tileCount, hasFooter: hasFooter)
+        }
+    }
+}
