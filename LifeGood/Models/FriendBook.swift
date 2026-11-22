@@ -397,6 +397,8 @@ enum FriendText {
     static let suggestNote = "記帳時打過的名字；往左滑可以不要再提（只記在這支手機）。"
     static let saveAsFriend = "存成朋友"
     static let pendingMarked = "記帳存檔時會存成朋友 ✓"
+    static let unmarkFriend = "不存了"
+    static let addedFromCard = "加到朋友履歷了"
     static let dontSuggest = "不要再提"
     static let addToFriends = "加到朋友履歷"
     static let openFriend = "朋友履歷"

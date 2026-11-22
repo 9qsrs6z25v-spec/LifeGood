@@ -2,7 +2,7 @@ import SwiftUI
 
 // [v25.636] 家人頁、朋友頁的往來那一格（peoplehub2 總設計；judge_peoplehub §C7-2、§C11）
 //
-// 照 25.635 名片頁的 BusinessCardLedgerSlot（BusinessCardView.swift 檔尾，那一個一行沒改）寫成共用的：
+// 照 25.635 名片頁的 BusinessCardLedgerSlot（BusinessCardView.swift 檔尾；那一個照舊用 cardSnapshot，25.636 只多了名片↔朋友那一列）寫成共用的：
 // - VStack(spacing: 16) { above（一定有的那張卡，.task 才一定會跑）; 往來卡?; 〔已還〕完成提示? }
 //   沒有往來＝只剩 above，版面跟原本一樣（呼叫端外層 VStack 也是 16）。
 // - 只讀：.task(id:) 裡算 PersonLedger.snapshot(subject:…) 放進 @State；body 不算。

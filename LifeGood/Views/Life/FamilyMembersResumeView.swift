@@ -575,7 +575,8 @@ struct FamilyMemberDetailView: View {
             ScrollView {
                 VStack(spacing: 16) {
                     AnyView(headerCard)
-                    AnyView(eventsSection)
+                    // [v25.636] 往來卡接在家庭事件後面（PersonLedgerSlot；沒有往來＝只剩家庭事件，版面跟 25.635 一樣）
+                    AnyView(PersonLedgerSlot(subject: PersonLedgerSubject.family(member), above: AnyView(eventsSection)))
                     if !gifts.isEmpty {
                         AnyView(memberGiftsSection(gifts))
                     }

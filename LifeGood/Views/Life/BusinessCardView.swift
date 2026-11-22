@@ -3072,11 +3072,14 @@ fileprivate struct BusinessCardLedgerSlot: View {
 
     @EnvironmentObject var store: ExpenseStore
     @EnvironmentObject var lifeStore: LifeStore
+    @EnvironmentObject var subscription: SubscriptionManager
 
     @State private var snapshot = PersonLedgerSnapshot()
     @State private var repayTarget: SplitRepayTarget? = nil
     @State private var openCard: FinanceCardTarget? = nil
     @State private var doneText: String? = nil
+    @State private var friendTarget: FriendDetailTarget? = nil
+    @State private var showPremiumAlert = false
 
     init(card: BusinessCard, below: AnyView) {
         self.card = card
@@ -3103,6 +3106,12 @@ fileprivate struct BusinessCardLedgerSlot: View {
                                          onRepay: { eid, sid in repay(eid, sid) })
                     .padding(.horizontal))
             }
+            // [v25.636] 名片↔朋友（只靠名字）
+            if let mode = friendMode {
+                AnyView(BusinessCardFriendRow(title: mode == .add ? "＋ " + FriendText.addToFriends : FriendText.openFriend,
+                                              chevron: mode != .add, onTap: { tapFriend(mode) })
+                    .padding(.horizontal))
+            }
             if let t = doneText {
                 BusinessCardLedgerDone(text: t)
             }
@@ -3122,6 +3131,31 @@ fileprivate struct BusinessCardLedgerSlot: View {
         .sheet(item: $openCard) { t in
             FinanceItemCard(target: t)
                 .appStores()
+        }
+        .premiumLockAlert(isPresented: $showPremiumAlert)
+        .sheet(item: $friendTarget) { t in FriendDetailView(relationshipId: t.id).appStores() }
+    }
+
+    /// [v25.636] 名字合格、不是本人才有那一列；有同名朋友＝開朋友頁，沒有＝加到朋友履歷
+    private var friendMode: BusinessCardFriendMode? {
+        guard PersonLedger.canPick(card.name),
+              !PersonLedger.isSelf(keys: PersonLedger.names(primary: card.name, extra: []),
+                                   meKeys: PersonLedger.meKeys(lifeStore.profile)) else { return nil }
+        if let r = PersonLedger.friend(named: card.name, in: lifeStore.relationships) { return .open(r.id) }
+        return .add
+    }
+
+    private func tapFriend(_ mode: BusinessCardFriendMode) {
+        switch mode {
+        case .open(let id):
+            friendTarget = FriendDetailTarget(id: id)
+        case .add:
+            guard subscription.isPremium else { showPremiumAlert = true; return }
+            let life = lifeStore
+            let c = card
+            DispatchQueue.main.async {
+                if FriendActions.addFromCard(c, life: life) != nil { doneText = FriendText.addedFromCard }
+            }
         }
     }
 
@@ -3153,5 +3187,35 @@ fileprivate struct BusinessCardLedgerDone: View {
             .foregroundStyle(.green)
             .frame(maxWidth: .infinity, alignment: .leading)
             .padding(.horizontal)
+    }
+}
+
+/// [v25.636] 名片頁那一列是開朋友頁還是加到朋友履歷
+fileprivate enum BusinessCardFriendMode: Equatable {
+    case open(UUID)
+    case add
+}
+
+/// [v25.636] 「朋友履歷 ›」／〔＋ 加到朋友履歷〕
+fileprivate struct BusinessCardFriendRow: View {
+    let title: String
+    let chevron: Bool
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 10) {
+                Image(systemName: "person.2.fill").foregroundStyle(.green)
+                Text(title).font(.subheadline.weight(.semibold))
+                Spacer()
+                if chevron { Image(systemName: "chevron.right").foregroundStyle(.tertiary) }
+            }
+            .padding(.horizontal)
+            .padding(.vertical, 12)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(Color(.systemBackground))
+            .clipShape(RoundedRectangle(cornerRadius: 14))
+        }
+        .buttonStyle(.plain)
     }
 }

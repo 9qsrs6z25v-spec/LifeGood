@@ -54,6 +54,9 @@ struct LifeOverviewView: View {
     /// 這一區是「想知道的時候才看」，不該每次打開總覽都先讀一遍還沒有的東西。
     @AppStorage("life_locked_features_expanded") private var lockedExpanded = false
     @State private var addingMilestoneCategory: MilestoneCategory?
+    /// [v25.636] 解鎖家庭：先問新增家人還是朋友
+    @State private var askFamilyOrFriend = false
+    @State private var addingFriend: FriendEditorTarget?
     /// [v25.565] 名片的淨資產：跟理財總覽同一個數（FinanceSnapshot.current(...).netWorth，含存款、扣貸款與卡費、交割）。
     /// 在 .task 裡算（會掃支出找貸款）；還沒算好是 nil，名片寫「—」（不先閃一個舊的總資產）
     @State private var netWorth: Double?
@@ -103,6 +106,9 @@ struct LifeOverviewView: View {
                     .appStores()
             }
             .premiumLockAlert(isPresented: $showPremiumAlert)
+            .modifier(LifeOverviewFriendUnlock(ask: $askFamilyOrFriend, addingFriend: $addingFriend,
+                                               onFamily: { addingMilestoneCategory = .family },
+                                               onFriend: { if subscription.isPremium { addingFriend = FriendEditorTarget.adding() } else { showPremiumAlert = true } }))
         }
     }
 
@@ -714,6 +720,8 @@ extension LifeOverviewView {
         case .addRealEstate:
             // 房地產要訂閱，比照本頁右上角＋的處理
             if subscription.isPremium { showAddRealEstate = true } else { showPremiumAlert = true }
+        case .addFamilyOrFriend:
+            askFamilyOrFriend = true
         case .addMilestone(let category):
             addingMilestoneCategory = category
         case nil:
@@ -735,5 +743,23 @@ extension LifeOverviewView {
         case .travelMap:  return .purple
         case .medicalMap: return .pink
         }
+    }
+}
+
+/// [v25.636] 解鎖家庭：「新增家人／新增朋友」（dialog 收起來那一輪過了才開，25.614）
+fileprivate struct LifeOverviewFriendUnlock: ViewModifier {
+    @Binding var ask: Bool
+    @Binding var addingFriend: FriendEditorTarget?
+    let onFamily: () -> Void
+    let onFriend: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .confirmationDialog("要新增哪一位？", isPresented: $ask, titleVisibility: .visible) {
+                Button("新增家人") { DispatchQueue.main.async { onFamily() } }
+                Button("新增朋友") { DispatchQueue.main.async { onFriend() } }
+                Button("取消", role: .cancel) {}
+            }
+            .sheet(item: $addingFriend) { t in FriendEditor(target: t).appStores() }
     }
 }

@@ -18,6 +18,7 @@ struct OwedListView: View {
 
     @EnvironmentObject var store: ExpenseStore
     @EnvironmentObject var lifeStore: LifeStore
+    @EnvironmentObject var subscription: SubscriptionManager
     @Environment(\.dismiss) private var dismiss
 
     /// 0＝還沒還、1＝還清了
@@ -31,6 +32,9 @@ struct OwedListView: View {
     @State private var undoAsk: SplitUndoAsk? = nil
     @State private var card: FinanceCardTarget? = nil
     @State private var toast: String? = nil
+    /// [v25.636] 名單上已經有的名字 key（〔存成朋友〕只給名單外的人）
+    @State private var knownKeys: Set<String> = []
+    @State private var showPremiumAlert = false
 
     init(opensCards: Bool = true) {
         self.opensCards = opensCards
@@ -56,6 +60,7 @@ struct OwedListView: View {
                 .appStores()
         }
         .modifier(SplitUndoDialog(ask: $undoAsk, life: lifeStore))
+        .premiumLockAlert(isPresented: $showPremiumAlert)
         .overlay(alignment: .bottom) { OwedToast(text: toast) }
         .task(id: toast) {
             guard toast != nil else { return }
@@ -106,7 +111,8 @@ struct OwedListView: View {
                 mealRow(m)
             }
         } header: {
-            OwedPersonHeader(name: p.name, value: ExpenseSplitText.owedPersonValue(p))
+            OwedPersonHeader(name: p.name, value: ExpenseSplitText.owedPersonValue(p),
+                             onSaveFriend: canSaveFriend(p.name) ? { saveFriend(p.name) } : nil)
         }
     }
 
@@ -162,6 +168,25 @@ struct OwedListView: View {
         settled = ExpenseSplitIndex.people(idx.settledMeals(expenses: store.expenses, now: now, calendar: cal))
         let pairs: [(UUID, String)] = lifeStore.milestones.map { m in (m.id, ExpenseSplitRepay.accountName(m)) }
         accountNames = Dictionary(pairs, uniquingKeysWith: { a, _ in a })
+        knownKeys = PersonLedger.knownKeys(life: lifeStore)
+    }
+
+    /// [v25.636] 名單外、名字合格的人才有〔存成朋友〕
+    private func canSaveFriend(_ name: String) -> Bool {
+        guard PersonLedger.canPick(name) else { return false }
+        let k = PersonLedger.key(name)
+        return !k.isEmpty && !knownKeys.contains(k)
+    }
+
+    /// [v25.636] 〔存成朋友〕：要訂閱；下一個 runloop 才寫
+    private func saveFriend(_ name: String) {
+        guard subscription.isPremium else { showPremiumAlert = true; return }
+        knownKeys.insert(PersonLedger.key(name))
+        let life = lifeStore
+        DispatchQueue.main.async {
+            let saved = FriendActions.save(names: [name], life: life)
+            if !saved.isEmpty { toast = FriendText.savedToast(saved) }
+        }
     }
 }
 
@@ -183,6 +208,8 @@ fileprivate struct OwedTabPicker: View {
 fileprivate struct OwedPersonHeader: View {
     let name: String
     let value: String
+    /// [v25.636] 〔存成朋友〕（名單外的人才有）
+    let onSaveFriend: (() -> Void)?
 
     var body: some View {
         HStack(spacing: 8) {
@@ -190,6 +217,11 @@ fileprivate struct OwedPersonHeader: View {
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.primary)
                 .lineLimit(1)
+            if let s = onSaveFriend {
+                Button(FriendText.saveAsFriend, action: s)
+                    .font(.caption.weight(.semibold))
+                    .buttonStyle(.borderless)
+            }
             Spacer(minLength: 8)
             Text(value)
                 .font(.footnote)

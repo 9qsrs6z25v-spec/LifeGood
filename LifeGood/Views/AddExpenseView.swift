@@ -88,6 +88,8 @@ struct AddExpenseView: View {
     /// 固定支出：列入節稅追蹤；nil 採自動推斷
     @State private var taxDeductibleOverride: Bool? = nil
     @State private var selectedDiningMembers: Set<String> = []
+    /// [v25.636] 選人單〔存成朋友〕點了的名字（同行人員、收受人共用；記帳存檔時才存，取消＝不存）
+    @State private var pendingFriends: Set<String> = []
     /// [v25.634] 同行人員／收受人共用的選人清單（PeoplePickerSheet；sheet(item:)）
     @State private var peoplePicker: PeoplePickerKind?
     /// [v25.634] 「誰付多少」編輯器交回來的草稿（nil＝沒打開過：存檔照預設角色＋平分，ExpenseSplitMath.resolve）
@@ -2457,11 +2459,13 @@ struct AddExpenseView: View {
             PeoplePickerSheet(title: ExpenseSplitText.pickerTitle, prompt: ExpenseSplitText.pickerPrompt,
                               subtitle: ExpenseSplitText.pickerSubtitle, groups: diningGroups,
                               selection: $selectedDiningMembers, meName: splitMeName,
-                              lockedNames: splitLockedNames, allowTyping: true, accent: .green)
+                              lockedNames: splitLockedNames, allowTyping: true, accent: .green,
+                              pendingFriends: $pendingFriends, friendKeys: PersonLedger.knownKeys(life: lifeStore))
         case .social:
             PeoplePickerSheet(title: "收受人", prompt: "搜尋姓名、部門、公司、職稱", subtitle: nil,
                               groups: socialRecipientGroups, selection: $selectedSocialRecipients, meName: nil,
-                              lockedNames: [], allowTyping: true, accent: .pink)
+                              lockedNames: [], allowTyping: true, accent: .pink,
+                              pendingFriends: $pendingFriends, friendKeys: PersonLedger.knownKeys(life: lifeStore))
         }
     }
 
@@ -4341,6 +4345,13 @@ struct AddExpenseView: View {
             ? ExpenseSplitMath.resolve(edited: splitDraft, loaded: loadedSplit, names: splitOthers, family: splitFamily, total: amount)
             : nil
         DispatchQueue.main.async { splitStore.recordSave(expenseId: splitId, draft: splitSaved) }
+        // [v25.636] 〔存成朋友〕記帳存檔時才存（K2；取消不存）：只存真的存進這筆的名字；先 dismiss，下一個 runloop 才寫（FriendActions.save 用當下名單再去重、withBatch 一次）
+        let friendNames = PersonLedger.pendingToSave(pending: pendingFriends,
+                                                     saved: SplitPeople.names(in: expense.diningMember) + SplitPeople.names(in: expense.socialRecipient))
+        if !friendNames.isEmpty {
+            let friendLife = lifeStore
+            DispatchQueue.main.async { FriendActions.save(names: friendNames, life: friendLife) }
+        }
         syncBankWithdrawal(for: expense, previous: editingExpense)
         // [v25.567] 改了一筆保費：連著它的財富保單照寫一份舊欄位（里程碑保費、帳本繳法／從哪扣／下次；給醫療地圖、舊 iPad、網頁版）。
         // 先 dismiss，下一個 runloop 才寫（store 先抓進區域常數）；沒連保單的 policyExpenseChanged 自己什麼都不做

@@ -56,13 +56,28 @@ struct PeoplePickerSheet: View {
     let allowTyping: Bool
     /// 〔完成〕、「已選 N」膠囊的顏色（同行人員綠、收受人粉）
     let accent: Color
+    /// [v25.636] 〔存成朋友〕點了的名字（AddExpenseView 存檔時才存；選人單本身不寫任何東西）
+    @Binding private var pendingFriends: Set<String>
+    /// [v25.636] 名單上已經有的名字 key（PersonLedger.knownKeys）；nil＝沒有〔存成朋友〕
+    let friendKeys: Set<String>?
 
+    @EnvironmentObject var subscription: SubscriptionManager
     @State private var query = ""
     @State private var lockedAlert = false
+    @State private var premiumAlert = false
     @Environment(\.dismiss) private var dismiss
 
     init(title: String, prompt: String, subtitle: String?, groups: [PeopleGroup], selection: Binding<Set<String>>,
          meName: String?, lockedNames: Set<String>, allowTyping: Bool, accent: Color) {
+        self.init(title: title, prompt: prompt, subtitle: subtitle, groups: groups, selection: selection, meName: meName,
+                  lockedNames: lockedNames, allowTyping: allowTyping, accent: accent,
+                  pendingFriends: .constant([]), friendKeys: nil)
+    }
+
+    /// [v25.636] 多〔存成朋友〕
+    init(title: String, prompt: String, subtitle: String?, groups: [PeopleGroup], selection: Binding<Set<String>>,
+         meName: String?, lockedNames: Set<String>, allowTyping: Bool, accent: Color,
+         pendingFriends: Binding<Set<String>>, friendKeys: Set<String>?) {
         self.title = title
         self.prompt = prompt
         self.subtitle = subtitle
@@ -72,6 +87,8 @@ struct PeoplePickerSheet: View {
         self.lockedNames = lockedNames
         self.allowTyping = allowTyping
         self.accent = accent
+        _pendingFriends = pendingFriends
+        self.friendKeys = friendKeys
     }
 
     var body: some View {
@@ -84,6 +101,7 @@ struct PeoplePickerSheet: View {
                 .alert(ExpenseSplitText.pickerLocked, isPresented: $lockedAlert) {
                     Button("知道了", role: .cancel) {}
                 }
+                .premiumLockAlert(isPresented: $premiumAlert)
         }
     }
 
@@ -145,6 +163,7 @@ struct PeoplePickerSheet: View {
                 lockedAlert = true
             } else {
                 selection.remove(name)
+                pendingFriends.remove(name)
             }
         } else {
             // [v25.635] 名單裡不合格的名字（有「、」逗號分號換行、超過 20 字）不能勾（列本身也灰掉）；不幫使用者改名
@@ -158,6 +177,24 @@ struct PeoplePickerSheet: View {
         let kept = selection.intersection(lockedNames)
         if !kept.isEmpty { lockedAlert = true }
         selection = kept
+        pendingFriends = pendingFriends.intersection(kept)
+    }
+
+    /// [v25.636] 「已選」那一列有沒有〔存成朋友〕：可以打字的選單、名字合格、名單外
+    private func canSaveFriend(_ name: String) -> Bool {
+        guard allowTyping, let keys = friendKeys, PersonLedger.canPick(name) else { return false }
+        let k = PersonLedger.key(name)
+        return !k.isEmpty && !keys.contains(k)
+    }
+
+    /// [v25.636] 〔存成朋友〕／〔不存了〕：只改 pendingFriends（存檔時才寫）；要訂閱
+    private func markFriend(_ name: String) {
+        guard subscription.isPremium else { premiumAlert = true; return }
+        if pendingFriends.contains(name) {
+            pendingFriends.remove(name)
+        } else {
+            pendingFriends.insert(name)
+        }
     }
 
     private func add(_ row: SplitAddRow) {
@@ -189,8 +226,13 @@ struct PeoplePickerSheet: View {
                 if !selection.isEmpty {
                     Section("已選（\(selection.count)）") {
                         ForEach(selection.sorted(), id: \.self) { name in
-                            PeoplePickerRow(title: name, detail: "", picked: true, locked: isLocked(name),
-                                            blocked: !PersonLedger.canPick(name), onToggle: { toggle(name) })
+                            if canSaveFriend(name) {
+                                PeoplePickedFriendRow(title: name, locked: isLocked(name), marked: pendingFriends.contains(name),
+                                                      onToggle: { toggle(name) }, onMark: { markFriend(name) })
+                            } else {
+                                PeoplePickerRow(title: name, detail: "", picked: true, locked: isLocked(name),
+                                                blocked: !PersonLedger.canPick(name), onToggle: { toggle(name) })
+                            }
                         }
                     }
                 }
@@ -275,6 +317,41 @@ fileprivate struct PeoplePickerRow: View {
         }
         .buttonStyle(.plain)
         .disabled(blocked && !picked)
+    }
+}
+
+/// [v25.636] 「已選」那一列＋右邊〔存成朋友〕（兩顆鈕都 .borderless，List 才不會一起觸發）
+fileprivate struct PeoplePickedFriendRow: View {
+    let title: String
+    let locked: Bool
+    let marked: Bool
+    let onToggle: () -> Void
+    let onMark: () -> Void
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Button(action: onToggle) {
+                HStack(spacing: 10) {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(Color.green)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(title).foregroundStyle(Color.primary)
+                        if marked {
+                            Text(FriendText.pendingMarked).font(.caption).foregroundStyle(.green)
+                        }
+                    }
+                    Spacer()
+                    if locked {
+                        Image(systemName: "lock.fill").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.borderless)
+            Button(marked ? FriendText.unmarkFriend : FriendText.saveAsFriend, action: onMark)
+                .font(.caption.weight(.semibold))
+                .buttonStyle(.borderless)
+        }
     }
 }
 

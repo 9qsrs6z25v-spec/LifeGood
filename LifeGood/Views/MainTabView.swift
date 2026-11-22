@@ -114,7 +114,8 @@ enum LifeFeatureGate {
         case .career:
             return life.milestones.contains { $0.category == .career }
         case .family:
-            return !life.familyMembers.isEmpty
+            // [v25.636] 只有朋友也解鎖家庭（朋友履歷在家庭第 5 顆）
+            return !life.familyMembers.isEmpty || !life.relationships.isEmpty
         case .realEstate:
             return !finance.realEstates.isEmpty
         case .tax:
@@ -154,7 +155,8 @@ enum LifeFeatureGate {
         case .career:
             return "記一筆「職涯」類的里程碑（到職、升遷、調動…）"
         case .family:
-            return "新增一位家庭成員（配偶、兒女、父母、寵物都算）"
+            // [v25.636] 朋友也算
+            return "新增一位家庭成員（配偶、兒女、父母、寵物都算），或一位朋友"
         case .realEstate:
             return "在理財新增一筆房地產"
         case .tax:
@@ -173,7 +175,8 @@ enum LifeFeatureGate {
         switch feature {
         case .overview, .resume, .health, .finance: return nil   // [v25.553] 健康、[v25.564] 財富一開始就出現
         case .career:     return .addMilestone(.career)
-        case .family:     return .addMilestone(.family)
+        // [v25.636] 先問新增家人還是朋友（LifeOverviewView）
+        case .family:     return .addFamilyOrFriend
         case .realEstate: return .addRealEstate
         case .tax, .foodMap, .travelMap, .medicalMap: return .addVariableExpense
         }
@@ -183,6 +186,8 @@ enum LifeFeatureGate {
         case addVariableExpense
         case addRealEstate
         case addMilestone(MilestoneCategory)
+        // [v25.636] 家庭：新增家人或朋友
+        case addFamilyOrFriend
     }
 }
 
@@ -218,7 +223,8 @@ enum ManagementFeature: String, CaseIterable, Identifiable {
 
 enum FamilyMgmtFeature: String, CaseIterable, Identifiable {
     /// [v25.387] petResume 排在 childrenResume 右邊——膠囊列與這個順序一致
-    case spouseResume, childrenResume, petResume, relativeResume
+    // [v25.636] friendResume 朋友履歷排最後
+    case spouseResume, childrenResume, petResume, relativeResume, friendResume
     var id: String { rawValue }
     var title: String {
         switch self {
@@ -226,6 +232,8 @@ enum FamilyMgmtFeature: String, CaseIterable, Identifiable {
         case .childrenResume: return "兒女履歷"
         case .petResume:      return "寵物履歷"
         case .relativeResume: return "家人履歷"
+        // [v25.636] 朋友履歷
+        case .friendResume:   return "朋友履歷"
         }
     }
     var icon: String {
@@ -234,6 +242,8 @@ enum FamilyMgmtFeature: String, CaseIterable, Identifiable {
         case .childrenResume: return "figure.2.and.child.holdinghands"
         case .petResume:      return "pawprint.circle.fill"
         case .relativeResume: return "person.3.sequence.fill"
+        // [v25.636] 朋友履歷
+        case .friendResume:   return "person.2.fill"
         }
     }
 }
@@ -436,9 +446,10 @@ struct MainTabView: View {
             && (isCurrentlyManagerial || hasAnySideRoleWorkspace) && !isSettingsActive
     }
 
-    /// 家庭子功能列在「家庭」被選取且有家庭成員時展開
+    /// 家庭子功能列在「家庭」被選取且有家人或朋友時展開
     private var shouldExpandFamily: Bool {
-        currentMode == .life && lifeFeature == .family && !lifeStore.familyMembers.isEmpty && !isSettingsActive
+        // [v25.636] 有家人或朋友
+        currentMode == .life && lifeFeature == .family && (!lifeStore.familyMembers.isEmpty || !lifeStore.relationships.isEmpty) && !isSettingsActive
     }
 
     /// 職涯功能列實際要顯示哪幾顆。六個既有管理功能維持「限主管」，
@@ -459,6 +470,8 @@ struct MainTabView: View {
         if hasChildren { list.append(.childrenResume) }
         if hasPets { list.append(.petResume) }
         if hasExtendedFamily { list.append(.relativeResume) }
+        // [v25.636] 朋友履歷一律最後一顆（不看有沒有資料，不然第一位朋友沒地方建）
+        list.append(.friendResume)
         return list
     }
 
@@ -1474,8 +1487,12 @@ struct MainTabView: View {
                     if hasPets { PetResumeView() } else { FamilyView() }
                 case .relativeResume:
                     if hasExtendedFamily { FamilyMembersResumeView() } else { FamilyView() }
+                // [v25.636] 朋友履歷
+                case .friendResume:
+                    FriendsResumeView()
                 }
-            } else if !lifeStore.familyMembers.isEmpty {
+            // [v25.636] 只有朋友也進家庭
+            } else if !lifeStore.familyMembers.isEmpty || !lifeStore.relationships.isEmpty {
                 FamilyView()
             } else {
                 LifeOverviewView()
