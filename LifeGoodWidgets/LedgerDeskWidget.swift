@@ -38,11 +38,11 @@ struct LedgerDeskWidget: Widget {
         // [v3] StaticConfiguration → AppIntentConfiguration（kind 不變：已經放好的升級後用預設值、外觀一樣）
         AppIntentConfiguration(kind: WidgetKind.ledgerDesk, intent: LedgerDeskConfigIntent.self,
                                provider: LedgerDeskProvider()) { entry in
-            LedgerDeskEntryView(entry: entry)
+            LedgerDeskRootView(entry: entry)
         }
         .configurationDisplayName("記帳台")
-        .description("看還能花，一按就記帳")
-        .supportedFamilies([.systemMedium])
+        .description("看還能花，一按就記帳；大的上面整排還能花、下面四張大卡")
+        .supportedFamilies([.systemMedium, .systemLarge])
     }
 }
 
@@ -377,6 +377,205 @@ struct LedgerDeskCardBackground: View {
                 shape.fill(gradient)
                 shape.fill(Color.black.opacity(shade))
             }
+        }
+    }
+}
+
+// MARK: - 大型（v25.632 large2）
+//
+// judge_largewidgets.md §C 第二版 C3、brief §2 G3。同一個 kind、同一個 timeline（LedgerDeskProvider 一字不動），
+// LedgerDeskRootView 依尺寸分：大型 → LedgerDeskLargeEntryView，其他（中型）→ 既有 LedgerDeskEntryView（一字不動）。
+// • 上半整寬：WidgetMoneyPanelWide（WidgetMoneyPanel.swift 檔尾；跟中型左半同一組字），點了 → 收支總覽。
+// • 下半 2×2 大卡片：跟中型同一組卡（LedgerDeskModel.tiles(snapshot:choiceIDs:)，長按設定照用），卡上沒有金額；
+//   每張各自一個 Link → 新增支出、分類／車子帶好（使用者按儲存才算）。一排只有 1 張時那張佔滿整排。
+// • 放不下只砍卡片高（76 → 68 → 60）、再拿掉頁腳，字級不變（LedgerDeskLargeLayout.candidates，ViewThatFits 4 個候選）。
+// • 上半與卡片之間 Spacer(minLength: 12)：卡片貼底、手指好按（第三版「今天記的」放那裡）。
+// • 整塊 widgetURL＝收支總覽（空白處的後備）。
+//
+// 型別：LedgerDeskRootView（internal）；LedgerDeskLargeModel 與畫面零件 private。
+
+/// 依尺寸分：大型 → LedgerDeskLargeEntryView；其他 → 既有 LedgerDeskEntryView（中型原封不動）
+struct LedgerDeskRootView: View {
+    let entry: LedgerDeskEntry
+
+    @Environment(\.widgetFamily) private var family
+
+    var body: some View {
+        if family == .systemLarge {
+            LedgerDeskLargeEntryView(entry: entry)
+        } else {
+            LedgerDeskEntryView(entry: entry)
+        }
+    }
+}
+
+/// 大型要的東西：上半的字、卡、4 個候選（只挑、不算；sim ledger_large_make）
+private struct LedgerDeskLargeModel {
+    let panel: WidgetMoneyPanelWideModel
+    let tiles: [WidgetDeskTile]
+    /// 固定 4 個（大到小）
+    let candidates: [LedgerDeskLargeLayout.Plan]
+
+    /// 安全取值：index 夾在 0...count-1；沒有候選回最矮、不帶頁腳的
+    func candidate(at index: Int) -> LedgerDeskLargeLayout.Plan {
+        guard !candidates.isEmpty else {
+            return LedgerDeskLargeLayout.Plan(tileHeight: LedgerDeskLargeLayout.compactTileHeight, showsFooter: false)
+        }
+        let i: Int = min(max(index, 0), candidates.count - 1)
+        return candidates[i]
+    }
+
+    static func make(entry: LedgerDeskEntry) -> LedgerDeskLargeModel {
+        let panel = WidgetMoneyPanelWideModel.make(snapshot: entry.snapshot, now: entry.date, hidden: entry.hidesAmounts)
+        let tiles: [WidgetDeskTile] = LedgerDeskModel.tiles(snapshot: entry.snapshot, choiceIDs: entry.choiceIDs)
+        let plans: [LedgerDeskLargeLayout.Plan] = LedgerDeskLargeLayout.candidates(tileCount: tiles.count,
+                                                                                   hasFooter: !panel.footer.isEmpty)
+        return LedgerDeskLargeModel(panel: panel, tiles: tiles, candidates: plans)
+    }
+}
+
+/// 大型：palette／surface 同中型；天空月牙放右上（上半右邊比較空）
+private struct LedgerDeskLargeEntryView: View {
+    let entry: LedgerDeskEntry
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.widgetRenderingMode) private var renderingMode
+    @Environment(\.showsWidgetContainerBackground) private var showsBackground
+
+    private var surface: WidgetPalette.Surface {
+        WidgetPalette.Surface(renderingMode: renderingMode, showsBackground: showsBackground)
+    }
+
+    private var palette: WidgetPalette {
+        WidgetPalette(colorScheme, mono: surface.isMono)
+    }
+
+    private var model: LedgerDeskLargeModel {
+        LedgerDeskLargeModel.make(entry: entry)
+    }
+
+    var body: some View {
+        LedgerDeskLargeBoard(model: model, palette: palette)
+            .containerBackground(for: .widget) {
+                backgroundView
+            }
+            .widgetURL(WidgetLink.expenseOverview)
+    }
+
+    /// 著色不畫天空
+    @ViewBuilder
+    private var backgroundView: some View {
+        if surface.drawsSky {
+            WidgetSky(palette: palette, moon: .topTrailing)
+        } else {
+            Color.clear
+        }
+    }
+}
+
+/// 4 個候選由上往下挑（字級不變、只砍卡片高與頁腳；不巢狀 ViewThatFits）
+private struct LedgerDeskLargeBoard: View {
+    let model: LedgerDeskLargeModel
+    let palette: WidgetPalette
+
+    var body: some View {
+        ViewThatFits(in: .vertical) {
+            LedgerDeskLargeColumn(model: model, plan: model.candidate(at: 0), palette: palette)
+            LedgerDeskLargeColumn(model: model, plan: model.candidate(at: 1), palette: palette)
+            LedgerDeskLargeColumn(model: model, plan: model.candidate(at: 2), palette: palette)
+            LedgerDeskLargeColumn(model: model, plan: model.candidate(at: 3), palette: palette)
+        }
+    }
+}
+
+/// 上半（固定高）→ Spacer（至少 12）→ 卡片（貼底）。LedgerDeskLargeLayout.height 算的就是這一欄
+private struct LedgerDeskLargeColumn: View {
+    let model: LedgerDeskLargeModel
+    let plan: LedgerDeskLargeLayout.Plan
+    let palette: WidgetPalette
+
+    private var gap: CGFloat {
+        model.tiles.isEmpty ? 0 : LedgerDeskLargeLayout.gridTopGap
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            Link(destination: WidgetLink.expenseOverview) {
+                WidgetMoneyPanelWide(model: model.panel, showsFooter: plan.showsFooter, palette: palette)
+            }
+            Spacer(minLength: gap)
+            LedgerDeskLargeGrid(tiles: model.tiles, tileHeight: plan.tileHeight, palette: palette)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+}
+
+/// 2×2（前 2 張一排、第 3–4 張一排；沒有就不畫）。每排高度＝候選的卡片高
+private struct LedgerDeskLargeGrid: View {
+    let tiles: [WidgetDeskTile]
+    let tileHeight: CGFloat
+    let palette: WidgetPalette
+
+    private var topRow: [WidgetDeskTile] { Array(tiles.prefix(2)) }
+    private var bottomRow: [WidgetDeskTile] { Array(tiles.dropFirst(2).prefix(2)) }
+
+    var body: some View {
+        VStack(spacing: LedgerDeskLargeLayout.tileSpacing) {
+            if !topRow.isEmpty {
+                row(topRow)
+            }
+            if !bottomRow.isEmpty {
+                row(bottomRow)
+            }
+        }
+    }
+
+    private func row(_ items: [WidgetDeskTile]) -> some View {
+        HStack(spacing: LedgerDeskLargeLayout.tileSpacing) {
+            ForEach(items, id: \.id) { (tile: WidgetDeskTile) in
+                Link(destination: tile.url) {
+                    LedgerDeskLargeTileView(tile: tile, palette: palette)
+                }
+            }
+        }
+        .frame(height: tileHeight)
+    }
+}
+
+/// 一張大卡：左上圖示、左下字（同中型卡的畫法，字大一點）；「＋ 記一筆」淺底；著色模式外框＋重點色圖示
+private struct LedgerDeskLargeTileView: View {
+    let tile: WidgetDeskTile
+    let palette: WidgetPalette
+
+    private var isAdd: Bool { tile.style == .add }
+
+    private var iconColor: Color {
+        if palette.isMono { return palette.ink }
+        return isAdd ? palette.deskAddIcon : palette.tileInk
+    }
+
+    private var textColor: Color {
+        if palette.isMono { return palette.ink }
+        return isAdd ? palette.ink : palette.tileInk
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Image(systemName: tile.icon)
+                .font(.system(size: 18, weight: .bold))
+                .foregroundStyle(iconColor)
+                .widgetAccentable()
+            Spacer(minLength: 2)
+            Text(tile.title)
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(textColor)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background {
+            LedgerDeskCardBackground(top: tile.top, bottom: tile.bottom, plain: isAdd, palette: palette)
         }
     }
 }

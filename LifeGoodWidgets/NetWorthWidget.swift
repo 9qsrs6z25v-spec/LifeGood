@@ -40,11 +40,11 @@ struct NetWorthWidget: Widget {
     var body: some WidgetConfiguration {
         AppIntentConfiguration(kind: WidgetKind.netWorth, intent: NetWorthConfigIntent.self,
                                provider: NetWorthWidgetProvider()) { entry in
-            NetWorthWidgetEntryView(entry: entry)
+            NetWorthWidgetRootView(entry: entry)
         }
         .configurationDisplayName("淨資產")
-        .description("身家比上個月多還是少")
-        .supportedFamilies([.systemSmall, .systemMedium, .accessoryCircular, .accessoryRectangular])
+        .description("身家比上個月多還是少；大的列出每一類資產和貸款")
+        .supportedFamilies([.systemSmall, .systemMedium, .systemLarge, .accessoryCircular, .accessoryRectangular])
     }
 }
 
@@ -835,6 +835,480 @@ private struct NetWorthWidgetRect: View {
                 .font(.system(size: 13, weight: .medium))
                 .foregroundStyle(.secondary)
                 .lineLimit(1)
+                .minimumScaleFactor(0.8)
+        }
+    }
+}
+
+// MARK: - 大型（v25.632 large2）
+//
+// 規格見 scratchpad/radar/build/large2/brief.md §0 C2、§2 G2；示意圖 scratchpad/largewidgets/networth.html（只做到兩欄＋頁腳）。
+// 「淨資產　11 月」→ 大字 30pt＋膠囊「比上月 ↑2%」→ App 寫好的那一句 → 資產色帶（＋貸款色帶，長度＝debtsBar）→
+// 兩欄（資產最多 6 類｜貸款最多 4 類：色塊、名稱、金額、占比）→ 右下「股價 11/20 13:30」（舊快照再加橘字「11/18 的數字」）。
+// • 走勢是第三版：這一版不畫、不留位置（兩欄下面 Spacer，頁腳貼底）。
+// • 字全部來自既有 NetWorthWidgetModel.make(entry:)（大字、比上月、那一句、跨月、舊快照、隱藏金額的規則都不重寫）；
+//   **這一段不算錢、不拼「NT$」**。大型共用同一個 provider／timeline（不多排 entry、不上網）。
+// • 「比上月」膠囊不上紅綠（v25.549：跟理財總覽一致，方向靠 ↑↓）；舊數字橘字（palette.warn）。
+// • 沒有貸款：貸款色帶、右欄整欄不畫（連欄名）。有「卡費與交割」右欄寫「負債」（同中型 debtsLabel）。
+// • 隱藏金額：大字 mask、不標紅；那一句用 App 的遮罩版；每類金額欄不畫、只寫占比（字放大）；色帶照畫。
+// • 放不下只砍類別數／列高（NetWorthLargeLayout.candidates 固定 4 個），字級不變。
+// • 小、中、鎖定畫面：NetWorthWidgetRootView 原封不動交給既有 NetWorthWidgetEntryView。
+
+/// 依尺寸分：大型 → NetWorthLargeEntryView；其他（小、中、鎖定畫面）照舊 NetWorthWidgetEntryView
+struct NetWorthWidgetRootView: View {
+    let entry: NetWorthWidgetEntry
+
+    @Environment(\.widgetFamily) private var family
+
+    var body: some View {
+        if family == .systemLarge {
+            NetWorthLargeEntryView(entry: entry)
+        } else {
+            NetWorthWidgetEntryView(entry: entry)
+        }
+    }
+}
+
+// MARK: 大型要畫的字（sim nw_large_make）
+
+/// 兩欄的一列（一類資產或貸款）
+private struct NetWorthLargeRow: Identifiable {
+    /// part.key（「stock」「mortgage」…）
+    let id: String
+    /// 「股票」「房貸」「卡費與交割」
+    let title: String
+    /// 「NT$860萬」「約 NT$510萬」（App 寫好的）；隱藏金額空字串（只寫占比）
+    let amount: String
+    /// 「45%」
+    let share: String
+    let top: UInt32
+    let bottom: UInt32
+}
+
+/// ViewThatFits 的一個候選：兩欄各畫幾類、列多高（列 model 先切好，View 不切陣列）
+private struct NetWorthLargeCandidate: Identifiable {
+    let id: Int
+    let plan: NetWorthLargeLayout.Plan
+    let assets: [NetWorthLargeRow]
+    let debts: [NetWorthLargeRow]
+}
+
+private struct NetWorthLargeModel {
+    /// 沒快照、沒有資產也沒有貸款：只寫一句話（同中型）
+    var isMessage = true
+    var message = ""
+    /// 「11 月」
+    var monthText = ""
+    /// 大字「NT$1,300萬」；隱藏 mask
+    var hero = ""
+    /// 淨資產是負的（大字紅；隱藏時不標）
+    var heroIsNegative = false
+    /// 膠囊「比上月 ↑2%」；跨月「11/30 的數字」（橘）；都沒有空字串（不畫膠囊）
+    var headTrail = ""
+    var headTrailIsStale = false
+    /// 「總資產 NT$1926萬・貸款還欠 約 NT$640萬」；隱藏用 App 的 lineMasked
+    var line = ""
+    /// 色帶：全部類別（不是只有兩欄放得下的那幾類）
+    var assetBand: [LargeWidgetBandPart] = []
+    var debtBand: [LargeWidgetBandPart] = []
+    var assetsBar: Double = 0
+    var debtsBar: Double = 0
+    /// 欄名：「資產」；右欄「貸款」或「負債」（有卡費與交割）
+    var assetTitle = "資產"
+    var debtTitle = "貸款"
+    /// 右下：「股價 11/20 13:30」（灰）＋「11/18 的數字」（橘）
+    var footStock = ""
+    var footStale = ""
+    var hasFoot = false
+    /// 固定 4 個（大到小）
+    var candidates: [NetWorthLargeCandidate] = []
+
+    /// 安全取值：index 夾在 0…count-1；沒有候選回一個 0 列的
+    func candidate(at index: Int) -> NetWorthLargeCandidate {
+        guard !candidates.isEmpty else {
+            let plan = NetWorthLargeLayout.Plan(assetRows: 0, debtRows: 0, rowHeight: NetWorthLargeLayout.rowHeight)
+            return NetWorthLargeCandidate(id: 0, plan: plan, assets: [], debts: [])
+        }
+        let i: Int = min(max(0, index), candidates.count - 1)
+        return candidates[i]
+    }
+
+    /// 只挑字、不算錢（sim nw_large_make）。base＝NetWorthWidgetModel.make(entry:)（小、中同一個）
+    static func make(base: NetWorthWidgetModel, hidden: Bool) -> NetWorthLargeModel {
+        var m = NetWorthLargeModel()
+        m.message = base.message
+        guard !base.isMessage else { return m }
+        m.isMessage = false
+        m.monthText = base.monthText
+        m.hero = base.hero
+        m.heroIsNegative = base.heroIsNegative
+        m.headTrail = base.headTrail
+        m.headTrailIsStale = base.headTrailIsStale
+        m.line = base.line
+        m.assetBand = base.assetParts.map { band($0) }
+        m.debtBand = base.debtParts.map { band($0) }
+        m.assetsBar = base.assetsBar
+        m.debtsBar = base.debtsBar
+        m.debtTitle = base.debtsLabel
+        m.footStock = base.stockPriceText
+        m.footStale = base.footStale
+        m.hasFoot = !base.stockPriceText.isEmpty || !base.footStale.isEmpty
+        let assets: [NetWorthLargeRow] = base.assetParts.prefix(NetWorthLargeLayout.maxAssets).map { row($0, hidden: hidden) }
+        let debts: [NetWorthLargeRow] = base.debtParts.prefix(NetWorthLargeLayout.maxDebts).map { row($0, hidden: hidden) }
+        let plans: [NetWorthLargeLayout.Plan] = NetWorthLargeLayout.candidates(assetCount: base.assetParts.count,
+                                                                              debtCount: base.debtParts.count,
+                                                                              hasFoot: m.hasFoot)
+        var out: [NetWorthLargeCandidate] = []
+        for (i, plan) in plans.enumerated() {
+            let a: [NetWorthLargeRow] = Array(assets.prefix(max(0, plan.assetRows)))
+            let d: [NetWorthLargeRow] = Array(debts.prefix(max(0, plan.debtRows)))
+            out.append(NetWorthLargeCandidate(id: i, plan: plan, assets: a, debts: d))
+        }
+        m.candidates = out
+        return m
+    }
+
+    /// 一類：隱藏金額時金額欄空字串（只寫占比）
+    private static func row(_ part: WidgetNetWorthPart, hidden: Bool) -> NetWorthLargeRow {
+        NetWorthLargeRow(id: part.key, title: part.title, amount: hidden ? "" : part.amountText,
+                         share: part.shareText, top: part.top, bottom: part.bottom)
+    }
+
+    private static func band(_ part: WidgetNetWorthPart) -> LargeWidgetBandPart {
+        LargeWidgetBandPart(id: part.key, share: part.share, top: part.top, bottom: part.bottom)
+    }
+}
+
+// MARK: 大型畫面
+
+/// palette／surface 同中型；整塊 → 理財總覽（同中型）
+private struct NetWorthLargeEntryView: View {
+    let entry: NetWorthWidgetEntry
+
+    @Environment(\.colorScheme) private var colorScheme
+    @Environment(\.widgetRenderingMode) private var renderingMode
+    @Environment(\.showsWidgetContainerBackground) private var showsBackground
+
+    private var surface: WidgetPalette.Surface {
+        WidgetPalette.Surface(renderingMode: renderingMode, showsBackground: showsBackground)
+    }
+
+    private var palette: WidgetPalette {
+        WidgetPalette(colorScheme, mono: surface.isMono)
+    }
+
+    private var model: NetWorthLargeModel {
+        NetWorthLargeModel.make(base: NetWorthWidgetModel.make(entry: entry), hidden: entry.hidesAmounts)
+    }
+
+    var body: some View {
+        NetWorthLargeView(model: model, palette: palette)
+            .containerBackground(for: .widget) {
+                background
+            }
+            .widgetURL(WidgetLink.financeOverview)
+    }
+
+    /// 全彩畫天空（不放月牙：右上沒有空位）；著色、透明 Color.clear
+    @ViewBuilder
+    private var background: some View {
+        if surface.drawsSky {
+            WidgetSky(palette: palette, moon: WidgetSkyMoon.none)
+        } else {
+            Color.clear
+        }
+    }
+}
+
+/// 一句話 → 既有 NetWorthWidgetMessage；其他 → 4 個候選由上往下挑（字級不變、只砍類別數／列高；不巢狀）
+private struct NetWorthLargeView: View {
+    let model: NetWorthLargeModel
+    let palette: WidgetPalette
+
+    var body: some View {
+        if model.isMessage {
+            NetWorthWidgetMessage(text: model.message, palette: palette)
+        } else {
+            ViewThatFits(in: .vertical) {
+                NetWorthLargeColumn(model: model, candidate: model.candidate(at: 0), palette: palette)
+                NetWorthLargeColumn(model: model, candidate: model.candidate(at: 1), palette: palette)
+                NetWorthLargeColumn(model: model, candidate: model.candidate(at: 2), palette: palette)
+                NetWorthLargeColumn(model: model, candidate: model.candidate(at: 3), palette: palette)
+            }
+        }
+    }
+}
+
+/// 標題 → 大字＋膠囊 → 那一句 → 色帶 → 兩欄 → Spacer → 頁腳。每一塊固定高度（NetWorthLargeLayout.height 算的就是這一欄）
+private struct NetWorthLargeColumn: View {
+    let model: NetWorthLargeModel
+    let candidate: NetWorthLargeCandidate
+    let palette: WidgetPalette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            NetWorthLargeTitle(month: model.monthText, palette: palette)
+            NetWorthLargeHero(model: model, palette: palette)
+            NetWorthLargeLine(text: model.line, palette: palette)
+            NetWorthLargeBands(model: model, palette: palette)
+            NetWorthLargeColumns(model: model, candidate: candidate, palette: palette)
+            Spacer(minLength: 0)
+            foot
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+    }
+
+    @ViewBuilder
+    private var foot: some View {
+        if model.hasFoot {
+            NetWorthLargeFoot(stock: model.footStock, stale: model.footStale, palette: palette)
+        }
+    }
+}
+
+/// 「淨資產　11 月」
+private struct NetWorthLargeTitle: View {
+    let month: String
+    let palette: WidgetPalette
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: 6) {
+            Text("淨資產")
+                .font(.system(size: 13, weight: .bold))
+                .foregroundStyle(palette.ink)
+            Text(month)
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundStyle(palette.label)
+            Spacer(minLength: 0)
+        }
+        .lineLimit(1)
+        .frame(maxWidth: .infinity, minHeight: NetWorthLargeLayout.titleHeight,
+               maxHeight: NetWorthLargeLayout.titleHeight, alignment: .leading)
+    }
+}
+
+/// 大字「NT$1,300萬」（著色模式染重點色；負的紅字、隱藏時不標）＋膠囊「比上月 ↑2%」
+private struct NetWorthLargeHero: View {
+    let model: NetWorthLargeModel
+    let palette: WidgetPalette
+
+    private var color: Color { model.heroIsNegative ? palette.bad : palette.ink }
+
+    var body: some View {
+        HStack(alignment: .center, spacing: 8) {
+            Text(model.hero)
+                .font(.system(size: 30, weight: .bold, design: .rounded))
+                .monospacedDigit()
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .widgetAccentable()
+            NetWorthLargePill(text: model.headTrail, isStale: model.headTrailIsStale, palette: palette)
+            Spacer(minLength: 0)
+        }
+        .frame(maxWidth: .infinity, minHeight: NetWorthLargeLayout.heroHeight,
+               maxHeight: NetWorthLargeLayout.heroHeight, alignment: .leading)
+    }
+}
+
+/// 膠囊「比上月 ↑2%」：不上紅綠（v25.549，方向靠 ↑↓）；「11/30 的數字」橘字。空字串不畫
+private struct NetWorthLargePill: View {
+    let text: String
+    let isStale: Bool
+    let palette: WidgetPalette
+
+    private var color: Color { isStale ? palette.warn : palette.label }
+
+    var body: some View {
+        if !text.isEmpty {
+            Text(text)
+                .font(.system(size: 11, weight: .bold))
+                .monospacedDigit()
+                .foregroundStyle(color)
+                .lineLimit(1)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(palette.capsuleFill, in: Capsule())
+                .fixedSize()
+        }
+    }
+}
+
+/// App 寫好的那一句（空字串也佔 lineHeight，高度才對得上）
+private struct NetWorthLargeLine: View {
+    let text: String
+    let palette: WidgetPalette
+
+    var body: some View {
+        Text(text)
+            .font(.system(size: 11.5, weight: .medium))
+            .foregroundStyle(palette.inkSoft)
+            .lineLimit(1)
+            .minimumScaleFactor(0.75)
+            .frame(maxWidth: .infinity, minHeight: NetWorthLargeLayout.lineHeight,
+                   maxHeight: NetWorthLargeLayout.lineHeight, alignment: .leading)
+    }
+}
+
+/// 資產色帶（12pt，全部類別）＋貸款色帶（6pt，長度＝debtsBar；沒有貸款不畫）
+private struct NetWorthLargeBands: View {
+    let model: NetWorthLargeModel
+    let palette: WidgetPalette
+
+    private var hasDebtBand: Bool { !model.debtBand.isEmpty }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: NetWorthLargeLayout.debtBandGap) {
+            LargeWidgetBand(parts: model.assetBand, fraction: model.assetsBar,
+                            height: NetWorthLargeLayout.assetBandHeight, palette: palette)
+            debtBand
+        }
+        .padding(.top, NetWorthLargeLayout.bandTopGap)
+        .frame(height: NetWorthLargeLayout.bandsHeight(hasDebtBand: hasDebtBand), alignment: .top)
+    }
+
+    @ViewBuilder
+    private var debtBand: some View {
+        if hasDebtBand {
+            LargeWidgetBand(parts: model.debtBand, fraction: model.debtsBar,
+                            height: NetWorthLargeLayout.debtBandHeight, palette: palette)
+        }
+    }
+}
+
+/// 左欄資產、右欄貸款（沒有的那一欄整欄不畫，連欄名）；兩欄都沒有列整塊不畫
+private struct NetWorthLargeColumns: View {
+    let model: NetWorthLargeModel
+    let candidate: NetWorthLargeCandidate
+    let palette: WidgetPalette
+
+    private var rowCount: Int { max(0, max(candidate.plan.assetRows, candidate.plan.debtRows)) }
+
+    private var height: CGFloat {
+        let rows: CGFloat = CGFloat(rowCount) * candidate.plan.rowHeight
+        return NetWorthLargeLayout.columnsTopGap + NetWorthLargeLayout.sectionLabelHeight + rows
+    }
+
+    var body: some View {
+        if rowCount > 0 {
+            HStack(alignment: .top, spacing: NetWorthLargeLayout.columnSpacing) {
+                assetList
+                debtList
+            }
+            .padding(.top, NetWorthLargeLayout.columnsTopGap)
+            .frame(height: height, alignment: .top)
+        }
+    }
+
+    @ViewBuilder
+    private var assetList: some View {
+        if !candidate.assets.isEmpty {
+            NetWorthLargeColumnList(title: model.assetTitle, rows: candidate.assets,
+                                    rowHeight: candidate.plan.rowHeight, palette: palette)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+
+    @ViewBuilder
+    private var debtList: some View {
+        if !candidate.debts.isEmpty {
+            NetWorthLargeColumnList(title: model.debtTitle, rows: candidate.debts,
+                                    rowHeight: candidate.plan.rowHeight, palette: palette)
+                .frame(maxWidth: .infinity, alignment: .leading)
+        }
+    }
+}
+
+/// 欄名「資產」「貸款／負債」＋每一類一列（列高固定）
+private struct NetWorthLargeColumnList: View {
+    let title: String
+    let rows: [NetWorthLargeRow]
+    let rowHeight: CGFloat
+    let palette: WidgetPalette
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            LargeWidgetSectionLabel(title: title, height: NetWorthLargeLayout.sectionLabelHeight, palette: palette)
+            ForEach(rows, id: \.id) { row in
+                NetWorthLargeRowView(row: row, palette: palette)
+                    .frame(height: rowHeight)
+            }
+        }
+    }
+}
+
+/// 色塊、名稱、金額（隱藏時不畫）、占比（隱藏時放大，名稱旁就看得到）
+private struct NetWorthLargeRowView: View {
+    let row: NetWorthLargeRow
+    let palette: WidgetPalette
+
+    /// 隱藏金額：金額欄空字串
+    private var sharesOnly: Bool { row.amount.isEmpty }
+    private var shareSize: CGFloat { sharesOnly ? 12 : 10 }
+    private var shareColor: Color { sharesOnly ? palette.ink : palette.label }
+    private var shareWidth: CGFloat { sharesOnly ? 36 : 28 }
+
+    var body: some View {
+        HStack(spacing: 6) {
+            LargeWidgetSwatch(top: row.top, bottom: row.bottom, palette: palette, size: NetWorthLargeLayout.swatchSize)
+            Text(row.title)
+                .font(.system(size: 11.5, weight: .semibold))
+                .foregroundStyle(palette.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.8)
+            Spacer(minLength: 4)
+            amount
+            share
+        }
+    }
+
+    @ViewBuilder
+    private var amount: some View {
+        if !row.amount.isEmpty {
+            Text(row.amount)
+                .font(.system(size: 12, weight: .bold))
+                .monospacedDigit()
+                .foregroundStyle(palette.ink)
+                .lineLimit(1)
+                .minimumScaleFactor(0.6)
+                .layoutPriority(1)
+        }
+    }
+
+    private var share: some View {
+        Text(row.share)
+            .font(.system(size: shareSize, weight: .bold))
+            .monospacedDigit()
+            .foregroundStyle(shareColor)
+            .lineLimit(1)
+            .minimumScaleFactor(0.8)
+            .frame(width: shareWidth, alignment: .trailing)
+    }
+}
+
+/// 右下小字：「股價 11/20 13:30」（灰）＋「11/18 的數字」（橘）；hasFoot 才畫（整塊 footHeight、字貼底）
+private struct NetWorthLargeFoot: View {
+    let stock: String
+    let stale: String
+    let palette: WidgetPalette
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Spacer(minLength: 0)
+            part(stock, color: palette.label)
+            part(stale, color: palette.warn)
+        }
+        .font(.system(size: 9.5, weight: .semibold))
+        .lineLimit(1)
+        .frame(maxWidth: .infinity, minHeight: NetWorthLargeLayout.footHeight,
+               maxHeight: NetWorthLargeLayout.footHeight, alignment: .bottom)
+    }
+
+    @ViewBuilder
+    private func part(_ text: String, color: Color) -> some View {
+        if !text.isEmpty {
+            Text(text)
+                .foregroundStyle(color)
                 .minimumScaleFactor(0.8)
         }
     }
