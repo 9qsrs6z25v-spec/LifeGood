@@ -26,6 +26,20 @@ class ExpenseStore: ObservableObject {
     init() {
         load()
         backfillLoanEndDates()
+        // [v25.640 mac1] 上次 App 被關掉時留下、還沒合併的雲端收支（inbox）：先合併、再讀一次（judge_mac §O4-1-8；sim: NewDevice.restart）
+        if LedgerSyncState.shared.hasInbox(saveKey) || LedgerSyncState.shared.hasInbox(incomeKey) {
+            let ledgerExpensesMerged = ledgerMergeInbox(saveKey)
+            let ledgerIncomesMerged = ledgerMergeInbox(incomeKey)
+            load()
+            if ledgerExpensesMerged || ledgerIncomesMerged { save() }
+        }
+        #if DEBUG
+        let ledgerGolden = LedgerMergeGolden.run()
+        print("LedgerMerge 自我檢查 \(ledgerGolden.passed)/\(ledgerGolden.total) 通過")
+        if !ledgerGolden.allPassed {
+            assertionFailure("LedgerMerge 黃金案例失敗：\(ledgerGolden.failures.prefix(5))")
+        }
+        #endif
         NotificationCenter.default.addObserver(
             self,
             selector: #selector(reloadFromCloud),
@@ -92,11 +106,69 @@ class ExpenseStore: ObservableObject {
            Set(keys).isDisjoint(with: [saveKey, incomeKey, currencyRatesKey]) {
             return
         }
+        // [v25.640 mac1] 收支兩個鍵：雲端那份在 inbox，跟 base、記憶體三方合併（judge_mac §O4-1-7）。
+        // 沒帶 keys（覆蓋、合併、還原、共享切換）＝整包流程：清掉 base／inbox，照今天整包讀（退回以前的行為）
+        // 合併結果跟雲端不一樣的那個鍵，等 load() 把另一個鍵（雲端原 bytes）讀進記憶體之後才 save()：
+        // save() 會把兩個陣列一起寫，先存的話另一個鍵會被記憶體裡的舊資料蓋回去
+        var ledgerNeedsSave = false
+        if let keys = note.userInfo?["keys"] as? [String] {
+            for key in [saveKey, incomeKey] where keys.contains(key) {
+                if ledgerMergeInbox(key) { ledgerNeedsSave = true }
+            }
+        } else {
+            LedgerSyncState.shared.clear(saveKey)
+            LedgerSyncState.shared.clear(incomeKey)
+        }
         // load() 內部已按 key 比對原始 Data，只有真的有變更才回傳 true；
         // 藉此避免這 3 個 key 只有其中一個變更時，其餘未變的資料仍觸發 ChartView 重算。
         if load() {
             modifyID = UUID()
         }
+        if ledgerNeedsSave { save() }                       // [v25.640 mac1] 寫 UserDefaults＋pushAll（推送時雲端＝base）
+    }
+
+    /// [v25.640 mac1] 主執行緒：inbox（雲端）× base × 記憶體 三方合併（judge_mac §O4-1-7；sim: NewDevice.reload）
+    /// 合併結果＝雲端 → UserDefaults 寫雲端原 bytes（跟以前一樣，外面的 load() 讀進來），回 false；
+    /// 不一樣 → 指派給陣列（isLoading 期間）、這個鍵先寫進 UserDefaults、鎖住 lastLoadedRawData，回 true：呼叫端在 load() 之後 save()
+    ///（寫 UserDefaults＋pushAll；推送時雲端＝base）。不在這裡 save()：另一個鍵的雲端原 bytes 還沒讀進記憶體。
+    private func ledgerMergeInbox(_ key: String) -> Bool {
+        guard let schema = LedgerMerge.schema(for: key), let remote = LedgerSyncState.shared.inbox(key) else { return false }
+        saveQueue.sync {}                                   // 排隊中的舊快照先寫完（記憶體比 UserDefaults 新）
+        let base = LedgerSyncState.shared.base(key)
+        let local: Data? = key == saveKey ? (try? JSONEncoder().encode(expenses)) : (try? JSONEncoder().encode(incomes))
+        let merged = local.flatMap { l in LedgerMerge.threeWay(schema, base: base, local: l, remote: remote) }
+        // 先把 UserDefaults 換成新的那份、再升 base、清 inbox（順序不能反）：CloudKit 佇列上的 modifyKV
+        // 看到 inbox 清了、base＝雲端時，UserDefaults 一定已經是新的，才認得出手上那份是合併前讀的舊資料
+        guard let r = merged, !r.equalsRemote else {
+            UserDefaults.standard.set(remote, forKey: key)    // 跟以前一樣：雲端原 bytes，外面的 load() 讀進來
+            LedgerSyncState.shared.setBase(key, remote)
+            LedgerSyncState.shared.clearInbox(key)
+            return false
+        }
+        isLoading = true
+        if key == saveKey {
+            expenses = ledgerDecode([Expense].self, r.data)
+        } else {
+            incomes = ledgerDecode([Income].self, r.data)
+        }
+        isLoading = false
+        // 只寫這個鍵（saveQueue 剛排乾、主執行緒上不會再排進新的）；兩個陣列一起寫、推送交給呼叫端 load() 之後的 save()
+        let ledgerFresh: Data? = key == saveKey ? (try? JSONEncoder().encode(expenses)) : (try? JSONEncoder().encode(incomes))
+        if let ledgerFresh { UserDefaults.standard.set(ledgerFresh, forKey: key) }
+        lastLoadedRawData[key] = UserDefaults.standard.data(forKey: key)   // 外面的 load() 不准用舊的蓋掉合併結果
+        LedgerSyncState.shared.setBase(key, remote)
+        LedgerSyncState.shared.clearInbox(key)
+        return true
+    }
+
+    /// [v25.640 mac1] 合併結果解回陣列：整批 → 失敗再逐筆（FailableDecodable，跳過看不懂的那筆；同 lossyDecodeArray）
+    private func ledgerDecode<T: Decodable>(_ type: [T].Type, _ data: Data) -> [T] {
+        let decoder = JSONDecoder()
+        if let items = try? decoder.decode([T].self, from: data) { return items }
+        if let raw = try? decoder.decode([FailableDecodable<T>].self, from: data) {
+            return raw.compactMap { $0.value }
+        }
+        return []
     }
 
     /// [v25.615] 細項那一包變了：只讓畫面重算（新的 private 函式；不指派 expenses、不 save、不推）

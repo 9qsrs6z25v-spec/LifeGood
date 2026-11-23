@@ -438,6 +438,29 @@
 		A01B000003000029 /* TripPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000029 /* TripPage.swift */; };
 		A01B000003000030 /* TripStopDetail.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000030 /* TripStopDetail.swift */; };
 		A01B000003000031 /* TripCheckIns.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000003000031 /* TripCheckIns.swift */; };
+		A01B000001001691 /* LedgerMerge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001691 /* LedgerMerge.swift */; };
+		A01B000001001692 /* LedgerMergeGolden.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001692 /* LedgerMergeGolden.swift */; };
+		A01B000001001693 /* LedgerSyncState.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001693 /* LedgerSyncState.swift */; };
+		A01B000005000001 /* LifeGoodMacApp.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000001 /* LifeGoodMacApp.swift */; };
+		A01B000005000002 /* MacCloud.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000002 /* MacCloud.swift */; };
+		A01B000005000005 /* MacSourceView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000005 /* MacSourceView.swift */; };
+		A01B000005000006 /* MacFinanceEnums.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000006 /* MacFinanceEnums.swift */; };
+		A01B000005000007 /* MacSplitLite.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000007 /* MacSplitLite.swift */; };
+		A01B000005000008 /* MacMoneyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000008 /* MacMoneyStore.swift */; };
+		A01B000005000009 /* MacShell.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000009 /* MacShell.swift */; };
+		A01B00000500000A /* MacOverviewPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000500000A /* MacOverviewPage.swift */; };
+		A01B00000500000B /* MacInspector.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000500000B /* MacInspector.swift */; };
+		A01B00000500000C /* MacCloudWriter.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000500000C /* MacCloudWriter.swift */; };
+		A01B00000500000D /* MacEditPolicy.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000500000D /* MacEditPolicy.swift */; };
+		A01B00000500000E /* MacEntryRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000500000E /* MacEntryRules.swift */; };
+		A01B00000500000F /* MacJournal.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000500000F /* MacJournal.swift */; };
+		A01B000005000010 /* MacEditor.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000010 /* MacEditor.swift */; };
+		A01B000005000004 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A01A000005000004 /* Assets.xcassets */; };
+		A01B000005000050 /* Expense.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000002 /* Expense.swift */; };
+		A01B000005000051 /* Income.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100001B /* Income.swift */; };
+		A01B000005000052 /* WidgetMoneyFormat.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000002000083 /* WidgetMoneyFormat.swift */; };
+		A01B000005000053 /* LedgerMerge.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001691 /* LedgerMerge.swift */; };
+		A01B000005000054 /* LedgerMergeGolden.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001001692 /* LedgerMergeGolden.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXCopyFilesBuildPhase section */
@@ -925,6 +948,26 @@
 		A01A000003000039 /* RunSummaryView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = RunSummaryView.swift; sourceTree = "<group>"; };
 		A01A000004000007 /* AddWidget.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = AddWidget.swift; sourceTree = "<group>"; };
 		A01A000004000100 /* LifeGoodWatchWidgets.appex */ = {isa = PBXFileReference; explicitFileType = "wrapper.app-extension"; includeInIndex = 0; path = LifeGoodWatchWidgets.appex; sourceTree = BUILT_PRODUCTS_DIR; };
+		A01A000001001691 /* LedgerMerge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LedgerMerge.swift; sourceTree = "<group>"; };
+		A01A000001001692 /* LedgerMergeGolden.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LedgerMergeGolden.swift; sourceTree = "<group>"; };
+		A01A000001001693 /* LedgerSyncState.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LedgerSyncState.swift; sourceTree = "<group>"; };
+		A01A000005000100 /* LifeGood.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = LifeGood.app; sourceTree = BUILT_PRODUCTS_DIR; };
+		A01A000005000001 /* LifeGoodMacApp.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LifeGoodMacApp.swift; sourceTree = "<group>"; };
+		A01A000005000002 /* MacCloud.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacCloud.swift; sourceTree = "<group>"; };
+		A01A000005000005 /* MacSourceView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacSourceView.swift; sourceTree = "<group>"; };
+		A01A000005000006 /* MacFinanceEnums.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacFinanceEnums.swift; sourceTree = "<group>"; };
+		A01A000005000007 /* MacSplitLite.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacSplitLite.swift; sourceTree = "<group>"; };
+		A01A000005000008 /* MacMoneyStore.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacMoneyStore.swift; sourceTree = "<group>"; };
+		A01A000005000009 /* MacShell.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacShell.swift; sourceTree = "<group>"; };
+		A01A00000500000A /* MacOverviewPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacOverviewPage.swift; sourceTree = "<group>"; };
+		A01A00000500000B /* MacInspector.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacInspector.swift; sourceTree = "<group>"; };
+		A01A00000500000C /* MacCloudWriter.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacCloudWriter.swift; sourceTree = "<group>"; };
+		A01A00000500000D /* MacEditPolicy.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacEditPolicy.swift; sourceTree = "<group>"; };
+		A01A00000500000E /* MacEntryRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacEntryRules.swift; sourceTree = "<group>"; };
+		A01A00000500000F /* MacJournal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacJournal.swift; sourceTree = "<group>"; };
+		A01A000005000010 /* MacEditor.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacEditor.swift; sourceTree = "<group>"; };
+		A01A000005000003 /* LifeGoodMac.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LifeGoodMac.entitlements; sourceTree = "<group>"; };
+		A01A000005000004 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -950,6 +993,13 @@
 			runOnlyForDeploymentPostprocessing = 0;
 		};
 		A01C000004000002 /* Frameworks */ = {
+			isa = PBXFrameworksBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A01C000005000002 /* Frameworks */ = {
 			isa = PBXFrameworksBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
@@ -1006,6 +1056,8 @@
 				A01A000002000081 /* FXRateService.swift */,
 				A01A000002000082 /* WidgetQuoteService.swift */,
 				A01A000002000083 /* WidgetMoneyFormat.swift */,
+				A01A000001001691 /* LedgerMerge.swift */,
+				A01A000001001692 /* LedgerMergeGolden.swift */,
 				A01A000002000089 /* DayTimelineToggleIntent.swift */,
 				A01A000002000094 /* RunActivityAttributes.swift */,
 				A01A000002000095 /* RunPauseIntent.swift */,
@@ -1029,6 +1081,7 @@
 				A01D000002000001 /* LifeGoodWidgets */,
 				A01D000003000001 /* LifeGoodWatch */,
 				A01D000004000001 /* LifeGoodWatchWidgets */,
+				A01D000005000001 /* LifeGoodMac */,
 				A01D000001000005 /* Products */,
 			);
 			sourceTree = "<group>";
@@ -1053,6 +1106,7 @@
 				A01A000001000002 /* Expense.swift */,
 				A01A000001000003 /* ExpenseStore.swift */,
 				A01A00000100001B /* Income.swift */,
+				A01A000001001693 /* LedgerSyncState.swift */,
 				A01A00000100000E /* AppMode.swift */,
 				A01A00000100000F /* FinanceModels.swift */,
 				A01A000001000010 /* FinanceStore.swift */,
@@ -1381,6 +1435,7 @@
 				A01A000002000100 /* LifeGoodWidgets.appex */,
 				A01A000003000100 /* LifeGoodWatch.app */,
 				A01A000004000100 /* LifeGoodWatchWidgets.appex */,
+				A01A000005000100 /* LifeGood.app */,
 			);
 			name = Products;
 			sourceTree = "<group>";
@@ -1457,6 +1512,29 @@
 				A01A000004000003 /* LifeGoodWatchWidgets.entitlements */,
 			);
 			path = LifeGoodWatchWidgets;
+			sourceTree = "<group>";
+		};
+		A01D000005000001 /* LifeGoodMac */ = {
+			isa = PBXGroup;
+			children = (
+				A01A000005000001 /* LifeGoodMacApp.swift */,
+				A01A000005000002 /* MacCloud.swift */,
+				A01A000005000005 /* MacSourceView.swift */,
+				A01A000005000006 /* MacFinanceEnums.swift */,
+				A01A000005000007 /* MacSplitLite.swift */,
+				A01A000005000008 /* MacMoneyStore.swift */,
+				A01A000005000009 /* MacShell.swift */,
+				A01A00000500000A /* MacOverviewPage.swift */,
+				A01A00000500000B /* MacInspector.swift */,
+				A01A00000500000C /* MacCloudWriter.swift */,
+				A01A00000500000D /* MacEditPolicy.swift */,
+				A01A00000500000E /* MacEntryRules.swift */,
+				A01A00000500000F /* MacJournal.swift */,
+				A01A000005000010 /* MacEditor.swift */,
+				A01A000005000004 /* Assets.xcassets */,
+				A01A000005000003 /* LifeGoodMac.entitlements */,
+			);
+			path = LifeGoodMac;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -1536,6 +1614,23 @@
 			productReference = A01A000004000100 /* LifeGoodWatchWidgets.appex */;
 			productType = "com.apple.product-type.app-extension";
 		};
+		A01E000005000001 /* LifeGoodMac */ = {
+			isa = PBXNativeTarget;
+			buildConfigurationList = A01F000005000003 /* Build configuration list for PBXNativeTarget "LifeGoodMac" */;
+			buildPhases = (
+				A01C000005000001 /* Sources */,
+				A01C000005000002 /* Frameworks */,
+				A01C000005000003 /* Resources */,
+			);
+			buildRules = (
+			);
+			dependencies = (
+			);
+			name = LifeGoodMac;
+			productName = LifeGoodMac;
+			productReference = A01A000005000100 /* LifeGood.app */;
+			productType = "com.apple.product-type.application";
+		};
 /* End PBXNativeTarget section */
 
 /* Begin PBXProject section */
@@ -1558,6 +1653,9 @@
 					A01E000004000001 = {
 						CreatedOnToolsVersion = 15.4;
 					};
+					A01E000005000001 = {
+						CreatedOnToolsVersion = 15.4;
+					};
 				};
 			};
 			buildConfigurationList = A01F000001000006 /* Build configuration list for PBXProject "LifeGood" */;
@@ -1578,6 +1676,7 @@
 				A01E000002000001 /* LifeGoodWidgets */,
 				A01E000003000001 /* LifeGoodWatch */,
 				A01E000004000001 /* LifeGoodWatchWidgets */,
+				A01E000005000001 /* LifeGoodMac */,
 			);
 		};
 /* End PBXProject section */
@@ -1611,6 +1710,14 @@
 			isa = PBXResourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A01C000005000003 /* Resources */ = {
+			isa = PBXResourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A01B000005000004 /* Assets.xcassets in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -1985,6 +2092,9 @@
 				A01B000001001687 /* PersonLedgerSlot.swift in Sources */,
 				A01B000001001688 /* FriendsResumeView.swift in Sources */,
 				A01B000001001689 /* FriendDetailView.swift in Sources */,
+				A01B000001001691 /* LedgerMerge.swift in Sources */,
+				A01B000001001692 /* LedgerMergeGolden.swift in Sources */,
+				A01B000001001693 /* LedgerSyncState.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -2067,6 +2177,32 @@
 				A01B000004000056 /* WatchText.swift in Sources */,
 				A01B000004000057 /* WatchTripText.swift in Sources */,
 				A01B000004000058 /* WatchRunText.swift in Sources */,
+			);
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+		A01C000005000001 /* Sources */ = {
+			isa = PBXSourcesBuildPhase;
+			buildActionMask = 2147483647;
+			files = (
+				A01B000005000001 /* LifeGoodMacApp.swift in Sources */,
+				A01B000005000002 /* MacCloud.swift in Sources */,
+				A01B000005000005 /* MacSourceView.swift in Sources */,
+				A01B000005000006 /* MacFinanceEnums.swift in Sources */,
+				A01B000005000007 /* MacSplitLite.swift in Sources */,
+				A01B000005000008 /* MacMoneyStore.swift in Sources */,
+				A01B000005000009 /* MacShell.swift in Sources */,
+				A01B00000500000A /* MacOverviewPage.swift in Sources */,
+				A01B00000500000B /* MacInspector.swift in Sources */,
+				A01B00000500000C /* MacCloudWriter.swift in Sources */,
+				A01B00000500000D /* MacEditPolicy.swift in Sources */,
+				A01B00000500000E /* MacEntryRules.swift in Sources */,
+				A01B00000500000F /* MacJournal.swift in Sources */,
+				A01B000005000010 /* MacEditor.swift in Sources */,
+				A01B000005000050 /* Expense.swift in Sources */,
+				A01B000005000051 /* Income.swift in Sources */,
+				A01B000005000052 /* WidgetMoneyFormat.swift in Sources */,
+				A01B000005000053 /* LedgerMerge.swift in Sources */,
+				A01B000005000054 /* LedgerMergeGolden.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -2450,6 +2586,64 @@
 			};
 			name = Release;
 		};
+		A01F000005000001 /* Debug */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = LifeGoodMac/LifeGoodMac.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "LifeGood";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
+				PRODUCT_MODULE_NAME = LifeGoodMac;
+				PRODUCT_NAME = LifeGood;
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Debug;
+		};
+		A01F000005000002 /* Release */ = {
+			isa = XCBuildConfiguration;
+			buildSettings = {
+				ASSETCATALOG_COMPILER_APPICON_NAME = AppIcon;
+				ASSETCATALOG_COMPILER_GLOBAL_ACCENT_COLOR_NAME = AccentColor;
+				CODE_SIGN_ENTITLEMENTS = LifeGoodMac/LifeGoodMac.entitlements;
+				CODE_SIGN_STYLE = Automatic;
+				COMBINE_HIDPI_IMAGES = YES;
+				ENABLE_HARDENED_RUNTIME = YES;
+				GENERATE_INFOPLIST_FILE = YES;
+				INFOPLIST_KEY_CFBundleDisplayName = "LifeGood";
+				INFOPLIST_KEY_LSApplicationCategoryType = "public.app-category.finance";
+				INFOPLIST_KEY_NSHumanReadableCopyright = "";
+				LD_RUNPATH_SEARCH_PATHS = (
+					"$(inherited)",
+					"@executable_path/../Frameworks",
+				);
+				MACOSX_DEPLOYMENT_TARGET = 26.0;
+				PRODUCT_BUNDLE_IDENTIFIER = com.lifegood.app;
+				PRODUCT_MODULE_NAME = LifeGoodMac;
+				PRODUCT_NAME = LifeGood;
+				SDKROOT = macosx;
+				SUPPORTED_PLATFORMS = macosx;
+				SUPPORTS_MACCATALYST = NO;
+				SWIFT_EMIT_LOC_STRINGS = YES;
+				SWIFT_VERSION = 5.0;
+			};
+			name = Release;
+		};
 /* End XCBuildConfiguration section */
 
 /* Begin XCConfigurationList section */
@@ -2494,6 +2688,15 @@
 			buildConfigurations = (
 				A01F000004000001 /* Debug */,
 				A01F000004000002 /* Release */,
+			);
+			defaultConfigurationIsVisible = 0;
+			defaultConfigurationName = Release;
+		};
+		A01F000005000003 /* Build configuration list for PBXNativeTarget "LifeGoodMac" */ = {
+			isa = XCConfigurationList;
+			buildConfigurations = (
+				A01F000005000001 /* Debug */,
+				A01F000005000002 /* Release */,
 			);
 			defaultConfigurationIsVisible = 0;
 			defaultConfigurationName = Release;

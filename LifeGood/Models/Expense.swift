@@ -869,7 +869,7 @@ extension Expense {
         return nil
     }
 }
-
+#if os(iOS) // 照片段只給 iPhone、iPad；本檔也編進 LifeGoodMac（新依賴要包 #if os(iOS)）
 // MARK: - 支出照片儲存（多張）
 
 extension Expense {
@@ -911,7 +911,7 @@ extension Expense {
         photosDirectory.appendingPathComponent(fileName)
     }
 }
-
+#endif
 // MARK: - 圖表資料點
 struct ChartDataPoint: Identifiable {
     let id = UUID()

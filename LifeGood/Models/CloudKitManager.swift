@@ -277,6 +277,22 @@ final class CloudKitManager {
                 self.report(fe, context: "上傳 \(key)")
                 completion?(false); return
             }
+            // [v25.640 mac1] 收支兩個鍵：inbox 還有沒合併的、或雲端已經不是這台上次看到的那份（base）→ 延後
+            //（先拉、主執行緒合併、再推；不整包覆蓋）。沒有 base＝照今天推（judge_mac §O4-1-3；sim: NewDevice.push_save）
+            let isLedger = LedgerMerge.handles(key)
+            if isLedger {
+                if LedgerSyncState.shared.hasInbox(key) { self.ledgerDeferPush(key: key, completion: completion); return }
+                if let rec = existing, let base = LedgerSyncState.shared.base(key), Self.ledgerPayload(rec) != base {
+                    self.ledgerDeferPush(key: key, completion: completion); return
+                }
+                // 要推的這份已經不是本機現在那份：pushAllKV 在拉完、主執行緒還沒合併時就讀了 UserDefaults，
+                // db.fetch 回來時合併已經做完（inbox 清了、base＝雲端）→ 推舊的會把別台剛推的蓋回去。
+                // 這輪不推、不記指紋、不算延後；本機那份（合併結果或又改過的）由下一輪 pushAll 推
+                if self.defaults.data(forKey: key) != data {
+                    self.ledgerLock.lock(); self.ledgerDeferred.insert(key); self.ledgerLock.unlock()
+                    completion?(true); return
+                }
+            }
             let record = existing ?? CKRecord(recordType: Self.kvBlobRecordType, recordID: recID)
 
             // JSON 寫到暫存檔做為 CKAsset；使用確定性檔名（不含 UUID），
@@ -296,6 +312,8 @@ final class CloudKitManager {
 
             let op = CKModifyRecordsOperation(recordsToSave: [record], recordIDsToDelete: nil)
             op.savePolicy = .changedKeys
+            // [v25.640 mac1] 收支：條件寫入（雲端在 fetch 之後被別台改過 → serverRecordChanged → 延後）；送出前記 pending
+            if isLedger { op.savePolicy = .ifServerRecordUnchanged; LedgerSyncState.shared.setPending(key, data) }
             op.qualityOfService = .userInitiated
             // 個別記錄結果：整體 modifyRecordsResultBlock 成功「不代表」個別記錄成功——
             // 個別失敗（最典型：iCloud 空間不足 quotaExceeded）走 perRecordSaveBlock 回報，
@@ -309,6 +327,7 @@ final class CloudKitManager {
                 switch result {
                 case .success:
                     if let pe = perRecordError {
+                        if isLedger, Self.isServerRecordChanged(pe) { self?.ledgerDeferPush(key: key, completion: completion); return }
                         self?.report(pe, context: "上傳 \(key)（個別記錄失敗）")
                         completion?(false)
                         return
@@ -329,7 +348,11 @@ final class CloudKitManager {
                         }
                     }
                     verifyOp.fetchRecordsResultBlock = { [weak self] overall in
-                        if readBack { completion?(true); return }
+                        if readBack {
+                            // [v25.640 mac1] 收支：讀回成功才升 base、清 pending、延後次數歸零
+                            if isLedger { LedgerSyncState.shared.didPush(key, data); self?.ledgerResetDefer(key) }
+                            completion?(true); return
+                        }
                         if case .failure(let e) = overall, readBackError == nil { readBackError = e }
                         let detail = (readBackError as NSError?).map { "\($0.domain)#\($0.code)" } ?? "查無此筆"
                         self?.report(NSError(
@@ -344,6 +367,8 @@ final class CloudKitManager {
                 case .failure(let error):
                     // 兩台同時改同一筆 → 重新抓最新版本再覆蓋一次（整份快照，last-writer-wins）
                     // 延遲 0.5s 再重試，避免立即重打造成 CloudKit rate-limit
+                    // [v25.640 mac1] 收支兩個鍵不整包重試：延後（先拉、合併、再推）
+                    if isLedger, Self.isServerRecordChanged(error) { self?.ledgerDeferPush(key: key, completion: completion); return }
                     if Self.isServerRecordChanged(error), retriesLeft > 0 {
                         self?.queue.asyncAfter(deadline: .now() + 0.5) {
                             self?.modifyKV(key: key, data: data, retriesLeft: retriesLeft - 1, completion: completion)
@@ -365,6 +390,7 @@ final class CloudKitManager {
                         self.defaults.removeObject(forKey: self.uploadLedgerKey)   // zone 重建＝雲端照片全沒了，帳本作廢
                                 self.defaults.removeObject(forKey: self.kvPushLedgerKey)
                         self.defaults.removeObject(forKey: self.kvPushLedgerKey)
+                        LedgerSyncState.shared.clearAll()   // [v25.640 mac1] zone 重建：收支的 base／inbox／pending 一起清（退回今天的行為）
                         self.queue.async {
                             self.ensureZoneExists { ok in
                                 guard ok else { completion?(false); return }
@@ -536,6 +562,15 @@ final class CloudKitManager {
                        let asset = record["payload"] as? CKAsset,
                        let url = asset.fileURL,
                        let data = try? Data(contentsOf: url) {
+                        // [v25.640 mac1] 收支兩個鍵：不直接蓋 UserDefaults，先放 inbox，主執行緒用記憶體合併（judge_mac §O4-1-2）
+                        if LedgerMerge.handles(key) {
+                            if !LedgerSyncState.shared.absorbEcho(key, data, defaultsData: self.defaults.data(forKey: key)) {
+                                LedgerSyncState.shared.putInbox(key, data)
+                                lock.lock(); pulledKVKeys.insert(key); lock.unlock()
+                            }
+                            self.markKVPushed(key: key, signature: Self.kvSignature(data))
+                            return
+                        }
                         // 推播的變更可能是本裝置剛推送的內容原樣回彈（CloudKit 的 server change token
                         // 只在拉取時前進，推送後緊接的下一次拉取一定會看到自己剛寫入的 record）。
                         // 若內容與本地已存的完全相同，視為 echo，跳過寫入與通知，避免各 Store 收到
@@ -842,7 +877,8 @@ final class CloudKitManager {
                     self.pushKV(key: key, data: data) { ok in
                         if ok {
                             // 成功才記指紋；失敗的 key 下輪仍會重推
-                            self.markKVPushed(key: key, signature: sig)
+                            // [v25.640 mac1] 收支延後（不算失敗）：不記指紋，合併完下一輪會再推
+                            if !self.ledgerConsumeDeferred(key) { self.markKVPushed(key: key, signature: sig) }
                         } else {
                             lock.lock(); allOK = false; lock.unlock()
                         }
@@ -877,6 +913,56 @@ final class CloudKitManager {
     /// 必須跨啟動穩定，不能用 Swift hashValue（每次啟動隨機種子）。
     static func kvSignature(_ data: Data) -> String {
         SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
+    // MARK: - [v25.640 mac1] 收支同步補強（judge_mac §O4-1 第 3～5 點；sim: NewDevice._defer）
+
+    /// 保護下面兩個。延後的回呼可能就在 `queue` 上，用 `queue.sync` 會死鎖，所以用鎖
+    private let ledgerLock = NSLock()
+    /// 每個收支鍵連續延後幾次（推成功歸零）
+    private var ledgerDeferCounts: [String: Int] = [:]
+    /// 這一輪是延後、不是成功（pushAllKV 看到就不記指紋，合併完下一輪會再推）
+    private var ledgerDeferred: Set<String> = []
+
+    /// 收支這次先不推：延後不算失敗（completion true、不記指紋）；連續第 3 次清 change token 全量拉；
+    /// 第 4 次起回報錯誤、completion false（還是不推，絕不整包覆蓋）。最後一律拉一次（isFetching 守衛會擋重複）
+    private func ledgerDeferPush(key: String, completion: ((Bool) -> Void)?) {
+        ledgerLock.lock()
+        let n = (ledgerDeferCounts[key] ?? 0) + 1
+        ledgerDeferCounts[key] = n
+        if n < 4 { ledgerDeferred.insert(key) }
+        ledgerLock.unlock()
+        if n >= 4 {
+            let err = NSError(domain: "LifeGoodSync", code: -98, userInfo: [
+                NSLocalizedDescriptionKey: "收支這幾秒一直在變，這次先不推（不會整包覆蓋），等一下再按「立即同步」"
+            ])
+            report(err, context: "上傳 \(key)")
+            completion?(false)
+        } else {
+            if n == 3 { queue.async { self.clearChangeToken() } }
+            completion?(true)
+        }
+        fetchChanges()
+    }
+
+    /// pushAllKV 的回呼用：這個鍵這一輪是延後的 → true（並清掉記號）
+    private func ledgerConsumeDeferred(_ key: String) -> Bool {
+        ledgerLock.lock()
+        defer { ledgerLock.unlock() }
+        return ledgerDeferred.remove(key) != nil
+    }
+
+    /// 推成功（讀回成功）：連續延後次數歸零
+    private func ledgerResetDefer(_ key: String) {
+        ledgerLock.lock()
+        ledgerDeferCounts[key] = nil
+        ledgerLock.unlock()
+    }
+
+    /// 雲端記錄目前的 payload 原 bytes（跟 base 逐 byte 比）
+    private static func ledgerPayload(_ record: CKRecord?) -> Data? {
+        guard let url = (record?["payload"] as? CKAsset)?.fileURL else { return nil }
+        return try? Data(contentsOf: url)
     }
 
     /// 非破壞性地把雲端所有 KVBlob 讀進記憶體：不寫入本機 UserDefaults、也不更新 change token。
@@ -1111,6 +1197,7 @@ final class CloudKitManager {
         defaults.removeObject(forKey: initialPullDoneKey)
         defaults.removeObject(forKey: uploadLedgerKey)
         defaults.removeObject(forKey: kvPushLedgerKey)
+        LedgerSyncState.shared.clearAll()   // [v25.640 mac1] 收支的 base／inbox／pending 一起清（退回今天的行為）
     }
 
     // MARK: - 同步診斷（逐層測試，顯示原始錯誤碼）
@@ -1595,6 +1682,7 @@ final class CloudKitManager {
                     self.defaults.removeObject(forKey: self.subscriptionCreatedKey)
                     self.defaults.removeObject(forKey: self.uploadLedgerKey)   // zone 不存在＝雲端照片不存在，帳本作廢
                     self.defaults.removeObject(forKey: self.kvPushLedgerKey)
+                    LedgerSyncState.shared.clearAll()   // [v25.640 mac1] 收支的 base／inbox／pending 一起清
                 }
                 result.errorMessage = "雲端資料區不存在：同步從未在此環境成功寫入。已自動重設，請按「立即同步」重建後再驗證一次。"
             }
