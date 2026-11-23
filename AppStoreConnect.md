@@ -235,7 +235,7 @@ LifeGood（以下稱「本 App」）尊重並保護您的隱私。
 | 欄位 | 建議內容 |
 |------|---------|
 | **支援網址 (Support URL)** | 請替換為您的支援頁面或 GitHub 連結 |
-| **行銷網址 (Marketing URL)** | 選填，可用 GitHub Pages 或官網 |
+| **行銷網址 (Marketing URL)** | 選填，可填官網 |
 | **版權 (Copyright)** | © 2026 LifeGood. All rights reserved. |
 | **授權合約** | 使用 Apple 標準 EULA（預設值即可） |
 

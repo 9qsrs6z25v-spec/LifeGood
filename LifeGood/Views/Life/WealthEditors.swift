@@ -1458,7 +1458,7 @@ struct WealthAccountEditor: View {
     }
 
     static let cardVaultFootnote =
-        "完整卡號、有效期限、檢核碼、票證號碼會加密後才存起來，金鑰放在系統鑰匙圈，備份檔與桌面網頁版都讀不到明碼。"
+        "完整卡號、有效期限、檢核碼、票證號碼會加密後才存起來，金鑰放在系統鑰匙圈，備份檔與 Mac 版都讀不到明碼。"
         + "要看或修改一定要先通過 Face ID 或裝置密碼。檢核碼預設不記，由你自己決定。"
 
     @ViewBuilder

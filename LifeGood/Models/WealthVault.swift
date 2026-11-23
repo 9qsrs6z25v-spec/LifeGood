@@ -355,7 +355,6 @@ enum WealthSecrets {
     static let vaultNoticeMessage: String =
         "完整帳號、信用卡的有效期限、保單號碼、悠遊卡／一卡通／Happy Go 卡號，現在都跟卡號、安全碼一樣加密後才存，要看得先過 Face ID。"
         + "\n\n列表、選單、卡片上照樣露後 4 碼。家裡還沒更新的 iPad 只看得到後 4 碼、看不到有效期限，請把 iPad 也更新到 25.568 以上。"
-        + "\n\n桌面網頁版改讀 App 算好的數字（跟這裡一樣），只露後 4 碼、沒有卡片到期日。"
 
     /// 去掉前後空白；空的＝nil
     static func trimmed(_ s: String?) -> String? {

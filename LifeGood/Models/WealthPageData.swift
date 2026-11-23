@@ -47,7 +47,7 @@ import SwiftUI
 //
 // [v25.568] 財富 v7 隱私加強與網頁版（build/v7/brief.md §4 G2-5；judge §7.1、§7.3）：
 // • 「iCloud 與家人共享說明」第一句：加密的多了有效期限、保單號碼、票證號碼（安全碼照樣加密存：第 6 題）。
-// • 「這頁的數字怎麼算」多一句 webHow：網頁版讀 App 算好的那一包（life_wealth_facts_v1），只露後 4 碼、沒有卡片到期日。
+// • （v25.639 拿掉網頁版，webHow 那一句一起拿掉；life_wealth_facts_v1 照寫，之後 Mac 版要讀）
 //
 // [v25.575] 定期轉帳 v1a（transfer/build/v1a/brief.md §6 G1；transfer/judge.md §4.3、§5；樣稿①-2）：
 // • ⑤ 銀行帳戶最後一張「定期轉帳・4 條」卡：WealthPageTransfers（facts.transferRules 空的＝nil，整張不出現）。
@@ -1959,12 +1959,8 @@ extension WealthPageText {
         policyHow,
         "外幣照設定裡的匯率換台幣；查不到匯率的那一格不算進合計，大字前面會加「約」。",
         "繳款截止日、交割日遇到假日，銀行可能順延；App 不會自己順延。",
-        "右上的眼睛可以把金額遮住（記在這台裝置）；關掉遮住要 Face ID。",
-        webHow
+        "右上的眼睛可以把金額遮住（記在這台裝置）；關掉遮住要 Face ID。"
     ]
-
-    /// [v25.568] 「這頁的數字怎麼算」：桌面網頁版讀 App 算好的那一包（life_wealth_facts_v1，WealthWebFacts）
-    static let webHow = "桌面網頁版的數字是這支 App 算好、跟著 iCloud 上去的（同一個數）；網頁版只露後 4 碼、沒有卡片到期日。"
 
     /// ⋯「iCloud 與家人共享說明」（judge §7.3；使用者第 6 題：安全碼照樣加密存；[v25.568] v7 起有效期限、保單號碼、票證號碼也加密）
     static let iCloudNote: [String] = [
