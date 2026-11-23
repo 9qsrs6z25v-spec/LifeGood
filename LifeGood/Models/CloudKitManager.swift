@@ -919,13 +919,13 @@ final class CloudKitManager {
 
     /// 保護下面兩個。延後的回呼可能就在 `queue` 上，用 `queue.sync` 會死鎖，所以用鎖
     private let ledgerLock = NSLock()
-    /// 每個收支鍵連續延後幾次（推成功歸零）
+    /// 每個收支鍵連續延後幾次（推成功、合併完歸零）
     private var ledgerDeferCounts: [String: Int] = [:]
     /// 這一輪是延後、不是成功（pushAllKV 看到就不記指紋，合併完下一輪會再推）
     private var ledgerDeferred: Set<String> = []
 
-    /// 收支這次先不推：延後不算失敗（completion true、不記指紋）；連續第 3 次清 change token 全量拉；
-    /// 第 4 次起回報錯誤、completion false（還是不推，絕不整包覆蓋）。最後一律拉一次（isFetching 守衛會擋重複）
+    /// 收支這次先不推：延後不算失敗（completion true、不記指紋）；連續第 3 次起只重抓這個鍵（ledgerRefetch）；
+    /// 第 4 次起回報錯誤、completion false（還是不推，絕不整包覆蓋）。前兩次拉一次（isFetching 守衛會擋重複）
     private func ledgerDeferPush(key: String, completion: ((Bool) -> Void)?) {
         ledgerLock.lock()
         let n = (ledgerDeferCounts[key] ?? 0) + 1
@@ -939,10 +939,30 @@ final class CloudKitManager {
             report(err, context: "上傳 \(key)")
             completion?(false)
         } else {
-            if n == 3 { queue.async { self.clearChangeToken() } }
             completion?(true)
         }
-        fetchChanges()
+        // 第 3 次起只重抓這一個鍵（不清 change token：全量拉會用雲端舊的蓋掉別的鍵還沒推的改動）
+        if n >= 3 { ledgerRefetch(key: key) } else { fetchChanges() }
+    }
+
+    /// 只重抓這一個收支鍵的記錄：增量拉已經走過頭、拉不到的那一份（雲端≠base、inbox 空）從這裡進 inbox。
+    /// 別的鍵、照片、change token 都不動；有一輪 fetch 在跑就這次不抓（下次延後還會再抓）
+    private func ledgerRefetch(key: String) {
+        queue.async {
+            guard !self.isFetching else { return }
+            let recID = CKRecord.ID(recordName: "kv_\(key)", zoneID: self.zoneID)
+            self.db.fetch(withRecordID: recID) { [weak self] record, _ in
+                guard let self = self, let data = Self.ledgerPayload(record) else { return }
+                let echo = LedgerSyncState.shared.absorbEcho(key, data, defaultsData: self.defaults.data(forKey: key))
+                if !echo { LedgerSyncState.shared.putInbox(key, data) }
+                self.markKVPushed(key: key, signature: Self.kvSignature(data))
+                if echo { return }
+                DispatchQueue.main.async {
+                    NotificationCenter.default.post(name: Self.didPullKVChangesNotification, object: nil,
+                                                    userInfo: ["keys": [key]])
+                }
+            }
+        }
     }
 
     /// pushAllKV 的回呼用：這個鍵這一輪是延後的 → true（並清掉記號）
@@ -952,8 +972,8 @@ final class CloudKitManager {
         return ledgerDeferred.remove(key) != nil
     }
 
-    /// 推成功（讀回成功）：連續延後次數歸零
-    private func ledgerResetDefer(_ key: String) {
+    /// 推成功（讀回成功）、或 ExpenseStore 合併完 inbox：連續延後次數歸零
+    func ledgerResetDefer(_ key: String) {
         ledgerLock.lock()
         ledgerDeferCounts[key] = nil
         ledgerLock.unlock()

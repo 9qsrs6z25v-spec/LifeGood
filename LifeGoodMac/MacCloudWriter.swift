@@ -203,8 +203,10 @@ final class MacCloudWriter {
                 return .failed("寫進去了但讀不回來，請按 ⌘R")
             }
             let updatedAt = (back["updatedAt"] as? Date) ?? (saved["updatedAt"] as? Date) ?? Date()
+            // changeTag 用這次寫入伺服器給的（跟 data 對得上）；讀回的 tag 不一樣＝寫完到讀回之間別台又存了，
+            // 不能拿讀回的 tag 配這份 data（之後每一輪比 tag 都會以為沒變、不重抓）
             let newRecord = MacKVRecord(key: key, record: saved, data: result.data,
-                                        changeTag: back.recordChangeTag ?? saved.recordChangeTag,
+                                        changeTag: saved.recordChangeTag,
                                         updatedAt: updatedAt, fetchedAt: Date())
             // ⑬ 日誌
             lastEntry = Self.journalEntry(action: action, key: key, remote: remote, written: result.data,

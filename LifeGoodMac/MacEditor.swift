@@ -1083,6 +1083,10 @@ private struct MacEditorSheet: View {
     @State private var errorText: String?
     @State private var saving = false
     @State private var ask: MacFormAsk?
+    /// 新的一筆：id、時間在這張表單開著的期間固定。存失敗（離線、讀不回來）但其實已經寫進去時，
+    /// 再按一次存＝同一個 id（合併當成同一筆），不會在 iCloud 多一筆
+    @State private var newEntryID = UUID()
+    @State private var newEntryStamp: Date?
     @FocusState private var amountFocused: Bool
 
     init(request: MacEditorRequest) {
@@ -1147,13 +1151,15 @@ private struct MacEditorSheet: View {
         guard let base = request.bases[key] else { return .error("iCloud 上還沒有這份資料，先在 iPhone 打開 iCloud 同步") }
         let made: (raw: [String: Any]?, error: String?)
         let category: String
+        let stamp = newEntryStamp ?? Date()
+        newEntryStamp = stamp
         if isIncome {
             made = MacEntryRules.newIncome(title: draft.title, amountText: draft.amountText, day: draft.day,
-                                           category: draft.incomeCategory, note: draft.note)
+                                           category: draft.incomeCategory, note: draft.note, id: newEntryID, now: stamp)
             category = draft.incomeCategory.rawValue
         } else {
             made = MacEntryRules.newExpense(title: draft.title, amountText: draft.amountText, day: draft.day,
-                                            category: draft.expenseCategory, note: draft.note)
+                                            category: draft.expenseCategory, note: draft.note, id: newEntryID, now: stamp)
             category = draft.expenseCategory.rawValue
         }
         guard let raw = made.raw else { return .error(made.error ?? MacEntryRules.amountError) }
@@ -1209,7 +1215,7 @@ private struct MacEditorSheet: View {
                                        purpose: .form(isNew: true), ref: ref, rememberCategory: nil)
                 ask = .gone(copy)
             } else {
-                errorText = MacEditCenter.text(for: outcome)
+                errorText = "這筆在另一台已經刪掉了，而且連著別的資料（銀行、卡、旅行、照片等），請在 iPhone 處理"
             }
         default:
             errorText = MacEditCenter.text(for: outcome)

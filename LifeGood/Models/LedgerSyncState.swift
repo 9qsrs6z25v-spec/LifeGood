@@ -91,6 +91,14 @@ final class LedgerSyncState {
         queue.sync { remove(key, kind: "inbox") }
     }
 
+    /// 合併完只清「合併的那一份」：主執行緒合併期間 CloudKit 執行緒又放進新的一份（R2）就留著，
+    /// 排在後面的那次通知會拿它跟這次的 base 再合併一次
+    func clearInbox(_ key: String, ifEqual data: Data) {
+        queue.sync {
+            if read(key, kind: "inbox") == data { remove(key, kind: "inbox") }
+        }
+    }
+
     // MARK: - 清掉
 
     /// 這個鍵的 base、inbox 都清（整包覆蓋類流程：覆蓋本機、合併、還原、共享切換）

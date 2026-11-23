@@ -114,6 +114,7 @@ class ExpenseStore: ObservableObject {
         if let keys = note.userInfo?["keys"] as? [String] {
             for key in [saveKey, incomeKey] where keys.contains(key) {
                 if ledgerMergeInbox(key) { ledgerNeedsSave = true }
+                CloudKitManager.shared.ledgerResetDefer(key)      // 合併完：延後的原因沒了，次數歸零
             }
         } else {
             LedgerSyncState.shared.clear(saveKey)
@@ -142,7 +143,7 @@ class ExpenseStore: ObservableObject {
         guard let r = merged, !r.equalsRemote else {
             UserDefaults.standard.set(remote, forKey: key)    // 跟以前一樣：雲端原 bytes，外面的 load() 讀進來
             LedgerSyncState.shared.setBase(key, remote)
-            LedgerSyncState.shared.clearInbox(key)
+            LedgerSyncState.shared.clearInbox(key, ifEqual: remote)
             return false
         }
         isLoading = true
@@ -157,7 +158,7 @@ class ExpenseStore: ObservableObject {
         if let ledgerFresh { UserDefaults.standard.set(ledgerFresh, forKey: key) }
         lastLoadedRawData[key] = UserDefaults.standard.data(forKey: key)   // 外面的 load() 不准用舊的蓋掉合併結果
         LedgerSyncState.shared.setBase(key, remote)
-        LedgerSyncState.shared.clearInbox(key)
+        LedgerSyncState.shared.clearInbox(key, ifEqual: remote)
         return true
     }
 

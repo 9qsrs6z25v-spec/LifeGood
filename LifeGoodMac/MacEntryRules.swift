@@ -44,9 +44,9 @@ enum MacEntryRules {
 
     // MARK: - 新的一筆（sim new_expense_dict／new_income_dict）
 
-    /// 回傳 (原字典, nil) 或 (nil, 原因)
+    /// 回傳 (原字典, nil) 或 (nil, 原因)。id、now 由表單開著的期間固定（存失敗再按一次＝同一筆，不會多一筆）
     static func newExpense(title: String, amountText: String, day: Date, category: VariableCategory,
-                           note: String, now: Date = Date()) -> (raw: [String: Any]?, error: String?) {
+                           note: String, id: UUID = UUID(), now: Date = Date()) -> (raw: [String: Any]?, error: String?) {
         guard MacEditPolicy.eightCategories.contains(category) else {
             return (nil, "分類只有 " + MacEditPolicy.eightCategoryNames.joined(separator: "、"))
         }
@@ -56,14 +56,14 @@ enum MacEntryRules {
         if t.isEmpty {
             t = category.rawValue
         }
-        let e = Expense(id: UUID(), title: t, amount: amount, date: combine(day: day, timeOf: now),
+        let e = Expense(id: id, title: t, amount: amount, date: combine(day: day, timeOf: now),
                         expenseType: .variable, variableCategory: category, note: note)
         guard let raw = dictionary(e) else { return (nil, "這筆編不出來，請再試一次") }
         return (raw, nil)
     }
 
     static func newIncome(title: String, amountText: String, day: Date, category: IncomeCategory,
-                          note: String, now: Date = Date()) -> (raw: [String: Any]?, error: String?) {
+                          note: String, id: UUID = UUID(), now: Date = Date()) -> (raw: [String: Any]?, error: String?) {
         guard MacEditPolicy.incomeCategories.contains(category) else {
             let names = MacEditPolicy.incomeCategories.map { c in c.rawValue }
             return (nil, "分類只有 " + names.joined(separator: "、"))
@@ -73,7 +73,7 @@ enum MacEntryRules {
         if t.isEmpty {
             t = category.rawValue
         }
-        let i = Income(title: t, amount: amount, date: combine(day: day, timeOf: now), category: category,
+        let i = Income(id: id, title: t, amount: amount, date: combine(day: day, timeOf: now), category: category,
                        period: .once, isFixedSalary: false, note: note)
         guard let raw = dictionary(i) else { return (nil, "這筆編不出來，請再試一次") }
         return (raw, nil)
@@ -170,11 +170,20 @@ enum MacEntryRules {
 
     // MARK: - 〔另存成新的一筆〕：那筆在另一台刪掉了（S11）
 
+    private static let detachedLinkKeys = [
+        "linkedBankMilestoneId", "linkedBankCurrency", "linkedCreditCardMilestoneId",
+        "linkedStockId", "linkedRealEstateId", "linkedVehicleId", "linkedInsuranceId",
+        "linkedTripPlanId", "linkedTripStopId",
+    ]
+
     /// base 那筆＋這次的改動，換一個新的 id（原字典其餘欄位原樣，不認得的也留著）
     static func detachedCopy(base: Data, id: String, changes: [String: Any?]) -> [String: Any]? {
         guard let arr = LedgerMerge.parseArray(base) else { return nil }
         let idx = LedgerMerge.index(arr)
         guard let pos = idx.pos[id], var d = arr[pos] as? [String: Any] else { return nil }
+        // 連著銀行、卡、股票、房子、車子、保險、旅行或有照片的，換新 id 會讓那邊的連結對不上 → 不給另存，請在 iPhone 處理
+        if detachedLinkKeys.contains(where: { d[$0] != nil && !(d[$0] is NSNull) }) { return nil }
+        if let photos = d["photoFileNames"] as? [Any], !photos.isEmpty { return nil }
         for (k, v) in changes {
             if let v { d.updateValue(v, forKey: k) } else { d.removeValue(forKey: k) }
         }
