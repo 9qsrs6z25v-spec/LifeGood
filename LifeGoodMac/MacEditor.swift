@@ -1360,7 +1360,8 @@ private struct MacWatchdogRow: View {
     /// 目前這一頁看不到那筆就先換到總覽（換頁會清選取），再選
     private func select(_ ref: MacEntryRef) {
         let ui = edit.ui
-        if !ui.page.shows(ref) { ui.page = .overview }
+        // [review mac3 select-1] 變動支出頁有搜尋字或篩選時那列可能不在表上（守門會清掉選取）→ 一律回總覽再選
+        if !ui.page.shows(ref) || ui.page == .variable { ui.page = .overview }
         ui.selection = ref
     }
 

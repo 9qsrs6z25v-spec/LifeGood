@@ -61,6 +61,8 @@ struct MacVariableScreen {
     let monthTitle: String
     /// 副標「2026 年 11 月」／搜全部月份（而且有搜尋字，同 days 的 everyMonth）時「全部月份」
     let subtitle: String
+    /// 「花在哪裡」的「其他」那列能不能點（sim3: shop#1）
+    let otherClickable: Bool
 
     @MainActor
     static func make(money: MacMoneyStore, ui: MacUIState, query: String, category: VariableCategory?,
@@ -88,7 +90,8 @@ struct MacVariableScreen {
             hasQuery: hasQuery,
             isCurrent: isCurrent,
             monthTitle: monthTitle,
-            subtitle: ui.variableSearchAll && hasQuery ? "全部月份" : monthTitle)
+            subtitle: ui.variableSearchAll && hasQuery ? "全部月份" : monthTitle,
+            otherClickable: MacVariableBoard.otherIsPure(money: money, shops: board.shops, month: month, calendar: calendar))
     }
 }
 
@@ -213,7 +216,7 @@ struct MacVariableHead: View {
         HStack(alignment: .top, spacing: 20) {
             MacVariableSummary(screen: screen)
                 .frame(minWidth: 240, idealWidth: 320, maxWidth: 420, alignment: .leading)
-            MacVariableShops(shops: screen.board.shops, category: $category)
+            MacVariableShops(shops: screen.board.shops, otherClickable: screen.otherClickable, category: $category)
                 .frame(minWidth: 220, maxWidth: .infinity, alignment: .topLeading)
         }
         .padding(.horizontal, 16)
@@ -347,6 +350,7 @@ struct MacVariableChipView: View {
 /// 右邊「花在哪裡」：最多五類，點一類＝分類篩選
 struct MacVariableShops: View {
     let shops: [MacVariableShop]
+    let otherClickable: Bool
     @Binding var category: VariableCategory?
 
     var body: some View {
@@ -360,7 +364,7 @@ struct MacVariableShops: View {
                     .foregroundStyle(Color.secondary)
             } else {
                 ForEach(shops) { shop in
-                    MacVariableShopRow(shop: shop, category: $category)
+                    MacVariableShopRow(shop: shop, clickable: shop.category != .other || otherClickable, category: $category)
                 }
             }
         }
@@ -369,6 +373,8 @@ struct MacVariableShops: View {
 
 struct MacVariableShopRow: View {
     let shop: MacVariableShop
+    /// 「其他」那列有併進別類或沒分類的 → 不給點（sim3: shop#1）
+    let clickable: Bool
     @Binding var category: VariableCategory?
 
     var body: some View {
@@ -378,10 +384,13 @@ struct MacVariableShopRow: View {
             MacVariableShopLabel(shop: shop, selected: category == shop.category)
         }
         .buttonStyle(.plain)
+        .disabled(!clickable)
         .help(hint)
     }
 
-    private var hint: String { "只看" + shop.category.rawValue }
+    private var hint: String {
+        clickable ? "只看" + shop.category.rawValue : shop.category.rawValue + "含併進來的分類或沒分類的，請用分類選單"
+    }
 }
 
 struct MacVariableShopLabel: View {

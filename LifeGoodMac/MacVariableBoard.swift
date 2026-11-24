@@ -127,6 +127,17 @@ enum MacVariableBoard {
         let order = VariableCategory.allCases
         return (order.firstIndex(of: a.key) ?? order.count) < (order.firstIndex(of: b.key) ?? order.count)
     }
+
+    /// 「其他」那列能不能點（點了＝分類篩 .other，只比 variableCategory）：那個月每筆變動支出都有分類、
+    /// 而且它的分類都有自己一列（沒被併進「其他」）才行；不然點了看到的筆數、合計跟那列對不上 — sim3: shop#1
+    @MainActor
+    static func otherIsPure(money: MacMoneyStore, shops: [MacVariableShop], month: Date, calendar: Calendar) -> Bool {
+        let shown = Set(shops.map { s in s.category })
+        for e in money.expenses where e.expenseType == .variable && calendar.isDate(e.date, equalTo: month, toGranularity: .month) {
+            guard let c = e.variableCategory, shown.contains(c) else { return false }
+        }
+        return true
+    }
 }
 
 enum MacVariableText {

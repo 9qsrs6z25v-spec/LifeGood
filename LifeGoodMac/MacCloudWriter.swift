@@ -183,7 +183,9 @@ final class MacCloudWriter {
                 case .mine:
                     break
                 case .theirs:
-                    guard case .edit(let id, var changes) = action else { break }
+                    // [review mac3 writer-1] 新增的 id 雲端已經有、而且 iPhone 改過（存失敗重按、⌘D 重用同一筆）：
+                    // 〔用 iPhone 的〕＝留雲端那筆，不寫電腦的值
+                    guard case .edit(let id, var changes) = action else { return .nothingToWrite(fetched) }
                     let remoteItem = Self.item(id, in: remote)
                     let conflictFields = sameField.map { c in c.field }
                     // sim2: group#1（S5）衝突欄位＋同組裡這次也改到的欄位，一起換成雲端的值（雲端沒有那欄＝拿掉）
