@@ -7,6 +7,8 @@
 //   ⑩ 寫前備份雲端那份 ⑪ 拿剛抓到的那個 CKRecord，只設 payload／updatedAt／keyName，.ifServerRecordUnchanged
 //   ⑫ 讀回 updatedAt ⑬ 記日誌
 // 只收「動作」（新增一筆原字典、改幾個欄位、刪一筆），不收模型陣列、不收 Lite 型別。
+// [v25.641 mac2 G1] S1：改一筆時 ② 重抓之後、③ 套動作之前，用剛抓到的那筆再判斷一次（gate；每一輪重試、〔用 iPhone 的〕重套之後都再跑）。
+// S5：〔用 iPhone 的〕成組換（fieldGroups：結束日、結束原因）。sim_mac2.py save2／theirs_fields。
 import CloudKit
 import Foundation
 import os
@@ -89,8 +91,10 @@ final class MacCloudWriter {
         self.cloud = cloud
     }
 
+    /// gate：改一筆時拿剛抓到的那筆原字典＋這次的改動再判斷一次，回傳不是 nil＝擋（原因字）；新增、刪除不走 gate
     func save(key: String, action: MacLedgerAction, base: Data, resolution: MacConflictResolution,
-              journal: MacJournal, golden: LedgerMergeGolden.Report, writeEnabled: Bool) async -> MacWriteOutcome {
+              journal: MacJournal, golden: LedgerMergeGolden.Report, writeEnabled: Bool,
+              gate: (@MainActor ([String: Any], [String: Any?]) -> String?)? = nil) async -> MacWriteOutcome {
         lastEntry = nil
         // ① 開關、黃金案例、白名單
         guard writeEnabled else { return .locked("還沒打開「允許這台 Mac 修改」（在資料來源頁）") }
@@ -113,6 +117,12 @@ final class MacCloudWriter {
                 return Self.outcome(for: error)
             }
             guard let record = fetched.record, let remote = fetched.data else { return .noRecord }
+
+            // sim2: gate#1（S1）用剛抓到的那筆重新判斷；serverRecordChanged 重試的每一輪都會再跑
+            if case .edit(let id, let changes) = action, let gate, let item = Self.item(id, in: remote),
+               let reason = gate(item, changes) {
+                return .locked(reason)
+            }
 
             // ③ local＝動作套在 base 原字典陣列上
             guard let local = Self.apply(action, to: base) else {
@@ -138,10 +148,16 @@ final class MacCloudWriter {
                 case .theirs:
                     guard case .edit(let id, var changes) = action else { break }
                     let remoteItem = Self.item(id, in: remote)
-                    for c in sameField {
-                        changes.updateValue(remoteItem?[c.field], forKey: c.field)
+                    let conflictFields = sameField.map { c in c.field }
+                    // sim2: group#1（S5）衝突欄位＋同組裡這次也改到的欄位，一起換成雲端的值（雲端沒有那欄＝拿掉）
+                    for field in Self.theirsFields(conflictFields, changes: changes) {
+                        changes.updateValue(remoteItem?[field], forKey: field)
                     }
                     action = .edit(id: id, changes: changes)
+                    // sim2: gate#2 重套之後再判斷一次
+                    if let gate, let item = remoteItem, let reason = gate(item, changes) {
+                        return .locked(reason)
+                    }
                     guard let again = Self.apply(action, to: base),
                           let merged = LedgerMerge.threeWay(schema, base: base, local: again.data, remote: remote) else {
                         return .cannotMerge
@@ -239,6 +255,19 @@ final class MacCloudWriter {
         guard JSONSerialization.isValidJSONObject(arr),
               let data = try? JSONSerialization.data(withJSONObject: arr, options: []) else { return nil }
         return (data, arr)
+    }
+
+    // MARK: - 〔用 iPhone 的〕成組換（S5）
+
+    /// 要一起換的欄位組：組裡任一欄衝突，這次改到的同組欄位全部換成雲端的值
+    static let fieldGroups: [[String]] = [["endDate", "endReason"]]
+
+    static func theirsFields(_ conflictFields: [String], changes: [String: Any?]) -> [String] {
+        var out = Set(conflictFields)
+        for group in fieldGroups where group.contains(where: { f in conflictFields.contains(f) }) {
+            for f in group where changes.keys.contains(f) { out.insert(f) }
+        }
+        return out.sorted()
     }
 
     static func expectation(for action: MacLedgerAction) -> LedgerMerge.Expectation {

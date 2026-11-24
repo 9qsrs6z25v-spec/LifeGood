@@ -3,6 +3,9 @@
 //
 // • 每個鍵的**原始 bytes＋changeTag（records）才是真的資料**；解碼出來的 expenses／incomes 只拿來顯示、計算。
 // • 沒有 didSet、沒有 save、不碰 UserDefaults、不推、不寫 iCloud（寫入只在 MacCloudWriter，寫成功後用 adopt 交回）。
+// • [v25.641 mac2 G3] 本機快照（MacSnapshotCache）：打開時先顯示這台存的那份（showingCache），只拿來顯示——
+//   不進 records、不讓 hasFetchedThisLaunch 變 true（寫入照舊鎖到真的抓到）；真的抓到（apply）、寫成功（adopt）才存。
+//   UserDefaults（mac.snapshot.account）只在 MacSnapshotCache 裡碰。
 // • 重新整理只從 MacAppModel（啟動的下一個 runloop、60 秒計時器、帳號換了）、MacShell 的 scenePhase、⌘R、⟳、表單打開前叫；
 //   不在 body、.task 裡叫。
 // • 統計一支一支照抄 ExpenseStore.swift（25.639），只多 now:、calendar: 參數（iOS 寫死 Date()、Calendar.current），算法逐字一樣；
@@ -132,6 +135,11 @@ final class MacMoneyStore: ObservableObject {
     @Published private(set) var isRefreshing: Bool = false
     /// 已經有資料時這一輪讀失敗的原因（資料照留；下一輪成功就清掉）
     @Published private(set) var lastProblem: String?
+    /// [v25.641 mac2] 正在顯示這台存的快照、還沒抓到 iCloud（總設計先放：G3 設、G2 的工具列讀）。
+    /// 快照不進 records、不讓 hasFetchedThisLaunch 變 true（寫入照舊鎖到真的抓到）
+    @Published private(set) var showingCache: Bool = false
+    /// [v25.641 mac2] 快照存的時間（meta 裡最新的 fetchedAt；總設計先放：G3 設、G2 讀）
+    @Published private(set) var cacheSavedAt: Date?
 
     let cloud: MacCloud
     /// 原始字典陣列（收支兩個鍵；records 的 data 解成 JSONSerialization 的陣列）
@@ -143,6 +151,12 @@ final class MacMoneyStore: ObservableObject {
     ///（不然總覽少掉剛記的那筆、看門狗誤報「電腦記的不見了」，要等下一輪 60 秒才回來）
     private var adoptSerial = 0
     private var adoptedSerials: [String: Int] = [:]
+    /// [v25.641 mac2 G3] 顯示中的快照（鍵 → bytes＋changeTag）；fetchLatest 拿它比 tag，真的抓到就清掉。不是 records
+    private var cacheEntries: [String: MacSnapshotEntry] = [:]
+    /// 顯示中的快照是哪個帳號的（雜湊）
+    private var cacheAccount: String?
+    /// 這次開 App 試過載快照了（一次開 App 最多載一次；clearData 不重設）
+    private var cacheTried = false
 
     init(cloud: MacCloud = .shared) {
         self.cloud = cloud
@@ -188,7 +202,10 @@ final class MacMoneyStore: ObservableObject {
         do {
             status = try await cloud.accountStatus()
         } catch {
-            applyFailure(MacCloud.mapError(error))
+            let failure = MacCloud.mapError(error)
+            // [v25.641 mac2 G3] 離線：直接載上次那個帳號的快照（brief.md §1 第 10 點）
+            if failure == .network { await loadSnapshotIfNeeded(hash: MacSnapshotCache.savedAccount) }
+            applyFailure(failure)
             return
         }
         guard status == .available else {
@@ -199,11 +216,17 @@ final class MacMoneyStore: ObservableObject {
         do {
             name = try await cloud.userRecordName()
         } catch {
-            applyFailure(MacCloud.mapError(error))
+            let failure = MacCloud.mapError(error)
+            if failure == .network { await loadSnapshotIfNeeded(hash: MacSnapshotCache.savedAccount) }
+            applyFailure(failure)
             return
         }
         let hash = MacMoneyStore.hashAccount(name)
         if let old = accountHash, old != hash { clearData() }
+        // sim2: snap#5 顯示中的快照不是這個帳號的（離線時先載了上次那個帳號）→ 整個清掉、照 Mac 1 整包抓
+        if let c = cacheAccount, c != hash { clearData() }
+        // 線上：雜湊跟上次存快照的帳號一樣才載（換了 Apple 帳號不會閃一下別人的資料）
+        if MacSnapshotCache.savedAccount == hash { await loadSnapshotIfNeeded(hash: hash) }
         if accountHash != hash { accountHash = hash }
         do {
             let serial = adoptSerial
@@ -214,10 +237,46 @@ final class MacMoneyStore: ObservableObject {
         }
     }
 
+    // MARK: 本機快照（[v25.641 mac2 G3]）
+
+    /// 這次開 App 還沒抓成功過、還沒試過 → 背景讀那個帳號的快照；回來時還沒抓到才顯示
+    private func loadSnapshotIfNeeded(hash: String?) async {
+        guard !hasFetchedThisLaunch, !cacheTried, let hash, let folder = MacSnapshotCache.folder(for: hash) else { return }
+        cacheTried = true
+        let entries = await MacSnapshotCache.load(from: folder)
+        guard !hasFetchedThisLaunch, !entries.isEmpty else { return }
+        showSnapshot(entries, account: hash)
+    }
+
+    /// sim2: snap#1 快照只拿來顯示：解碼成 expenses／incomes／rates／splitIndex，其餘狀態（雲端那份、抓成功過、tag 表、帳號雜湊）一律不碰
+    private func showSnapshot(_ entries: [String: MacSnapshotEntry], account hash: String) {
+        for key in MacCloud.readKeys {
+            guard let entry = entries[key] else { continue }
+            decode(key, entry.data)
+        }
+        cacheEntries = entries
+        cacheAccount = hash
+        showingCache = true
+        cacheSavedAt = entries.values.map { e in e.fetchedAt }.max()
+        if entries[MacCloud.expensesKey] != nil || entries[MacCloud.incomesKey] != nil {
+            self.account = .available
+        }
+    }
+
+    /// 存快照：記下帳號、背景寫那幾個鍵（dropped＝雲端已經沒有的鍵）
+    private func storeSnapshot(_ entries: [MacSnapshotEntry], dropping dropped: [String] = []) {
+        guard let hash = accountHash, let folder = MacSnapshotCache.folder(for: hash) else { return }
+        MacSnapshotCache.remember(account: hash)
+        MacSnapshotCache.save(entries, dropping: dropped, to: folder)
+    }
+
+    // MARK: 抓
+
     /// 第一次（或帳號剛換）整包抓；之後先只抓 updatedAt 比 changeTag，有變的鍵才抓 payload（judge_mac.md §O2-2 MacCloud）
+    /// [v25.641 mac2 G3] 還沒抓過但有快照，也先只抓頭：tag 一樣就用快照的 bytes（不下載 payload）
     private func fetchLatest() async throws -> [String: MacKVRecord] {
         let keys = MacCloud.readKeys
-        guard hasFetchedThisLaunch else { return try await cloud.fetch(keys, withPayload: true) }
+        guard hasFetchedThisLaunch || !cacheEntries.isEmpty else { return try await cloud.fetch(keys, withPayload: true) }
         let heads = try await cloud.fetch(keys, withPayload: false)
         let now = Date()
         var out: [String: MacKVRecord] = [:]
@@ -227,6 +286,11 @@ final class MacMoneyStore: ObservableObject {
             if let old = records[key], let tag = old.changeTag, tag == head.changeTag, old.data != nil {
                 out[key] = MacKVRecord(key: key, record: old.record, data: old.data, changeTag: tag,
                                        updatedAt: head.updatedAt ?? old.updatedAt, fetchedAt: head.fetchedAt)
+            } else if let snap = cacheEntries[key], let tag = snap.changeTag, tag == head.changeTag {
+                // sim2: snap#2 快照的 tag 跟雲端一樣：用快照的 bytes。head.record 只有 updatedAt 一欄，
+                // 沒關係：Writer 一律自己重抓整筆（MacCloud.swift:16、MacCloudWriter）
+                out[key] = MacKVRecord(key: key, record: head.record, data: snap.data, changeTag: tag,
+                                       updatedAt: head.updatedAt ?? snap.updatedAt, fetchedAt: head.fetchedAt)
             } else if head.record == nil {
                 out[key] = head
             } else {
@@ -253,6 +317,11 @@ final class MacMoneyStore: ObservableObject {
         if record.record != nil && record.data == nil { return }   // 只有中繼資料：不動解碼結果
         decodedTags[record.key] = record.changeTag
         decode(record.key, record.data)
+        // [v25.641 mac2 G3] 寫成功、有 bytes 的那次存這一個鍵的快照（下次打開也看得到電腦剛改的）
+        if record.record != nil, let data = record.data {
+            storeSnapshot([MacSnapshotEntry(key: record.key, data: data, changeTag: record.changeTag,
+                                            updatedAt: record.updatedAt, fetchedAt: record.fetchedAt)])
+        }
         if record.key == MacCloud.expensesKey || record.key == MacCloud.incomesKey {
             if account == .noData && record.record != nil { account = .available }
         }
@@ -261,6 +330,9 @@ final class MacMoneyStore: ObservableObject {
     /// serial＝這一輪出發時的 adopt 流水號；之後才 adopt 的鍵留著 adopt 的那份（這一輪抓到的可能比它舊）
     private func apply(_ fetched: [String: MacKVRecord], since serial: Int) {
         var next = records
+        // [v25.641 mac2 G3] 這一輪真的重解的鍵（存快照用）；雲端沒有的鍵快照也拿掉
+        var snapshot: [MacSnapshotEntry] = []
+        var dropped: [String] = []
         for key in MacCloud.readKeys {
             if (adoptedSerials[key] ?? 0) > serial, records[key] != nil { continue }
             let rec = fetched[key] ?? MacKVRecord.missing(key, fetchedAt: Date())
@@ -270,6 +342,12 @@ final class MacMoneyStore: ObservableObject {
             if rec.record != nil && rec.data == nil { continue }   // 有記錄但沒有 payload：不動解碼結果
             decodedTags[key] = rec.changeTag
             decode(key, rec.data)
+            if rec.record != nil, let data = rec.data {
+                snapshot.append(MacSnapshotEntry(key: key, data: data, changeTag: rec.changeTag,
+                                                 updatedAt: rec.updatedAt, fetchedAt: rec.fetchedAt))
+            } else if rec.record == nil {
+                dropped.append(key)
+            }
         }
         records = next
         isOffline = false
@@ -278,6 +356,12 @@ final class MacMoneyStore: ObservableObject {
         hasFetchedThisLaunch = true
         let hasLedger = next[MacCloud.expensesKey]?.record != nil || next[MacCloud.incomesKey]?.record != nil
         account = hasLedger ? .available : .noData
+        // sim2: snap#4 真的抓到了：不再顯示快照；存這一輪重解的鍵（MacSnapshotCache 只收 MacCloud.readKeys）
+        showingCache = false
+        cacheSavedAt = nil
+        cacheEntries = [:]
+        cacheAccount = nil
+        storeSnapshot(snapshot, dropping: dropped)
     }
 
     /// 一個鍵解碼（收支照抄 ExpenseStore.swift:955-964 load()＋:978-987 lossyDecodeArray（25.639）逐筆容錯）
@@ -342,15 +426,19 @@ final class MacMoneyStore: ObservableObject {
             account = .couldNotDetermine
         case .zoneNotFound:
             // 這個帳號沒有 LifeGoodZone（審核員、還沒打開 iCloud 同步）：只顯示空白狀態，絕不建 zone
+            // [v25.641 mac2 G3] iCloud 上已經沒有了：這台存的快照也拿掉（不留著、下次打開也不閃舊的）
+            storeSnapshot([], dropping: MacCloud.readKeys)
             clearData()
             lastFetch = Date()
             account = .noData
         case .network:
             // 離線：手上的資料照留，畫面寫「離線中，資料停在 hh:mm」
             isOffline = true
-            if !hasFetchedThisLaunch { account = .failed("離線中，連上網路後按 ⌘R") }
+            // [v25.641 mac2 G3] 顯示著快照時照顯示（工具列寫「先顯示這台存的資料…・離線中」）
+            if !hasFetchedThisLaunch && !showingCache { account = .failed("離線中，連上網路後按 ⌘R") }
         case .other(let message):
-            if hasFetchedThisLaunch {
+            // 顯示著快照時也照顯示，只記這一輪的原因（資料來源頁「這一輪」）
+            if hasFetchedThisLaunch || showingCache {
                 lastProblem = message
             } else {
                 account = .failed(message)
@@ -371,6 +459,11 @@ final class MacMoneyStore: ObservableObject {
         lastFetch = nil
         isOffline = false
         lastProblem = nil
+        // [v25.641 mac2 G3] 快照一起清（cacheTried 不重設：一次開 App 只載一次）
+        showingCache = false
+        cacheSavedAt = nil
+        cacheEntries = [:]
+        cacheAccount = nil
     }
 
     // MARK: 查一筆
@@ -392,9 +485,10 @@ final class MacMoneyStore: ObservableObject {
         incomes.first { i in i.id == id }
     }
 
-    /// 5 個鍵 updatedAt 最大的＝iPhone 最後一次推上來的時間
+    /// 5 個鍵 updatedAt 最大的＝iPhone 最後一次推上來的時間（[v25.641 mac2 G3] 還沒抓到時看顯示中的快照）
     var lastPhoneSync: Date? {
-        records.values.compactMap { r in r.updatedAt }.max()
+        if let fetched = records.values.compactMap({ r in r.updatedAt }).max() { return fetched }
+        return cacheEntries.values.compactMap { e in e.updatedAt }.max()
     }
 
     // MARK: 小工具
@@ -492,7 +586,7 @@ final class MacMoneyStore: ObservableObject {
         return active.reduce(0) { $0 + projectedAmount(for: $1, in: period) }
     }
 
-    // 照抄 ExpenseStore.swift:191-207（25.639）currentMonthIncomeTotal（now、calendar 由參數帶進來）
+    // 照抄 ExpenseStore.swift:264-279（88bb518）currentMonthIncomeTotal（now、calendar 由參數帶進來）
     func currentMonthIncomeTotal(now: Date, calendar: Calendar) -> Double {
         // 單次收入：只計本月實際紀錄的
         let onceTotal = incomes
@@ -507,7 +601,7 @@ final class MacMoneyStore: ObservableObject {
         return onceTotal + recurringTotal
     }
 
-    // 照抄 ExpenseStore.swift:320-340（25.639）incomeTotal(for:)（「今天」改成參數 now）
+    // 照抄 ExpenseStore.swift:393-413（88bb518）incomeTotal(for:)（「今天」改成參數 now）
     func incomeTotal(for date: Date, now: Date, calendar: Calendar) -> Double {
         guard let monthStart = calendar.date(from: calendar.dateComponents([.year, .month], from: date)),
               let monthEnd = calendar.date(byAdding: .month, value: 1, to: monthStart) else { return 0 }
@@ -527,7 +621,7 @@ final class MacMoneyStore: ObservableObject {
         return onceTotal + recurringTotal
     }
 
-    // 照抄 ExpenseStore.swift:303-317（25.639）yearToDateIncomeTotal
+    // 照抄 ExpenseStore.swift:376-390（88bb518）yearToDateIncomeTotal
     func yearToDateIncomeTotal(now: Date, calendar: Calendar) -> Double {
         let currentMonth = calendar.component(.month, from: now)
         var comps = calendar.dateComponents([.year], from: now)

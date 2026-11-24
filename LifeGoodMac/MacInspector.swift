@@ -14,7 +14,7 @@ struct MacInspector: View {
                 MacInspectorBody(ref: ref)
             } else {
                 ContentUnavailableView("選一筆看詳情", systemImage: "sidebar.right",
-                                       description: Text("在總覽的「最近交易」點一筆"))
+                                       description: Text("在列表點一筆"))
             }
         }
         .inspectorColumnWidth(min: 240, ideal: 290, max: 400)
@@ -118,10 +118,12 @@ fileprivate enum MacInspectorRows {
         rows.append(MacInspectorRow(label: "分類", value: i.category.rawValue))
         rows.append(MacInspectorRow(label: "週期", value: periodText(i)))
         rows.append(MacInspectorRow(label: i.period == .once ? "日期" : "起始日", value: MacText.fullDay(i.date)))
-        if i.period != .once, let end = i.endDate {
-            rows.append(MacInspectorRow(label: "結束日", value: MacText.fullDay(end)))
+        // [v25.641 mac2] 有結束日就列（不限週期）：「2026/12/31（離職）」
+        if let end = i.endDate {
+            rows.append(MacInspectorRow(label: "結束", value: endText(end, reason: i.endReason)))
         }
-        rows.append(MacInspectorRow(label: "入帳", value: i.linkedBankMilestoneId != nil ? "銀行" : "不指定"))
+        // [v25.641 mac2] 入帳跟收入頁表格同一支字（「連著銀行」「連結股票」「—」）
+        rows.append(MacInspectorRow(label: "入帳", value: MacIncomeTable.bankText(i)))
         rows.append(MacInspectorRow(label: "備註", value: i.note.isEmpty ? "—" : i.note))
         return rows
     }
@@ -145,6 +147,12 @@ fileprivate enum MacInspectorRows {
         if e.linkedCreditCardMilestoneId != nil { return "信用卡" }
         if e.linkedBankMilestoneId != nil { return "銀行" }
         return "不指定"
+    }
+
+    /// 「2026/12/31（離職）」；沒有原因只寫日期
+    private static func endText(_ end: Date, reason: SalaryEndReason?) -> String {
+        guard let reason else { return MacText.fullDay(end) }
+        return MacText.fullDay(end) + "（" + reason.rawValue + "）"
     }
 
     private static func periodText(_ i: Income) -> String {

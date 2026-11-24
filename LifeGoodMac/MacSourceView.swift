@@ -1,6 +1,7 @@
 // 只編進 LifeGoodMac；只寫白名單鍵、寫前重抓、條件寫入
 // [v25.640 mac1] 資料來源頁（brief.md §G2-9、judge_mac.md §F4、§O6）：帳號狀態、5 個鍵各有沒有、筆數、大小、iPhone 最後同步時間、
 // 〔重新整理 ⌘R〕；下面放 G3 的 MacWriteSettingsSection()（寫入開關、自我檢查、最近在電腦改的、備份）。
+// [v25.641 mac2 G3] 〔重新整理〕那段多一列「這台存的資料」（本機快照的時間）。
 // 不顯示 email、不顯示帳號雜湊、不顯示任何一筆的內容。
 
 import SwiftUI
@@ -170,6 +171,15 @@ fileprivate struct MacSourceRefreshSection: View {
             if let phone = money.lastPhoneSync {
                 LabeledContent("iPhone 最後同步", value: MacText.fullDayTime(phone))
             }
+            LabeledContent("這台存的資料", value: MacSourceRefreshSection.snapshotText(money))
         }
+    }
+
+    /// [v25.641 mac2 G3] 本機快照那一列：只寫時間，不顯示內容、不顯示雜湊
+    @MainActor
+    static func snapshotText(_ money: MacMoneyStore) -> String {
+        guard money.showingCache else { return "每次讀到 iCloud 就更新" }
+        let saved = money.cacheSavedAt.map { d in MacText.dayTime(d) } ?? "—"
+        return saved + "（還沒讀到 iCloud，先顯示這份；這時候不能改）"
     }
 }

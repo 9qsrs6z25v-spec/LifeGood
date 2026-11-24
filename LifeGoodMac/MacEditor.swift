@@ -3,6 +3,8 @@
 // MacEditCenter：開表單前重抓、所有寫入都走 MacCloudWriter（復原、補回、從備份加回也一樣）、看門狗、狀態列、復原堆疊。
 // 畫面規則：sheet 一律 sheet(item:)＋.macStores(app)；dismiss 之後才寫 store（DispatchQueue.main.async）；不在 body 寫 store。
 // 字一律不用第三人稱代名詞，用「這筆」「另一台」「iPhone」。
+// [v25.641 mac2 G1] 存的時候 gate（S1，gateReason）、加回擋連著的（S2）、欄位對不到一律擋（S4）、選取三個洞（S3）、
+// 收入表單接週期／固定薪水／結束日（MacIncomeFormFields.swift）、刪週期收入多一句、詳情鎖頭清單用 MacEditField.fields(for:income:)。
 import Combine
 import Foundation
 import SwiftUI
@@ -61,6 +63,8 @@ struct MacDeleteAsk {
     let key: String
     let itemID: String
     let label: String
+    /// 週期收入（確認框多一句「每個月的收入統計都會少掉這筆。」）
+    let recurring: Bool
 }
 
 struct MacConflictAsk {
@@ -273,9 +277,11 @@ final class MacEditCenter: ObservableObject {
             show("iCloud 上還沒有這份資料，先在 iPhone 打開 iCloud 同步", isError: true)
             return
         }
+        // 新記收入：週期預設單次、薪水的「固定薪水」預設開（跟 iPhone AddIncomeView 一樣）
         let draft = MacEntryRules.Draft(title: "", amountText: "", day: Date(),
                                         expenseCategory: Self.lastExpenseCategory(),
-                                        incomeCategory: Self.lastIncomeCategory(), note: "")
+                                        incomeCategory: Self.lastIncomeCategory(), note: "",
+                                        period: .once, isFixedSalary: true)
         clearStatus()
         sheet = MacEditorRequest(ref: nil, startsWithIncome: income, bases: bases, original: .newEntry, draft: draft,
                                  verdict: MacEditVerdict(lock: nil, fieldReasons: [:]), payment: "不指定")
@@ -338,8 +344,12 @@ final class MacEditCenter: ObservableObject {
     private static func editRequest(income i: Income, ref: MacEntryRef, base: Data, key: String,
                                     verdict: MacEditVerdict) -> MacEditorRequest {
         let text = MacEntryRules.amountText(i.amount)
+        // 結束那一區：沒設過時日子先放今天（不早於開始日），原因先放「換工作」（跟 iPhone 預設一樣）；originalEnd 同值＝沒動就不寫
+        let end = MacIncomeEndDraft(enabled: i.endDate != nil, day: i.endDate ?? max(i.date, Date()),
+                                    reason: i.endReason ?? .jobChange)
         let draft = MacEntryRules.Draft(title: i.title, amountText: text, day: i.date, expenseCategory: .food,
-                                        incomeCategory: i.category, note: i.note, originalAmountText: text)
+                                        incomeCategory: i.category, note: i.note, originalAmountText: text,
+                                        period: i.period, isFixedSalary: i.isFixedSalary, end: end, originalEnd: end)
         let payment = i.linkedBankMilestoneId != nil ? "銀行" : "不指定"
         return MacEditorRequest(ref: ref, startsWithIncome: true, bases: [key: base], original: .income(i),
                                 draft: draft, verdict: verdict, payment: payment)
@@ -379,7 +389,10 @@ final class MacEditCenter: ObservableObject {
             show("找不到這一筆", isError: true)
             return
         }
-        hostAsk = .delete(MacDeleteAsk(ref: ref, key: key, itemID: itemID, label: MacEntryRules.label(raw: raw)))
+        var recurring = false
+        if case .income = ref, let i = money.income(id) { recurring = i.period != .once }
+        hostAsk = .delete(MacDeleteAsk(ref: ref, key: key, itemID: itemID, label: MacEntryRules.label(raw: raw),
+                                       recurring: recurring))
     }
 
     /// 確認框〔刪除〕：確認框收起來之後才寫
@@ -402,8 +415,12 @@ final class MacEditCenter: ObservableObject {
     func submit(_ job: MacWriteJob, resolution: MacConflictResolution) async -> (MacWriteOutcome, MacJournalEntry?) {
         guard !isBusy else { return (.failed("上一筆還在存，等一下再按"), nil) }
         isBusy = true
+        let key = job.key
         let outcome = await writer.save(key: job.key, action: job.action, base: job.base, resolution: resolution,
-                                        journal: journal, golden: journal.golden, writeEnabled: writeEnabled)
+                                        journal: journal, golden: journal.golden, writeEnabled: writeEnabled,
+                                        gate: { [weak self] item, changes in
+                                            self?.gateReason(key: key, item: item, changes: changes)
+                                        })
         isBusy = false
         phase = nil
         if case .saved = outcome { return (outcome, writer.lastEntry) }
@@ -423,11 +440,12 @@ final class MacEditCenter: ObservableObject {
     }
 
     /// 不在表單裡的改、刪（復原、重做、改回、補回）也照 MacEditPolicy：那筆現在鎖住的欄位不動、不能刪的不刪。
-    /// 新增（加回刪前原字典、從備份加回）不擋。找不到那筆＝交給 MacCloudWriter（會回 goneElsewhere）
+    /// 新增（加回刪前原字典、從備份加回、〔補回〕）：收入原字典連著銀行或股票不加回（S2）。找不到那筆＝交給 MacCloudWriter（會回 goneElsewhere）
     private func policyBlock(_ action: MacLedgerAction, key: String) -> String? {
         switch action {
-        case .add:
-            return nil
+        case .add(let raw):
+            // sim2: block#1（S2）
+            return key == LedgerMerge.incomesKey ? MacEditPolicy.addBackReason(raw: raw) : nil
         case .delete(let itemID):
             guard let ref = Self.ref(key: key, itemID: itemID), verdict(ref) != nil else { return nil }
             return deleteReason(ref)
@@ -435,22 +453,65 @@ final class MacEditCenter: ObservableObject {
             guard let ref = Self.ref(key: key, itemID: itemID), let v = verdict(ref) else { return nil }
             if let lock = v.lock { return lock }
             for field in changes.keys.sorted() {
-                if let f = Self.editField(field), let reason = v.reason(f) { return reason }
+                // sim2: block#2（S4）對不到表單欄位的一律擋
+                guard let f = Self.editField(field, key: key) else { return MacEditPolicy.reasonFieldUnknown }
+                if let reason = v.reason(f) { return reason }
             }
             return nil
         }
     }
 
-    /// 原字典欄位名 → 表單欄位
-    private static func editField(_ raw: String) -> MacEditField? {
+    /// 原字典欄位名 → 表單欄位（endDate、endReason 只在收入那包對到結束日；支出那包回 nil＝擋）
+    private static func editField(_ raw: String, key: String) -> MacEditField? {
         switch raw {
         case "title": return .title
         case "note": return .note
         case "amount": return .amount
         case "date": return .date
         case "variableCategory", "category": return .category
+        case "endDate", "endReason": return key == LedgerMerge.incomesKey ? .endDate : nil
         default: return nil
         }
+    }
+
+    /// S1：MacCloudWriter 重抓之後交過來剛抓到的那筆原字典＋這次的改動；nil＝放行，否則「這筆剛在 iPhone 改過，現在…」
+    /// （sim2 gate；值已經跟剛抓到的那筆一樣的欄位跳過：〔用 iPhone 的〕換成雲端值的那幾欄等於沒改）
+    func gateReason(key: String, item: [String: Any], changes: [String: Any?]) -> String? {
+        let prefix = MacEditPolicy.reasonGatePrefix
+        // sim2: gate#3 剛抓到的那筆用這一版的模型解得開才往下（解不開＝較新的 iPhone 版記的）
+        guard let schema = LedgerMerge.schema(for: key), JSONSerialization.isValidJSONObject(item),
+              let data = try? JSONSerialization.data(withJSONObject: item, options: []) else {
+            return prefix + MacEditPolicy.reasonNewer
+        }
+        let rawOK = LedgerMerge.editable(schema, raw: item)
+        let verdict: MacEditVerdict
+        var start: Date?
+        if key == LedgerMerge.incomesKey {
+            guard let i = try? JSONDecoder().decode(Income.self, from: data) else { return prefix + MacEditPolicy.reasonNewer }
+            verdict = MacEditPolicy.income(i, rawEditable: rawOK)
+            start = i.date
+        } else {
+            guard let e = try? JSONDecoder().decode(Expense.self, from: data) else { return prefix + MacEditPolicy.reasonNewer }
+            verdict = MacEditPolicy.expense(e, rawEditable: rawOK, liveSplitIDs: money.splitIndex.liveIDs)
+        }
+        // sim2: gate#4 現在整筆鎖
+        if let lock = verdict.lock { return prefix + lock }
+        // sim2: gate#5 每一欄
+        for k in changes.keys.sorted() {
+            let value: Any? = changes[k] ?? nil
+            if LedgerMerge.same(item[k], value) { continue }
+            guard let f = Self.editField(k, key: key) else { return prefix + MacEditPolicy.reasonFieldUnknown }
+            if let r = verdict.reason(f) { return prefix + r }
+        }
+        // sim2: gate#6 結束日不能早於剛抓到的開始那天
+        if let start, let end = (changes["endDate"] ?? nil) as? Double {
+            let calendar = Calendar.current
+            let endDay = Date(timeIntervalSinceReferenceDate: end)
+            if calendar.startOfDay(for: endDay) < calendar.startOfDay(for: start) {
+                return prefix + MacEditPolicy.errorEndBefore
+            }
+        }
+        return nil
     }
 
     /// 寫完：收進 MacMoneyStore、登記復原、狀態列
@@ -478,7 +539,7 @@ final class MacEditCenter: ObservableObject {
         case .form(let isNew):
             if let entry { registerUndo(entry.id, name: isNew ? "記一筆" : "修改", redo: false) }
             if isNew { Self.remember(job.rememberCategory, key: job.key) }
-            if let ref = job.ref { ui.selection = ref }
+            if let ref = job.ref, ui.page.shows(ref) { ui.selection = ref }   // sim2: sel#4 只在這一頁看得到時選
             show(merged ? "iPhone 剛改過別的欄位，已一起保留" : "已存 \(time)")
         case .delete:
             if let entry { registerUndo(entry.id, name: "刪除", redo: false) }
@@ -497,7 +558,7 @@ final class MacEditCenter: ObservableObject {
             show("已改回 \(time)")
         case .addBack:
             if let entry { registerUndo(entry.id, name: "從備份加回", redo: false) }
-            if let ref = job.ref { ui.selection = ref }
+            if let ref = job.ref, ui.page.shows(ref) { ui.selection = ref }   // sim2: sel#4
             show("已從備份加回 \(time)")
         }
     }
@@ -829,13 +890,14 @@ struct MacEditCommands: Commands {
         !edit.writeEnabled || edit.sheet != nil || edit.isOpening
     }
 
+    // sim2: sel#3 搜尋框有焦點（⌘⌫ 留給文字框）、選到的不在這一頁 → 反灰
     private var canEditSelection: Bool {
-        guard let ref = ui.selection, !blocked else { return false }
+        guard let ref = ui.selection, !blocked, !ui.searchFieldFocused, ui.page.shows(ref) else { return false }
         return edit.canEdit(ref)
     }
 
     private var canDeleteSelection: Bool {
-        guard let ref = ui.selection, !blocked else { return false }
+        guard let ref = ui.selection, !blocked, !ui.searchFieldFocused, ui.page.shows(ref) else { return false }
         return edit.canDelete(ref)
     }
 
@@ -917,7 +979,8 @@ private struct MacHostAskDialog: ViewModifier {
 
     private static func message(_ ask: MacHostAsk) -> String {
         switch ask {
-        case .delete: return "iPhone、iPad 也會一起刪掉。"
+        case .delete(let a):
+            return a.recurring ? "iPhone、iPad 也會一起刪掉。每個月的收入統計都會少掉這筆。" : "iPhone、iPad 也會一起刪掉。"
         case .conflict(let a): return a.message
         case .revert(let a): return "「\(a.fieldNames)」在另一台又改過，還要改回電腦改之前的值嗎？"
         }
@@ -1020,13 +1083,20 @@ private struct MacWatchdogRow: View {
     let item: MacWatchdogItem
     let edit: MacEditCenter
 
+    /// 目前這一頁看不到那筆就先換到總覽（換頁會清選取），再選
+    private func select(_ ref: MacEntryRef) {
+        let ui = edit.ui
+        if !ui.page.shows(ref) { ui.page = .overview }
+        ui.selection = ref
+    }
+
     var body: some View {
         HStack(spacing: 8) {
             Text(item.text)
                 .font(.callout)
             Spacer()
             if let ref = MacEditCenter.ref(key: item.entry.key, itemID: item.entry.itemID), item.reason != .addMissing {
-                Button("選這筆") { edit.ui.selection = ref }
+                Button("選這筆") { select(ref) }
                     .buttonStyle(.borderless)
             }
         }
@@ -1154,8 +1224,7 @@ private struct MacEditorSheet: View {
         let stamp = newEntryStamp ?? Date()
         newEntryStamp = stamp
         if isIncome {
-            made = MacEntryRules.newIncome(title: draft.title, amountText: draft.amountText, day: draft.day,
-                                           category: draft.incomeCategory, note: draft.note, id: newEntryID, now: stamp)
+            made = Self.makeIncome(draft, id: newEntryID, now: stamp)
             category = draft.incomeCategory.rawValue
         } else {
             made = MacEntryRules.newExpense(title: draft.title, amountText: draft.amountText, day: draft.day,
@@ -1166,6 +1235,17 @@ private struct MacEditorSheet: View {
         let ref = MacEditCenter.ref(key: key, itemID: (raw["id"] as? String) ?? "")
         return .job(MacWriteJob(key: key, action: .add(raw: raw), base: base, purpose: .form(isNew: true), ref: ref,
                                 rememberCategory: category))
+    }
+
+    /// 新記收入：薪水看「固定薪水」（開＝每月、關＝單次），其餘照選的週期；結束日只在薪水＋固定薪水＋開關開時交
+    private static func makeIncome(_ draft: MacEntryRules.Draft, id: UUID, now: Date) -> (raw: [String: Any]?, error: String?) {
+        let isSalary = draft.incomeCategory == .salary
+        let period: IncomePeriod = isSalary ? (draft.isFixedSalary ? .monthly : .once) : draft.period
+        let end: (day: Date, reason: SalaryEndReason)? =
+            (isSalary && draft.isFixedSalary && draft.end.enabled) ? (day: draft.end.day, reason: draft.end.reason) : nil
+        return MacEntryRules.newIncome(title: draft.title, amountText: draft.amountText, day: draft.day,
+                                       category: draft.incomeCategory, note: draft.note, period: period,
+                                       isFixedSalary: draft.isFixedSalary, end: end, id: id, now: now)
     }
 
     private func prepareEdit(changes: [String: Any?], error: String?) -> Prepared {
@@ -1311,9 +1391,16 @@ private struct MacEditorFields: View {
                     TextField("名稱", text: $draft.title, prompt: Text("留空＝用分類名稱"))
                 }
                 MacEditorCategoryField(isIncome: isIncome, draft: $draft, reason: verdict.reason(.category),
-                                       lockedName: lockedCategoryName)
+                                       lockedName: lockedCategoryName, incomeChoices: incomeChoices)
+                if isIncome {
+                    MacIncomePeriodField(isNew: request.isNew, draft: $draft, original: originalIncome)
+                }
                 MacLockableRow(reason: verdict.reason(.date)) {
-                    DatePicker("日期", selection: $draft.day, displayedComponents: .date)
+                    DatePicker(dateTitle, selection: $draft.day, displayedComponents: .date)
+                }
+                if isIncome {
+                    MacIncomeEndField(isNew: request.isNew, draft: $draft, start: draft.day,
+                                      reason: verdict.reason(.endDate), original: originalIncome)
                 }
                 LabeledContent("付款方式") {
                     Text(request.payment)
@@ -1325,6 +1412,27 @@ private struct MacEditorFields: View {
             }
         }
         .formStyle(.grouped)
+    }
+
+    /// 改的是哪一筆收入（新的一筆、支出＝nil）
+    private var originalIncome: Income? {
+        if case .income(let i) = request.original { return i }
+        return nil
+    }
+
+    /// 週期收入、新記的週期收入或固定薪水：日期叫「開始日」
+    private var dateTitle: String {
+        guard isIncome else { return "日期" }
+        if let i = originalIncome { return i.period == .once ? "日期" : "開始日" }
+        guard request.isNew else { return "日期" }
+        if draft.incomeCategory == .salary { return draft.isFixedSalary ? "開始日" : "日期" }
+        return draft.period == .once ? "日期" : "開始日"
+    }
+
+    /// 收入分類選單：改既有的週期收入只列獎金、禮金、確幸；其餘照 Mac 1 四類
+    private var incomeChoices: [IncomeCategory] {
+        if let i = originalIncome, i.period != .once { return MacEditPolicy.recurringIncomeCategories }
+        return MacEditPolicy.incomeCategories
     }
 
     /// 分類鎖住時顯示原本的分類名稱
@@ -1354,6 +1462,7 @@ private struct MacEditorCategoryField: View {
     @Binding var draft: MacEntryRules.Draft
     let reason: String?
     let lockedName: String
+    let incomeChoices: [IncomeCategory]
 
     var body: some View {
         if let reason {
@@ -1362,7 +1471,7 @@ private struct MacEditorCategoryField: View {
             }
         } else if isIncome {
             Picker("分類", selection: $draft.incomeCategory) {
-                ForEach(MacEditPolicy.incomeCategories, id: \.self) { c in
+                ForEach(incomeChoices, id: \.self) { c in
                     Text(c.rawValue).tag(c)
                 }
             }
@@ -1780,12 +1889,19 @@ struct MacInspectorEditSection: View {
     let ref: MacEntryRef
     @EnvironmentObject private var edit: MacEditCenter
 
+    /// 選到的是收入：那一筆（支出＝nil）
+    private var income: Income? {
+        if case .income(let id) = ref { return edit.money.income(id) }
+        return nil
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("在電腦改")
                 .font(.headline)
             if let v = edit.verdict(ref) {
-                MacFieldLockList(verdict: v)
+                MacFieldLockList(verdict: v, fields: MacEditField.fields(for: ref, income: income),
+                                 recurring: (income?.period ?? .once) != .once)
             } else {
                 Text("找不到這一筆")
                     .foregroundStyle(.secondary)
@@ -1797,6 +1913,10 @@ struct MacInspectorEditSection: View {
 
 private struct MacFieldLockList: View {
     let verdict: MacEditVerdict
+    /// MacEditField.fields(for:income:)：週期收入多結束日
+    let fields: [MacEditField]
+    /// 週期收入：多一列「週期、固定薪水開關請在 iPhone 改」
+    let recurring: Bool
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
@@ -1804,12 +1924,26 @@ private struct MacFieldLockList: View {
                 Label(lock, systemImage: "lock.fill")
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(MacEditField.allCases, id: \.self) { f in
-                    MacFieldLockRow(field: f, reason: verdict.reason(f))
-                }
+                MacFieldLockRows(verdict: verdict, fields: fields, recurring: recurring)
             }
         }
         .font(.callout)
+    }
+}
+
+private struct MacFieldLockRows: View {
+    let verdict: MacEditVerdict
+    let fields: [MacEditField]
+    let recurring: Bool
+
+    var body: some View {
+        ForEach(fields, id: \.self) { f in
+            MacFieldLockRow(field: f, reason: verdict.reason(f))
+        }
+        if recurring {
+            Label(MacEditPolicy.reasonIncomePeriod, systemImage: "lock.fill")
+                .foregroundStyle(.secondary)
+        }
     }
 }
 
@@ -1820,7 +1954,7 @@ private struct MacFieldLockRow: View {
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             Text(field.label)
-                .frame(width: 36, alignment: .leading)
+                .frame(width: 48, alignment: .leading)
             if let reason {
                 Image(systemName: "lock.fill")
                     .foregroundStyle(.secondary)

@@ -22,7 +22,7 @@ struct LifeGoodMacApp: App {
         }
         .defaultSize(width: 1180, height: 760)
         .commands {
-            MacAppCommands(model: model)
+            MacAppCommands(model: model, ui: model.ui)
             MacEditCommands(edit: model.edit, ui: model.ui)
         }
     }
@@ -55,8 +55,29 @@ enum MacPage: String, Hashable, CaseIterable {
         }
     }
 
-    /// Mac 1 開放的頁（其他頁側欄反灰、標「下一版」、不能選）
-    var isOpen: Bool { self == .overview || self == .source }
+    /// 開放的頁（其他頁側欄反灰、標「下一版」、不能選）。[v25.641 mac2] 加收入
+    var isOpen: Bool { self == .overview || self == .income || self == .source }
+
+    /// [v25.641 mac2] 視窗標題（總覽「收支總覽」；其他頁＝title）。總設計先放：G2 的 MacShell 用
+    var navTitle: String {
+        switch self {
+        case .overview: return "收支總覽"
+        default: return title
+        }
+    }
+
+    /// [v25.641 mac2] 這一頁看得到這一筆嗎（存完自動選取、換頁清選取用；sim2: sel#4）。總設計先放：G1 用
+    func shows(_ ref: MacEntryRef) -> Bool {
+        switch self {
+        case .overview:
+            return true
+        case .income:
+            if case .income = ref { return true }
+            return false
+        case .variable, .fixed, .chart, .source:
+            return false
+        }
+    }
 }
 
 // MARK: - 畫面狀態（目前頁、選到哪一筆、詳情開不開）
@@ -66,11 +87,20 @@ final class MacUIState: ObservableObject {
     /// 目前頁記在這台（"mac.sidebar.selection"：mac. 開頭，只存這台；judge_mac.md §F1）
     @Published var page: MacPage = .overview {
         didSet {
-            if page != oldValue { UserDefaults.standard.set(page.rawValue, forKey: "mac.sidebar.selection") }
+            // sim2: sel#1 換頁清選取（上一頁選到的那筆這一頁不一定看得到）、搜尋框焦點跟著清
+            if page != oldValue {
+                UserDefaults.standard.set(page.rawValue, forKey: "mac.sidebar.selection")
+                selection = nil
+                searchFieldFocused = false
+            }
         }
     }
     @Published var selection: MacEntryRef? = nil
     @Published var showInspector: Bool = true
+    /// [v25.641 mac2] ⌘F 每按一次 +1；收入頁 .onChange 看到就把焦點放進搜尋框（總設計先放：G1 選單寫、G2 頁面讀）
+    @Published var searchRequest: Int = 0
+    /// [v25.641 mac2] 搜尋框有焦點（收入頁 .onChange 寫）；有焦點時 ⌘E、⌘⌫ 反灰，⌘⌫ 留給文字框（G1 選單讀）
+    @Published var searchFieldFocused: Bool = false
 
     init() {
         let raw = UserDefaults.standard.string(forKey: "mac.sidebar.selection") ?? ""
@@ -129,21 +159,32 @@ final class MacAppModel: ObservableObject {
 
 // MARK: - 選單「顯示」
 
+/// [v25.641 mac2] ⌘2 收入、⌘F 搜尋（只在收入頁）；系統「尋找」「拼字」那一組（.textEditing）整組拿掉，⌘F 不撞鍵
+@MainActor
 struct MacAppCommands: Commands {
     let model: MacAppModel
+    @ObservedObject var ui: MacUIState
 
     var body: some Commands {
         CommandMenu("顯示") {
             Button("重新整理") { model.requestRefresh() }
                 .keyboardShortcut("r")
             Divider()
-            Button("總覽") { model.ui.page = .overview }
+            Button("總覽") { ui.page = .overview }
                 .keyboardShortcut("1")
-            Button("資料來源") { model.ui.page = .source }
+            Button("收入") { ui.page = .income }
+                .keyboardShortcut("2")
+                .disabled(!MacPage.income.isOpen)
+            Button("資料來源") { ui.page = .source }
             Divider()
-            Button("詳情") { model.ui.showInspector.toggle() }
+            Button("搜尋") { ui.searchRequest += 1 }
+                .keyboardShortcut("f")
+                .disabled(ui.page != .income)
+            Divider()
+            Button("詳情") { ui.showInspector.toggle() }
                 .keyboardShortcut("i", modifiers: [.command, .option])
         }
+        CommandGroup(replacing: .textEditing) { EmptyView() }
     }
 }
 

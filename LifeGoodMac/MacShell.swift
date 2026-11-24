@@ -1,7 +1,7 @@
 // 只編進 LifeGoodMac；只寫白名單鍵、寫前重抓、條件寫入
 // [v25.640 mac1] 視窗骨架（brief.md §G2-6、judge_mac.md §F1、§F3、§O6）：側欄＋內容＋詳情（inspector）＋工具列。
 //
-// • 側欄：收支（總覽 ⌘1；收入、變動支出、固定支出、圖表 反灰標「下一版」不能選）｜資料來源。
+// • 側欄：收支（總覽 ⌘1；收入 ⌘2〔v25.641〕；變動支出、固定支出、圖表 反灰標「下一版」不能選）｜資料來源。
 // • 工具列只有「iPhone 同步 hh:mm」和 ⟳；超過 24 小時變橘色＋「打開 iPhone 的 LifeGood 讓資料同步」。
 // • 空白狀態（審核員的 iCloud 是空的）：沒登入、沒資料、家人共享的成員、讀不到 各一段。
 // • 編輯的 sheet、確認框、紅條、看門狗、狀態列由 G3 的 .macEditorHost(app) 掛在整個 split view 上。
@@ -47,7 +47,7 @@ fileprivate struct MacSidebar: View {
         List(selection: pageSelection) {
             Section("收支") {
                 MacSidebarRow(page: .overview, note: "⌘1").tag(MacPage.overview)
-                MacSidebarRow(page: .income, note: "下一版")
+                MacSidebarRow(page: .income, note: "⌘2").tag(MacPage.income)
                 MacSidebarRow(page: .variable, note: "下一版")
                 MacSidebarRow(page: .fixed, note: "下一版")
                 MacSidebarRow(page: .chart, note: "下一版")
@@ -96,15 +96,25 @@ fileprivate struct MacDetailArea: View {
 
     var body: some View {
         Group {
-            if ui.page == .source {
+            switch ui.page {
+            case .source:
                 MacSourceView()
-            } else if money.account.hasLedger {
-                MacOverviewPage()
-            } else {
-                MacEmptyState(state: money.account)
+            case .income:
+                // [v25.641 mac2] 收入頁；沒有帳本照 Mac 1 的空白狀態
+                if money.account.hasLedger {
+                    MacIncomePage()
+                } else {
+                    MacEmptyState(state: money.account)
+                }
+            default:
+                if money.account.hasLedger {
+                    MacOverviewPage()
+                } else {
+                    MacEmptyState(state: money.account)
+                }
             }
         }
-        .navigationTitle(ui.page == .source ? "資料來源" : "收支總覽")
+        .navigationTitle(ui.page.navTitle)
     }
 }
 
@@ -206,7 +216,8 @@ fileprivate struct MacSyncStamp: View {
 
     var body: some View {
         let info = MacSyncStamp.info(offline: money.isOffline, lastFetch: money.lastFetch,
-                                     phone: money.lastPhoneSync, account: money.account, now: Date())
+                                     phone: money.lastPhoneSync, account: money.account,
+                                     showingCache: money.showingCache, cacheSavedAt: money.cacheSavedAt, now: Date())
         Text(info.text)
             .font(.callout)
             .monospacedDigit()
@@ -215,8 +226,16 @@ fileprivate struct MacSyncStamp: View {
     }
 
     /// 超過 24 小時沒更新＝橘色（judge_mac.md §F1）
+    /// [v25.641 mac2] 顯示這台存的資料（本機快照）時最優先：離線「…・離線中」（橘色），線上「…・正在讀 iCloud…」
     static func info(offline: Bool, lastFetch: Date?, phone: Date?, account: MacAccountState,
+                     showingCache: Bool, cacheSavedAt: Date?,
                      now: Date) -> (text: String, stale: Bool) {
+        if showingCache {
+            let saved = cacheSavedAt.map { d in MacText.stamp(d, now: now) } ?? "—"
+            let head = "先顯示這台存的資料（" + saved + "）"
+            if offline { return (head + "・離線中", true) }
+            return (head + "・正在讀 iCloud…", false)
+        }
         if offline {
             let at = lastFetch.map { d in MacText.stamp(d, now: now) } ?? "—"
             return ("離線中，資料停在 " + at, true)

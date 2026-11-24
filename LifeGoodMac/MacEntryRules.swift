@@ -3,7 +3,16 @@
 // 一支對一支照 scratchpad/radar/build/mac1/sim_mac1.py：parse_amount／new_expense_dict／new_income_dict。
 // 新的一筆一律用 Expense／Income 自己的 init 再 JSONEncoder 編（跟 iPhone 存出來的長相一模一樣），再轉成字典交給 MacCloudWriter。
 // 改一筆只交「改了哪幾欄」：date 寫 timeIntervalSinceReferenceDate（＝JSONEncoder 預設的日期編法）。
+// [v25.641 mac2 G1] 收入照 judge_mac §P5（sim_mac2.py new_income2／income_changes2／display／field_name；sim2 編號 entry#）：
+// 新記可選週期／固定薪水／結束日；改週期收入能在獎金、禮金、確幸之間換分類、固定薪水設／改／拿掉結束日（endDate、endReason 兩欄一起寫）。
 import Foundation
+
+/// 表單結束日那一區（開關、哪一天、原因）
+struct MacIncomeEndDraft: Equatable {
+    var enabled = false
+    var day = Date()
+    var reason: SalaryEndReason = .jobChange
+}
 
 enum MacEntryRules {
     static let amountError = "請輸入大於 0 的金額"
@@ -62,19 +71,47 @@ enum MacEntryRules {
         return (raw, nil)
     }
 
-    static func newIncome(title: String, amountText: String, day: Date, category: IncomeCategory,
-                          note: String, id: UUID = UUID(), now: Date = Date()) -> (raw: [String: Any]?, error: String?) {
+    /// 收入：薪水＝固定薪水開著就每月、關著就單次（不給每年）；獎金、禮金、確幸照選的週期、isFixedSalary＝false；
+    /// 結束日只在薪水＋固定薪水時收。驗證順序：分類 → 金額 → 薪水選每年 → 結束日早於日期
+    static func newIncome(title: String, amountText: String, day: Date, category: IncomeCategory, note: String,
+                          period: IncomePeriod = .once, isFixedSalary: Bool = false,
+                          end: (day: Date, reason: SalaryEndReason)? = nil,
+                          id: UUID = UUID(), now: Date = Date()) -> (raw: [String: Any]?, error: String?) {
         guard MacEditPolicy.incomeCategories.contains(category) else {
             let names = MacEditPolicy.incomeCategories.map { c in c.rawValue }
             return (nil, "分類只有 " + names.joined(separator: "、"))
         }
         guard let amount = parseAmount(amountText) else { return (nil, amountError) }
+        let finalPeriod: IncomePeriod
+        let fixed: Bool
+        if category == .salary {
+            // sim2: entry#4 薪水：固定＝每月，不固定＝單次；選了每年擋
+            if period == .yearly { return (nil, MacEditPolicy.errorSalaryYearly) }
+            finalPeriod = isFixedSalary ? .monthly : .once
+            fixed = isFixedSalary
+        } else {
+            // sim2: entry#5 獎金、禮金、確幸：照選的週期，不是固定薪水
+            finalPeriod = period
+            fixed = false
+        }
         var t = title.trimmingCharacters(in: .whitespacesAndNewlines)
         if t.isEmpty {
             t = category.rawValue
         }
-        let i = Income(id: id, title: t, amount: amount, date: combine(day: day, timeOf: now), category: category,
-                       period: .once, isFixedSalary: false, note: note)
+        let date = combine(day: day, timeOf: now)
+        var endDate: Date? = nil
+        var endReason: SalaryEndReason? = nil
+        if let end, category == .salary, fixed {
+            // sim2: entry#6 結束日時間＝現在的時間（跟日期同一套）；結束那天不能早於開始那天
+            let e = combine(day: end.day, timeOf: now)
+            let calendar = Calendar.current
+            if calendar.startOfDay(for: e) < calendar.startOfDay(for: date) { return (nil, MacEditPolicy.errorEndBefore) }
+            endDate = e
+            endReason = end.reason
+        }
+        // endDate、endReason 是 nil 時 JSONEncoder 不寫那兩個鍵（跟 iPhone 新增一樣）；amountHistory、linkedBank*、linkedStockId 不出現
+        let i = Income(id: id, title: t, amount: amount, date: date, category: category,
+                       period: finalPeriod, isFixedSalary: fixed, note: note, endDate: endDate, endReason: endReason)
         guard let raw = dictionary(i) else { return (nil, "這筆編不出來，請再試一次") }
         return (raw, nil)
     }
@@ -97,6 +134,11 @@ enum MacEntryRules {
         var note: String
         /// 打開表單時金額那格的字；沒動過就不改金額（原本超過兩位小數的那幾筆，不動就不會被四捨五入）
         var originalAmountText: String? = nil
+        /// [v25.641 mac2] 收入：週期（新記非薪水用）、固定薪水（新記薪水用，預設開）、結束日那一區與打開表單時的值
+        var period: IncomePeriod = .once
+        var isFixedSalary: Bool = true
+        var end = MacIncomeEndDraft()
+        var originalEnd = MacIncomeEndDraft()
     }
 
     /// 表單金額那格的字：整數不寫小數點、最多兩位小數、不加千分位（「120」「12.5」）
@@ -136,7 +178,7 @@ enum MacEntryRules {
         return (out, nil)
     }
 
-    /// 收入：同上
+    /// 收入：同上（sim2 income_changes2）。週期收入的金額、開始日被 verdict 擋，不會進 changes
     static func incomeChanges(original i: Income, draft: Draft,
                               verdict: MacEditVerdict) -> (changes: [String: Any?], error: String?) {
         var out: [String: Any?] = [:]
@@ -154,14 +196,49 @@ enum MacEntryRules {
             let newDate = sameDay(draft.day, i.date) ? i.date : combine(day: draft.day, timeOf: i.date)
             if newDate != i.date { out.updateValue(newDate.timeIntervalSinceReferenceDate, forKey: "date") }
         }
-        if verdict.canEdit(.category), i.category != draft.incomeCategory,
-           MacEditPolicy.incomeCategories.contains(draft.incomeCategory) {
+        if i.period == .once {
+            if verdict.canEdit(.category), i.category != draft.incomeCategory,
+               MacEditPolicy.incomeCategories.contains(draft.incomeCategory) {
+                out.updateValue(draft.incomeCategory.rawValue, forKey: "category")
+            }
+        } else if verdict.canEdit(.category), draft.incomeCategory != i.category,
+                  MacEditPolicy.recurringIncomeCategories.contains(i.category),
+                  MacEditPolicy.recurringIncomeCategories.contains(draft.incomeCategory) {
+            // sim2: entry#1 週期：新舊都在獎金、禮金、確幸才換
             out.updateValue(draft.incomeCategory.rawValue, forKey: "category")
+        }
+        if verdict.canEdit(.endDate), endChanged(draft.end, draft.originalEnd) {
+            let end = draft.end
+            if end.enabled {
+                // sim2: entry#2 開著：不能早於開始那天；同一天保留原值，否則那天＋開始日的時間；兩欄一起寫
+                if Calendar.current.startOfDay(for: end.day) < Calendar.current.startOfDay(for: i.date) {
+                    return ([:], MacEditPolicy.errorEndBefore)
+                }
+                let newEnd: Date
+                if let old = i.endDate, sameDay(end.day, old) {
+                    newEnd = old
+                } else {
+                    newEnd = combine(day: end.day, timeOf: i.date)
+                }
+                out.updateValue(newEnd.timeIntervalSinceReferenceDate, forKey: "endDate")
+                out.updateValue(end.reason.rawValue, forKey: "endReason")
+            } else if i.endDate != nil || i.endReason != nil {
+                // sim2: entry#3 關掉：兩欄都拿掉（鍵留在 changes、值 nil；MacCloudWriter.apply 會 removeValue）
+                out.updateValue(nil, forKey: "endDate")
+                out.updateValue(nil, forKey: "endReason")
+            }
         }
         if verdict.canEdit(.note), draft.note != i.note {
             out.updateValue(draft.note, forKey: "note")
         }
         return (out, nil)
+    }
+
+    /// 結束那一區有沒有動：開關不同＝改；都關＝沒改；都開＝不同天或原因不同
+    static func endChanged(_ a: MacIncomeEndDraft, _ b: MacIncomeEndDraft, calendar: Calendar = .current) -> Bool {
+        if a.enabled != b.enabled { return true }
+        if !a.enabled { return false }
+        return !calendar.isDate(a.day, inSameDayAs: b.day) || a.reason != b.reason
     }
 
     static func sameDay(_ a: Date, _ b: Date, calendar: Calendar = .current) -> Bool {
@@ -217,21 +294,23 @@ enum MacEntryRules {
         "NT$" + WidgetMoneyFormat.number(v, digits: 2)
     }
 
-    /// 衝突詢問、日誌用：把原字典的值寫成人看得懂的字
+    /// 衝突詢問、日誌用：把原字典的值寫成人看得懂的字（sim2 display）
     static func display(field: String, value: Any?, calendar: Calendar = .current) -> String {
-        guard let value else { return "（空白）" }
+        guard let value, !(value is NSNull) else { return "（空白）" }
         if field == "amount", let n = value as? NSNumber { return money(n.doubleValue) }
-        if field == "date", let n = value as? NSNumber {
+        if field == "date" || field == "endDate", let n = value as? NSNumber {
             let d = Date(timeIntervalSinceReferenceDate: n.doubleValue)
             let c = calendar.dateComponents([.year, .month, .day], from: d)
             return "\(c.year ?? 0)/\(c.month ?? 0)/\(c.day ?? 0)"
         }
+        if field == "amountHistory", let list = value as? [Any] { return "\(list.count) 段" }
+        if field == "isFixedSalary", let b = value as? Bool { return b ? "是" : "不是" }
         if let s = value as? String { return s.isEmpty ? "（空白）" : s }
         if let n = value as? NSNumber { return n.stringValue }
         return "（看不懂的值）"
     }
 
-    /// 欄位名 → 中文
+    /// 欄位名 → 中文（sim2 field_name）
     static func fieldName(_ field: String) -> String {
         switch field {
         case "title": return "名稱"
@@ -239,6 +318,11 @@ enum MacEntryRules {
         case "date": return "日期"
         case "variableCategory", "category": return "分類"
         case "note": return "備註"
+        case "endDate": return "結束日"
+        case "endReason": return "結束原因"
+        case "period": return "週期"
+        case "isFixedSalary": return "固定薪水"
+        case "amountHistory": return "金額歷史"
         default: return field
         }
     }
