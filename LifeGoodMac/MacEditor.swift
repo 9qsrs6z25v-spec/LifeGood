@@ -456,6 +456,11 @@ final class MacEditCenter: ObservableObject {
                 // sim2: block#2（S4）對不到表單欄位的一律擋
                 guard let f = Self.editField(field, key: key) else { return MacEditPolicy.reasonFieldUnknown }
                 if let reason = v.reason(f) { return reason }
+                // sim2: catto#2 換分類看新值（復原、改回：那筆現在已是每月／每年就不准換成薪水）
+                if field == "category", case .income(let id) = ref, let i = money.income(id),
+                   let reason = MacEditPolicy.incomeCategoryChangeReason(i, to: changes[field] ?? nil) {
+                    return reason
+                }
             }
             return nil
         }
@@ -486,10 +491,12 @@ final class MacEditCenter: ObservableObject {
         let rawOK = LedgerMerge.editable(schema, raw: item)
         let verdict: MacEditVerdict
         var start: Date?
+        var income: Income?
         if key == LedgerMerge.incomesKey {
             guard let i = try? JSONDecoder().decode(Income.self, from: data) else { return prefix + MacEditPolicy.reasonNewer }
             verdict = MacEditPolicy.income(i, rawEditable: rawOK)
             start = i.date
+            income = i
         } else {
             guard let e = try? JSONDecoder().decode(Expense.self, from: data) else { return prefix + MacEditPolicy.reasonNewer }
             verdict = MacEditPolicy.expense(e, rawEditable: rawOK, liveSplitIDs: money.splitIndex.liveIDs)
@@ -502,6 +509,10 @@ final class MacEditCenter: ObservableObject {
             if LedgerMerge.same(item[k], value) { continue }
             guard let f = Self.editField(k, key: key) else { return prefix + MacEditPolicy.reasonFieldUnknown }
             if let r = verdict.reason(f) { return prefix + r }
+            // sim2: catto#3 換分類看新值是不是剛抓到那筆准的（單次 4 類；週期只在獎金、禮金、確幸）
+            if k == "category", let i = income, let r = MacEditPolicy.incomeCategoryChangeReason(i, to: value) {
+                return prefix + r
+            }
         }
         // sim2: gate#6 結束日不能早於剛抓到的開始那天
         if let start, let end = (changes["endDate"] ?? nil) as? Double {

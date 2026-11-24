@@ -194,6 +194,21 @@ enum MacEditPolicy {
         return MacEditVerdict(lock: nil, fieldReasons: reasons)
     }
 
+    /// [review writer-1] 換分類的新值（存的時候、復原時用那筆最新的樣子再查）：nil＝准。
+    /// 單次只能換成 4 類；週期的新舊都要在獎金、禮金、確幸（換成或換掉薪水、投資一律擋）
+    static func incomeCategoryChangeReason(_ i: Income, to value: Any?) -> String? {
+        // sim2: catto#1 看不懂的值擋；跟那筆一樣＝沒換
+        guard let raw = value as? String, let c = IncomeCategory(rawValue: raw) else { return reasonFieldUnknown }
+        if c == i.category { return nil }
+        if i.period == .once {
+            if incomeCategories.contains(c) { return nil }
+            return c == .investment ? reasonIncomeInvest : reasonFieldUnknown
+        }
+        if recurringIncomeCategories.contains(i.category) && recurringIncomeCategories.contains(c) { return nil }
+        if i.category == .investment || c == .investment { return reasonIncomeInvest }
+        return reasonIncomeRecurringSalary
+    }
+
     /// sim2 income_delete2：nil＝能刪（單次、週期都可以）
     static func incomeDeleteReason(_ i: Income, rawEditable: Bool) -> String? {
         let v = income(i, rawEditable: rawEditable)
