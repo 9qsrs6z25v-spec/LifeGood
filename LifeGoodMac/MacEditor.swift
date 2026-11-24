@@ -795,6 +795,15 @@ final class MacEditCenter: ObservableObject {
         }
     }
 
+    /// 〔另存成新的一筆〕之前先看 post3#A3 一定擋的兩種（fromQuickRecord、amountHistory；detachedCopy 會照留）。
+    /// 只管支出（收入 A3 不看）；連著的鍵、照片 detachedCopy 已經回 nil。false＝不給另存
+    static func detachedCopyPasses(key: String, raw: [String: Any]) -> Bool {
+        guard key == LedgerMerge.expensesKey else { return true }
+        if nonEmpty(raw["fromQuickRecord"]) { return false }
+        if let list = raw["amountHistory"] as? [Any], !list.isEmpty { return false }
+        return true
+    }
+
     private static func nonEmpty(_ value: Any?) -> Bool {
         guard let v = value, !(v is NSNull) else { return false }
         if let s = v as? String { return !s.isEmpty }
@@ -1555,6 +1564,11 @@ private struct MacEditorSheet: View {
         case .goneElsewhere:
             if case .edit(let id, let changes) = job.action,
                let raw = MacEntryRules.detachedCopy(base: job.base, id: id, changes: changes) {
+                // [v25.642 mac3 裁定] 一按就記、有金額歷史的支出：另存那筆 post3#A3 一定擋 → 先不給〔另存〕，不會按了才失敗
+                guard MacEditCenter.detachedCopyPasses(key: job.key, raw: raw) else {
+                    errorText = "這筆在另一台已經刪掉了，而且是一按就記或改過金額的那種，請在 iPhone 重記一筆"
+                    return
+                }
                 let ref = MacEditCenter.ref(key: job.key, itemID: (raw["id"] as? String) ?? "")
                 let copy = MacWriteJob(key: job.key, action: .add(raw: raw), base: job.base,
                                        purpose: .form(isNew: true), ref: ref, rememberCategory: nil)

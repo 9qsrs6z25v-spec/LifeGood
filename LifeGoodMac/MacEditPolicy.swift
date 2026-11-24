@@ -249,7 +249,9 @@ enum MacEditPolicy {
         if let lock = v.lock { return lock }
         if links.kindRecordIDs.contains(e.id.uuidString.uppercased()) { return reasonDuplicateKind }
         if e.linkedCreditCardMilestoneId != nil || e.linkedBankMilestoneId != nil { return reasonDuplicatePay }
-        if hasResidue(e) { return reasonDuplicateResidue }
+        // 銀行在 iPhone 刪掉時只清 linkedBankMilestoneId、幣別留著（LifeStore.swift:1799（48c51a2））；
+        // 複製會照抄那個幣別 → postCheck A3 一定擋，所以這裡先當成舊欄位擋（選單、詳情鈕反灰，不會按了才失敗）
+        if hasResidue(e) || !(e.linkedBankCurrency ?? "").isEmpty { return reasonDuplicateResidue }
         return nil
     }
 
