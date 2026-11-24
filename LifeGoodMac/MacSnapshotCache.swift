@@ -8,6 +8,7 @@
 // • 讀寫都在背景佇列 mac.snapshot（序列，所以先寫的一定先完成）；MacJournal.rootFolder() 是 MainActor，資料夾 URL 在主執行緒拿好再交下去。
 // • 快照只拿來顯示：MacMoneyStore 不放進它「這次從雲端拿到的」那份、也不讓「這次抓成功過」變 true（寫入照舊鎖到真的抓到）。
 // • 讀不到、bytes 或 sha256 對不上＝那個鍵不收（照整包抓）；寫失敗就算了（只是下次打開慢一點），不跳錯；log 只 .private。
+// • [v25.642 mac3 G3] 快照資料夾（snapshot/）在 writeAll 設成不進備份（Time Machine；只設這個資料夾，寫前備份、日誌照進備份）。
 
 import Foundation
 import CryptoKit
@@ -130,6 +131,11 @@ enum MacSnapshotCache {
             logger.error("快照資料夾建不起來 \(error.localizedDescription, privacy: .private)")
             return
         }
+        // [v25.642 mac3] 快照資料夾不進 Time Machine（隨時能從 iCloud 重抓）；寫前備份、日誌不排除（那是救資料用的）
+        var url = folder
+        var values = URLResourceValues()
+        values.isExcludedFromBackup = true
+        try? url.setResourceValues(values)
         var meta = readMeta(folder) ?? MacSnapshotMeta()
         if meta.v != 1 { meta = MacSnapshotMeta() }
         for key in drop {

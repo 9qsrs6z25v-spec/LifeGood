@@ -5,6 +5,9 @@
 // 字一律不用第三人稱代名詞，用「這筆」「另一台」「iPhone」。
 // [v25.641 mac2 G1] 存的時候 gate（S1，gateReason）、加回擋連著的（S2）、欄位對不到一律擋（S4）、選取三個洞（S3）、
 // 收入表單接週期／固定薪水／結束日（MacIncomeFormFields.swift）、刪週期收入多一句、詳情鎖頭清單用 MacEditField.fields(for:income:)。
+// [v25.642 mac3 G1] judge_mac §Q4、§Q6（sim_mac3.py policy_block3／gate3／post_check；sim3 編號 block3#、gate3#、post3#）：
+// 判斷一律帶 MacLinkIDs（畫面用快取 cachedLinks()、存的那一刻用剛抓到的 links(_:)）；gate 看剛抓到的分帳細項、換分類看新值；
+// postCheck（postReason）看合併後那筆；從備份加回支出也擋；⌘D 複製成新的一筆（確認框、復原、選取）；詳情欄〔複製成新的一筆〕＋一行提示。
 import Combine
 import Foundation
 import SwiftUI
@@ -22,6 +25,8 @@ enum MacWritePurpose {
     /// 「最近在電腦改的」〔改回〕（日誌 id）
     case revert(String)
     case addBack
+    /// [v25.642 mac3] ⌘D 複製成新的一筆（當成新記：復原名稱「複製」、存完選到新那筆）
+    case duplicate
 }
 
 /// 一次要寫的東西：哪個鍵、什麼動作、base（開表單／重抓那時的雲端原字典陣列）
@@ -88,17 +93,33 @@ struct MacRevertAsk {
     let fieldNames: String
 }
 
+/// cachedLinks() 快取：哪一份分帳、細項 bytes 算出來的
+private struct MacLinksCache {
+    let splits: Data?
+    let kinds: Data?
+    let links: MacLinkIDs
+}
+
+/// ⌘D 確認框：raw 在打開那一刻定下（新 id、日期＝那一刻）
+struct MacDuplicateAsk {
+    let ref: MacEntryRef
+    let raw: [String: Any]
+    let label: String
+}
+
 /// 主視窗上的確認框（一次只會有一個）
 enum MacHostAsk: Identifiable {
     case delete(MacDeleteAsk)
     case conflict(MacConflictAsk)
     case revert(MacRevertAsk)
+    case duplicate(MacDuplicateAsk)
 
     var id: String {
         switch self {
         case .delete(let a): return "delete-" + a.itemID
         case .conflict(let a): return "conflict-" + a.job.action.itemID
         case .revert(let a): return "revert-" + a.job.action.itemID
+        case .duplicate(let a): return "duplicate-" + (a.raw["id"] as? String ?? "")
         }
     }
 
@@ -107,6 +128,7 @@ enum MacHostAsk: Identifiable {
         case .delete(let a): return "刪掉『\(a.label)』？"
         case .conflict: return "iPhone 剛改了這筆"
         case .revert: return "這筆在另一台又改過了"
+        case .duplicate(let a): return MacEditPolicy.duplicateConfirm(a.label)
         }
     }
 }
@@ -141,6 +163,11 @@ final class MacEditCenter: ObservableObject {
 
     /// 視窗的 UndoManager（macEditorHost 的 .onAppear 交過來）
     weak var undoManager: UndoManager?
+    /// [v25.642 mac3] ⌘D 存失敗（離線、讀不回來）時留著：10 分鐘內同一筆再按 ⌘D＝同一個 raw（同一 id），不會在 iCloud 多一筆
+    private var pendingDuplicate: MacDuplicateAsk?
+    private var pendingDuplicateAt: Date?
+    /// [v25.642 mac3] cachedLinks() 的快取（不是 @Published：畫面重畫時讀寫不觸發更新）
+    private var linksCache: MacLinksCache?
     private var bag: Set<AnyCancellable> = []
 
     init(money: MacMoneyStore, journal: MacJournal, ui: MacUIState) {
@@ -210,13 +237,38 @@ final class MacEditCenter: ObservableObject {
         return LedgerMerge.editable(schema, raw: raw)
     }
 
+    /// [v25.642 mac3] 畫面用：快取的分帳、細項（money.records；存的那一刻 gate、postCheck 改用剛抓到的 links(_:)）
+    /// 選單、詳情欄每畫一次會叫好幾次：同一份分帳、細項 bytes 只解一次（bytes 變了就重解）
+    func cachedLinks() -> MacLinkIDs {
+        let splits = money.records[MacCloud.splitsKey]?.data
+        let kinds = money.records[MacCloud.kindsKey]?.data
+        let live = money.splitIndex.liveIDs
+        if let c = linksCache, c.splits == splits, c.kinds == kinds, c.links.liveSplitIDs == live {
+            return c.links
+        }
+        let links = MacLinkIDs(liveSplitIDs: live,
+                               splitRecordIDs: MacEditPolicy.splitRecordIDs(splits),
+                               kindRecordIDs: MacEditPolicy.kindRecordIDs(kinds),
+                               liveKindIDs: MacEditPolicy.liveKindIDs(kinds))
+        linksCache = MacLinksCache(splits: splits, kinds: kinds, links: links)
+        return links
+    }
+
+    /// [v25.642 mac3] 存的那一刻：MacCloudWriter ② 同一次抓到的分帳、細項（MacSplitIndex 只在這個檔用，不進 Writer）
+    static func links(_ fresh: MacFreshLinks) -> MacLinkIDs {
+        MacLinkIDs(liveSplitIDs: MacSplitIndex(data: fresh.splitData).liveIDs,
+                   splitRecordIDs: MacEditPolicy.splitRecordIDs(fresh.splitData),
+                   kindRecordIDs: MacEditPolicy.kindRecordIDs(fresh.kindData),
+                   liveKindIDs: MacEditPolicy.liveKindIDs(fresh.kindData))
+    }
+
     /// 每欄能不能改（找不到那筆＝nil）
     func verdict(_ ref: MacEntryRef) -> MacEditVerdict? {
         switch ref {
         case .expense(let id):
             guard let e = money.expense(id) else { return nil }
             return MacEditPolicy.expense(e, rawEditable: rawEditable(LedgerMerge.expensesKey, id),
-                                         liveSplitIDs: money.splitIndex.liveIDs)
+                                         links: cachedLinks())
         case .income(let id):
             guard let i = money.income(id) else { return nil }
             return MacEditPolicy.income(i, rawEditable: rawEditable(LedgerMerge.incomesKey, id))
@@ -228,11 +280,8 @@ final class MacEditCenter: ObservableObject {
         switch ref {
         case .expense(let id):
             guard let e = money.expense(id) else { return "找不到這一筆" }
-            let splits = MacEditPolicy.splitRecordIDs(money.records[MacCloud.splitsKey]?.data)
-            let kinds = MacEditPolicy.kindRecordIDs(money.records[MacCloud.kindsKey]?.data)
             return MacEditPolicy.expenseDeleteReason(e, rawEditable: rawEditable(LedgerMerge.expensesKey, id),
-                                                     liveSplitIDs: money.splitIndex.liveIDs,
-                                                     splitRecordIDs: splits, kindRecordIDs: kinds)
+                                                     links: cachedLinks())
         case .income(let id):
             guard let i = money.income(id) else { return "找不到這一筆" }
             return MacEditPolicy.incomeDeleteReason(i, rawEditable: rawEditable(LedgerMerge.incomesKey, id))
@@ -250,10 +299,70 @@ final class MacEditCenter: ObservableObject {
     // [v25.642 mac3] ⌘D 複製成新的一筆（總設計先放骨架：G1 寫內容、G2 的右鍵選單叫；簽名不准改）
 
     /// 先跳確認框（打開那一刻定下 id、now），〔複製〕才寫
-    func requestDuplicate(_ ref: MacEntryRef) {}
+    func requestDuplicate(_ ref: MacEntryRef) {
+        guard writeEnabled else { show(writeLockText, isError: true); return }
+        guard hostAsk == nil else { return }
+        guard !isBusy else { show("上一筆還在存，等一下再按", isError: true); return }
+        guard case .expense(let id) = ref, let e = money.expense(id) else {
+            show("只有變動支出能在電腦複製", isError: true)
+            return
+        }
+        if let reason = duplicateReason(ref) { show(reason, isError: true); return }
+        guard let raw = MacEntryRules.duplicate(e, id: UUID(), now: Date()) else {
+            show("這筆編不出來，請再試一次", isError: true)
+            return
+        }
+        // 上次存失敗的那一筆（10 分鐘內、原本那筆內容沒變）：同一個 raw（同一 id、同一個時間）
+        if let pending = pendingDuplicate, pending.ref == ref, let at = pendingDuplicateAt,
+           Date().timeIntervalSince(at) < 600, Self.sameCopy(pending.raw, raw) {
+            hostAsk = .duplicate(pending)
+            return
+        }
+        let label = MacEntryRules.label(raw: money.rawEntry(key: LedgerMerge.expensesKey, id: id))
+        hostAsk = .duplicate(MacDuplicateAsk(ref: ref, raw: raw, label: label))
+    }
 
-    /// 選單、右鍵、詳情鈕反灰用（骨架回 false＝全部反灰）
-    func canDuplicate(_ ref: MacEntryRef) -> Bool { false }
+    /// 兩份複製出來的原字典除了 id、date 都一樣（原本那筆在這中間被改過＝不一樣，要重新複製）
+    private static func sameCopy(_ a: [String: Any], _ b: [String: Any]) -> Bool {
+        var x = a
+        var y = b
+        for k in ["id", "date"] {
+            x.removeValue(forKey: k)
+            y.removeValue(forKey: k)
+        }
+        return (x as NSDictionary).isEqual(y as NSDictionary)
+    }
+
+    /// 選單、右鍵、詳情鈕反灰用
+    func canDuplicate(_ ref: MacEntryRef) -> Bool {
+        guard writeEnabled, case .expense(let id) = ref, let e = money.expense(id) else { return false }
+        return MacEditPolicy.expenseDuplicateReason(e, rawEditable: rawEditable(LedgerMerge.expensesKey, id),
+                                                    links: cachedLinks()) == nil
+    }
+
+    /// 不能複製的原因（nil＝能；詳情欄提示用）
+    func duplicateReason(_ ref: MacEntryRef) -> String? {
+        guard case .expense(let id) = ref else { return "只有變動支出能在電腦複製" }
+        guard let e = money.expense(id) else { return "找不到這一筆" }
+        return MacEditPolicy.expenseDuplicateReason(e, rawEditable: rawEditable(LedgerMerge.expensesKey, id),
+                                                    links: cachedLinks())
+    }
+
+    /// 確認框〔複製〕：確認框收起來之後才寫（新增一筆；policyBlock、postCheck A1～A3 照擋）
+    func confirmDuplicate(_ ask: MacDuplicateAsk) {
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            guard let base = self.money.records[LedgerMerge.expensesKey]?.data else {
+                self.show("iCloud 上還沒有這份資料", isError: true)
+                return
+            }
+            self.pendingDuplicate = ask
+            self.pendingDuplicateAt = Date()
+            let ref = Self.ref(key: LedgerMerge.expensesKey, itemID: (ask.raw["id"] as? String) ?? "")
+            self.run(MacWriteJob(key: LedgerMerge.expensesKey, action: .add(raw: ask.raw), base: base,
+                                 purpose: .duplicate, ref: ref, rememberCategory: nil))
+        }
+    }
 
     // MARK: 開表單（先重抓；那筆不在就不開）
 
@@ -424,10 +533,15 @@ final class MacEditCenter: ObservableObject {
         guard !isBusy else { return (.failed("上一筆還在存，等一下再按"), nil) }
         isBusy = true
         let key = job.key
+        let purpose = job.purpose
         let outcome = await writer.save(key: job.key, action: job.action, base: job.base, resolution: resolution,
                                         journal: journal, golden: journal.golden, writeEnabled: writeEnabled,
-                                        gate: { [weak self] item, changes in
-                                            self?.gateReason(key: key, item: item, changes: changes)
+                                        gate: { [weak self] item, changes, fresh in
+                                            self?.gateReason(key: key, item: item, changes: changes, fresh: fresh)
+                                        },
+                                        postCheck: { action, fetched, merged, fresh in
+                                            MacEditCenter.postReason(key: key, purpose: purpose, action: action,
+                                                                     fetched: fetched, merged: merged, fresh: fresh)
                                         })
         isBusy = false
         phase = nil
@@ -452,8 +566,10 @@ final class MacEditCenter: ObservableObject {
     private func policyBlock(_ action: MacLedgerAction, key: String) -> String? {
         switch action {
         case .add(let raw):
-            // sim2: block#1（S2）
-            return key == LedgerMerge.incomesKey ? MacEditPolicy.addBackReason(raw: raw) : nil
+            // sim2: block#1（S2）收入照 Mac 2
+            if key == LedgerMerge.incomesKey { return MacEditPolicy.addBackReason(raw: raw) }
+            // sim3: block3#1 支出：解不開、整筆鎖、連著銀行／照片／分帳／細項 → 不加回（快取的分帳細項；存的那一刻 postCheck 再看剛抓到的）
+            return MacEditPolicy.expenseAddBackReason(raw: raw, links: cachedLinks())
         case .delete(let itemID):
             guard let ref = Self.ref(key: key, itemID: itemID), verdict(ref) != nil else { return nil }
             return deleteReason(ref)
@@ -467,6 +583,11 @@ final class MacEditCenter: ObservableObject {
                 // sim2: catto#2 換分類看新值（復原、改回：那筆現在已是每月／每年就不准換成薪水）
                 if field == "category", case .income(let id) = ref, let i = money.income(id),
                    let reason = MacEditPolicy.incomeCategoryChangeReason(i, to: changes[field] ?? nil) {
+                    return reason
+                }
+                // sim3: block3#2 支出換分類看新值（字串、8 類；復原、改回、補回也一樣）
+                if field == "variableCategory", case .expense(let id) = ref, let e = money.expense(id),
+                   let reason = MacEditPolicy.expenseCategoryChangeReason(e, to: changes[field] ?? nil) {
                     return reason
                 }
             }
@@ -489,8 +610,11 @@ final class MacEditCenter: ObservableObject {
 
     /// S1：MacCloudWriter 重抓之後交過來剛抓到的那筆原字典＋這次的改動；nil＝放行，否則「這筆剛在 iPhone 改過，現在…」
     /// （sim2 gate；值已經跟剛抓到的那筆一樣的欄位跳過：〔用 iPhone 的〕換成雲端值的那幾欄等於沒改）
-    func gateReason(key: String, item: [String: Any], changes: [String: Any?]) -> String? {
+    /// [v25.642 mac3] fresh＝MacCloudWriter ② 同一次抓到的分帳、細項（支出用；收入 fetched＝false 不看）
+    func gateReason(key: String, item: [String: Any], changes: [String: Any?], fresh: MacFreshLinks) -> String? {
         let prefix = MacEditPolicy.reasonGatePrefix
+        // sim3: gate3#1 支出那包一定要有剛抓到的分帳細項（Writer 一定傳 true；防呆只會多擋）
+        if key == LedgerMerge.expensesKey && !fresh.fetched { return prefix + MacEditPolicy.reasonLinksUnknown }
         // sim2: gate#3 剛抓到的那筆用這一版的模型解得開才往下（解不開＝較新的 iPhone 版記的）
         guard let schema = LedgerMerge.schema(for: key), JSONSerialization.isValidJSONObject(item),
               let data = try? JSONSerialization.data(withJSONObject: item, options: []) else {
@@ -500,6 +624,7 @@ final class MacEditCenter: ObservableObject {
         let verdict: MacEditVerdict
         var start: Date?
         var income: Income?
+        var expense: Expense?
         if key == LedgerMerge.incomesKey {
             guard let i = try? JSONDecoder().decode(Income.self, from: data) else { return prefix + MacEditPolicy.reasonNewer }
             verdict = MacEditPolicy.income(i, rawEditable: rawOK)
@@ -507,7 +632,9 @@ final class MacEditCenter: ObservableObject {
             income = i
         } else {
             guard let e = try? JSONDecoder().decode(Expense.self, from: data) else { return prefix + MacEditPolicy.reasonNewer }
-            verdict = MacEditPolicy.expense(e, rawEditable: rawOK, liveSplitIDs: money.splitIndex.liveIDs)
+            // sim3: gate3#1 用剛抓到的分帳、細項（不是快取）
+            verdict = MacEditPolicy.expense(e, rawEditable: rawOK, links: Self.links(fresh))
+            expense = e
         }
         // sim2: gate#4 現在整筆鎖
         if let lock = verdict.lock { return prefix + lock }
@@ -519,6 +646,10 @@ final class MacEditCenter: ObservableObject {
             if let r = verdict.reason(f) { return prefix + r }
             // sim2: catto#3 換分類看新值是不是剛抓到那筆准的（單次 4 類；週期只在獎金、禮金、確幸）
             if k == "category", let i = income, let r = MacEditPolicy.incomeCategoryChangeReason(i, to: value) {
+                return prefix + r
+            }
+            // sim3: catto3（gate）支出換分類看新值是不是 8 類裡的字串
+            if k == "variableCategory", let e = expense, let r = MacEditPolicy.expenseCategoryChangeReason(e, to: value) {
                 return prefix + r
             }
         }
@@ -535,6 +666,15 @@ final class MacEditCenter: ObservableObject {
 
     /// 寫完：收進 MacMoneyStore、登記復原、狀態列
     func finish(_ job: MacWriteJob, outcome: MacWriteOutcome, entry: MacJournalEntry?) {
+        if case .duplicate = job.purpose {
+            // 存好（或 iCloud 上已經有這筆）才忘掉；其餘留著，再按 ⌘D 用同一個 raw
+            switch outcome {
+            case .saved, .nothingToWrite:
+                pendingDuplicate = nil
+                pendingDuplicateAt = nil
+            default: break
+            }
+        }
         switch outcome {
         case .saved(let record, let merged):
             money.adopt(record)
@@ -579,7 +719,94 @@ final class MacEditCenter: ObservableObject {
             if let entry { registerUndo(entry.id, name: "從備份加回", redo: false) }
             if let ref = job.ref, ui.page.shows(ref) { ui.selection = ref }   // sim2: sel#4
             show("已從備份加回 \(time)")
+        case .duplicate:
+            if let entry { registerUndo(entry.id, name: "複製", redo: false) }
+            if let ref = job.ref, ui.page.shows(ref) { ui.selection = ref }
+            show("已複製 \(time)")
         }
+    }
+
+    // MARK: postCheck（W-4：合併後真正要寫的那一筆；static：不靠 self，self 不在也照擋）
+
+    /// MacCloudWriter ⑥ 之後、⑦ 之前叫：fetched＝剛抓到那筆、merged＝合併後那筆、fresh＝剛抓到的分帳細項。nil＝放行
+    static func postReason(key: String, purpose: MacWritePurpose, action: MacLedgerAction, fetched: [String: Any]?,
+                           merged: [String: Any]?, fresh: MacFreshLinks) -> String? {
+        guard let schema = LedgerMerge.schema(for: key) else { return MacEditPolicy.reasonPostShape }
+        let isExpense = key == LedgerMerge.expensesKey
+        switch action {
+        case .delete:
+            return nil
+        case .edit(_, let changes):
+            // sim3: post3#P1 合併後那筆要在
+            guard let merged else { return MacEditPolicy.reasonPostShape }
+            // sim3: post3#P2 跟剛抓到那筆不同的鍵 ⊆ 這次改的鍵 ∩ 這包准改的欄位
+            let allow = isExpense ? MacEditPolicy.expensePostKeys : MacEditPolicy.incomePostKeys
+            let allowed = Set(changes.keys).intersection(allow)
+            let before: [String: Any] = fetched ?? [:]
+            let keys = Set(before.keys).union(merged.keys)
+            let diff = keys.filter { k in !LedgerMerge.same(before[k], merged[k]) }
+            if !diff.isSubset(of: allowed) { return MacEditPolicy.reasonPostShape }
+            // sim3: post3#P3 那幾個不同的鍵逐一值檢查（雲端本來就有的舊殘留不擋）
+            for k in diff.sorted() where !MacEditPolicy.postValueOK(key: key, field: k, value: merged[k]) {
+                return MacEditPolicy.reasonValueBad
+            }
+            // sim3: post3#P4 本來看得懂的那筆，合併後變成看不懂 → 擋
+            if let fetched, LedgerMerge.editable(schema, raw: fetched), !LedgerMerge.editable(schema, raw: merged) {
+                return MacEditPolicy.reasonPostShape
+            }
+            return nil
+        case .add:
+            // sim3: post3#A1 解得開、editable
+            guard let merged, decodes(merged, expense: isExpense), LedgerMerge.editable(schema, raw: merged) else {
+                return MacEditPolicy.reasonPostShape
+            }
+            // sim3: post3#A2 加回擋連著的（支出用剛抓到的分帳細項；收入照 Mac 2）
+            guard isExpense else { return MacEditPolicy.addBackReason(raw: merged) }
+            if let reason = MacEditPolicy.expenseAddBackReason(raw: merged, links: links(fresh)) { return reason }
+            // sim3: post3#A3 表單新記、⌘D 複製、〔另存〕：只准 8 類變動支出，不准連著的鍵、一按就記、照片、金額歷史
+            guard checksNewShape(purpose) else { return nil }
+            guard (merged["expenseType"] as? String) == ExpenseType.variable.rawValue,
+                  MacEditPolicy.expenseCategoryValueOK(merged["variableCategory"]) else {
+                return MacEditPolicy.reasonPostShape
+            }
+            for k in newEntryBannedKeys where nonEmpty(merged[k]) {
+                return MacEditPolicy.reasonPostShape
+            }
+            for k in ["photoFileNames", "amountHistory"] {
+                if let list = merged[k] as? [Any], !list.isEmpty { return MacEditPolicy.reasonPostShape }
+            }
+            return nil
+        }
+    }
+
+    /// post3#A3 新的一筆不准出現的鍵（在、不是 NSNull、不是空字串就擋）
+    private static let newEntryBannedKeys = [
+        "linkedBankMilestoneId", "linkedBankCurrency", "linkedCreditCardMilestoneId", "linkedStockId",
+        "linkedRealEstateId", "linkedVehicleId", "linkedInsuranceId", "linkedTripPlanId", "linkedTripStopId",
+        "fromQuickRecord",
+    ]
+
+    /// A3 只看表單新記（含〔另存〕）與 ⌘D 複製
+    private static func checksNewShape(_ purpose: MacWritePurpose) -> Bool {
+        switch purpose {
+        case .form(let isNew): return isNew
+        case .duplicate: return true
+        default: return false
+        }
+    }
+
+    private static func nonEmpty(_ value: Any?) -> Bool {
+        guard let v = value, !(v is NSNull) else { return false }
+        if let s = v as? String { return !s.isEmpty }
+        return true
+    }
+
+    /// 原字典用這一版的模型解得開
+    private static func decodes(_ raw: [String: Any], expense: Bool) -> Bool {
+        guard JSONSerialization.isValidJSONObject(raw),
+              let data = try? JSONSerialization.data(withJSONObject: raw, options: []) else { return false }
+        if expense { return (try? JSONDecoder().decode(Expense.self, from: data)) != nil }
+        return (try? JSONDecoder().decode(Income.self, from: data)) != nil
     }
 
     /// 寫入結果 → 一句話
@@ -920,6 +1147,13 @@ struct MacEditCommands: Commands {
         return edit.canDelete(ref)
     }
 
+    // [v25.642 mac3] ⌘D：同 ⌘E 的條件，只給支出
+    private var canDuplicateSelection: Bool {
+        guard let ref = ui.selection, !blocked, !ui.searchFieldFocused, ui.page.shows(ref) else { return false }
+        guard case .expense = ref else { return false }
+        return edit.canDuplicate(ref)
+    }
+
     var body: some Commands {
         CommandGroup(replacing: .newItem) {
             Button("記一筆支出") { edit.newExpense() }
@@ -934,6 +1168,9 @@ struct MacEditCommands: Commands {
             Button("編輯這一筆") { editSelection() }
                 .keyboardShortcut("e")
                 .disabled(!canEditSelection)
+            Button("複製成新的一筆") { duplicateSelection() }
+                .keyboardShortcut("d")
+                .disabled(!canDuplicateSelection)
             Button("刪除這一筆") { deleteSelection() }
                 .keyboardShortcut(.delete, modifiers: .command)
                 .disabled(!canDeleteSelection)
@@ -946,6 +1183,10 @@ struct MacEditCommands: Commands {
 
     private func deleteSelection() {
         if let ref = ui.selection { edit.requestDelete(ref) }
+    }
+
+    private func duplicateSelection() {
+        if let ref = ui.selection { edit.requestDuplicate(ref) }
     }
 }
 
@@ -1002,6 +1243,7 @@ private struct MacHostAskDialog: ViewModifier {
             return a.recurring ? "iPhone、iPad 也會一起刪掉。每個月的收入統計都會少掉這筆。" : "iPhone、iPad 也會一起刪掉。"
         case .conflict(let a): return a.message
         case .revert(let a): return "「\(a.fieldNames)」在另一台又改過，還要改回電腦改之前的值嗎？"
+        case .duplicate: return "iPhone、iPad 也會多這一筆。"
         }
     }
 }
@@ -1025,6 +1267,10 @@ private struct MacHostAskButtons: View {
             Button("改回") { edit.confirmRevert(a) }
             Button("取消", role: .cancel) {}
                 .keyboardShortcut(.defaultAction)
+        case .duplicate(let a):
+            Button(MacEditPolicy.duplicateButton) { edit.confirmDuplicate(a) }
+                .keyboardShortcut(.defaultAction)
+            Button("取消", role: .cancel) {}
         }
     }
 }
@@ -1926,7 +2172,18 @@ struct MacInspectorEditSection: View {
                     .foregroundStyle(.secondary)
             }
             MacInspectorButtons(ref: ref, edit: edit)
+            if isExpense {
+                // [v25.642 mac3] 這幾欄電腦只能看（hint_iphone_only）
+                Text(MacEditPolicy.hintIPhoneOnly)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
         }
+    }
+
+    private var isExpense: Bool {
+        if case .expense = ref { return true }
+        return false
     }
 }
 
@@ -1995,6 +2252,10 @@ private struct MacInspectorButtons: View {
             HStack(spacing: 8) {
                 Button("編輯") { edit.requestEdit(ref) }
                     .disabled(!edit.canEdit(ref))
+                if isExpense {
+                    Button("複製成新的一筆") { edit.requestDuplicate(ref) }
+                        .disabled(!edit.canDuplicate(ref))
+                }
                 Button("刪除", role: .destructive) { edit.requestDelete(ref) }
                     .disabled(!edit.canDelete(ref))
             }
@@ -2002,11 +2263,18 @@ private struct MacInspectorButtons: View {
         }
     }
 
+    private var isExpense: Bool {
+        if case .expense = ref { return true }
+        return false
+    }
+
     private var hint: String? {
         if !edit.writeEnabled { return edit.writeLockText }
         guard let v = edit.verdict(ref), v.lock == nil else { return nil }
-        if let r = edit.deleteReason(ref) { return "不能刪：\(r)" }
-        return nil
+        var lines: [String] = []
+        if let r = edit.deleteReason(ref) { lines.append("不能刪：\(r)") }
+        if isExpense, let r = edit.duplicateReason(ref) { lines.append("不能複製：\(r)") }
+        return lines.isEmpty ? nil : lines.joined(separator: "\n")
     }
 }
 

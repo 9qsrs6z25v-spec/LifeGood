@@ -4,7 +4,18 @@
 // 原因字＝sim 的 R 字典，一字不差（keycheck_mac1 逐字比）。
 // [v25.641 mac2 G1] 收入照 judge_mac §P4：policy#1～#5、incomeDeleteReason、addBackReason（sim_mac2.py income_policy2／
 // income_delete2／add_back_reason）；新 11 條原因字＝sim_mac2.R2。
+// [v25.642 mac3 G1] 支出照 judge_mac §Q5、§Q6（sim_mac3.py expense3／delete3／cat_change3／dup3／addback3／live_kind_ids／
+// link_data_parses／value_ok；sim3 編號 policy3#、del3#、catto3#、dup3#、addback3#、links3#、post3#）：連旅行那筆的金額、日期、刪除開；
+// 外幣只鎖金額；有活細項整筆鎖；選過地點的名稱鎖；有分帳紀錄或殘留欄位的分類鎖；⌘D 複製、從備份加回的擋法。新原因字＝sim_mac3.R3。
 import Foundation
+
+/// 支出那筆連著的東西（快取版 cachedLinks()／剛抓到版 links(_:)）。只有 memberwise init：忘了傳＝編不過，不會變成少擋
+struct MacLinkIDs {
+    let liveSplitIDs: Set<UUID>
+    let splitRecordIDs: Set<String>
+    let kindRecordIDs: Set<String>
+    let liveKindIDs: Set<String>
+}
 
 /// 表單上能改的欄位（endDate＝結束日，結束原因跟它同一欄）
 enum MacEditField: String, CaseIterable, Hashable {
@@ -92,6 +103,25 @@ enum MacEditPolicy {
     static let errorEndBefore = "結束日不能早於開始日"                               // R2['end_before']
     static let errorSalaryYearly = "薪水只有每月或單次"                              // R2['salary_yearly']
 
+    // [v25.642 mac3] 新 16 條（sim_mac3.py R3，一字不差；Mac 1、Mac 2 的一條都不改，reasonForeign、reasonTrip 留著不用）
+    static let reasonForeignAmount = "這筆是外幣，金額請在 iPhone 改"                 // R3['fx_amount']
+    static let reasonTitlePlace = "這筆選過地點，名稱請在 iPhone 改（iPhone 改名稱會一起換地點）"   // R3['title_place']
+    static let reasonSplitRecordEdit = "這筆有分帳紀錄，分類請在 iPhone 改"           // R3['split_rec_edit']
+    static let reasonCategoryResidue = "這筆有舊版留下的欄位，分類請在 iPhone 改"     // R3['cat_residue']
+    static let reasonKindLive = "這筆有細項，請在 iPhone 改"                          // R3['kind_live']
+    static let reasonDuplicateKind = "這筆有細項，複製請在 iPhone 做"                 // R3['dup_kind']
+    static let reasonDuplicatePay = "這筆有付款方式（信用卡或銀行），複製請在 iPhone 做"   // R3['dup_pay']
+    static let reasonDuplicateResidue = "這筆有舊版留下的欄位，複製請在 iPhone 做"    // R3['dup_residue']
+    static let reasonExpenseAddBackLinked = "這筆連著銀行、照片、分帳或細項，加回去那邊不會跟著回來，請在 iPhone 重記"   // R3['exp_addback_linked']
+    static let reasonDetachLinked = "這筆在 iPhone 刪掉了，而且有分帳或細項，請在 iPhone 重記"   // R3['exp_detach_linked']
+    static let reasonLinksUnknown = "確認不了這筆有沒有分帳或細項，這次先不存，請按 ⌘R 再試"     // R3['links_unknown']
+    static let reasonPostShape = "這次要寫的內容跟你改的不一樣，這次先不存，請按 ⌘R 再試"       // R3['post_shape']
+    static let reasonValueBad = "這一欄的值不對，這次先不存"                          // R3['value_bad']
+    static let hintIPhoneOnly = "付款方式、同行、地點、照片請在 iPhone 改"            // R3['hint_iphone_only']
+    static let duplicateButton = "複製"                                               // R3['dup_button']
+    /// 確認框標題（R3['dup_confirm']）
+    static func duplicateConfirm(_ label: String) -> String { "複製「\(label)」成新的一筆？日期會改成現在。" }
+
     // MARK: - 分類
 
     /// Mac 1 能記、能換的 8 類（sim EIGHT；照 VariableCategory.rawValue）
@@ -102,57 +132,142 @@ enum MacEditPolicy {
     /// [v25.641 mac2] 週期收入（沒連、沒設結束日或固定薪水）能互換的 3 類（sim2 RECURRING_CATS）
     static let recurringIncomeCategories: [IncomeCategory] = [.bonus, .gift, .luck]
 
-    // MARK: - 支出（sim expense_policy）
+    // MARK: - 支出（sim3 expense3／delete3／cat_change3／dup3／addback3；judge_mac §Q5 判定順序）
 
-    static func expense(_ e: Expense, rawEditable: Bool, liveSplitIDs: Set<UUID>) -> MacEditVerdict {
+    // 照抄 ExpenseKinds.swift:374、:758、:1123（48c51a2）
+    /// iPhone 存任何一次都會寫細項墓碑的那三種分類簽名（handledBasesV3；用 rawValue 拼）
+    static let handledBasesV3: Set<String> = ["fixed." + FixedCategory.other.rawValue, "vehicle." + VehicleVariableCategory.other.rawValue, "re." + RealEstateExpenseCategory.tax.rawValue]
+
+    /// 直接扣款：連著銀行、沒連信用卡
+    static func isDirectDebit(_ e: Expense) -> Bool {
+        e.linkedBankMilestoneId != nil && e.linkedCreditCardMilestoneId == nil
+    }
+
+    /// 選過地點（地址、座標任一；placeName 不算）
+    static func hasPlace(_ e: Expense) -> Bool {
+        e.placeAddress != nil || e.placeLatitude != nil || e.placeLongitude != nil
+    }
+
+    /// 舊版留下的欄位（換分類時 iPhone 會連帶清掉的那幾欄）
+    static func hasResidue(_ e: Expense) -> Bool {
+        if e.placeName != nil || e.vehicleExpenseCategory != nil || e.realEstateExpenseCategory != nil { return true }
+        if e.taxSavingSubCategory != nil || e.evKwh != nil || e.evFromPct != nil { return true }
+        return e.evToPct != nil || e.evOdometer != nil || e.fuelLiters != nil
+    }
+
+    /// 外幣（同 Mac 1：不是 NT$ 也不是空字串；TWD 也算）
+    static func isForeign(_ e: Expense) -> Bool {
+        e.currencyCode != "NT$" && !e.currencyCode.isEmpty
+    }
+
+    static func expense(_ e: Expense, rawEditable: Bool, links: MacLinkIDs) -> MacEditVerdict {
+        // sim3: policy3#1 固定支出：整筆鎖
         if e.expenseType != .variable {
             return .locked(reasonFixed)
         }
+        // sim3: policy3#2 不在 8 類：整筆鎖
         guard let cat = e.variableCategory, eightCategories.contains(cat) else {
             return .locked(reasonCategory)
         }
+        // sim3: policy3#3 車子 → 房子 → 股票 → 保險
         if e.linkedVehicleId != nil { return .locked(reasonVehicle) }
         if e.linkedRealEstateId != nil { return .locked(reasonHouse) }
         if e.linkedStockId != nil { return .locked(reasonStock) }
         if e.linkedInsuranceId != nil { return .locked(reasonInsurance) }
+        // sim3: policy3#4 看不懂的那筆
         if !rawEditable { return .locked(reasonNewer) }
+        let upper = e.id.uuidString.uppercased()
+        // sim3: policy3#5 有活細項：iPhone 存任何一次都寫細項墓碑 → 整筆鎖
+        if links.liveKindIDs.contains(upper) { return .locked(reasonKindLive) }
 
         var reasons: [MacEditField: String] = [:]
-        let hasSplit = liveSplitIDs.contains(e.id)
-        var amountReason: String?
-        if e.currencyCode != "NT$" && !e.currencyCode.isEmpty {
-            amountReason = reasonForeign
-        } else if e.linkedBankMilestoneId != nil && e.linkedCreditCardMilestoneId == nil {
-            amountReason = reasonBank
-        } else if hasSplit {
-            amountReason = reasonSplit
-        } else if e.linkedTripPlanId != nil {
-            amountReason = reasonTrip
+        let live = links.liveSplitIDs.contains(e.id)
+        let direct = isDirectDebit(e)
+        // sim3: policy3#6 金額：直接扣款 ＞ 活分帳 ＞ 外幣（旅行不再鎖）
+        if direct {
+            reasons[.amount] = reasonBank
+        } else if live {
+            reasons[.amount] = reasonSplit
+        } else if isForeign(e) {
+            reasons[.amount] = reasonForeignAmount
         }
-        if let amountReason {
-            reasons[.amount] = amountReason
-            reasons[.date] = amountReason
+        // sim3: policy3#7 日期：直接扣款 ＞ 活分帳（外幣、旅行不再鎖）
+        if direct {
+            reasons[.date] = reasonBank
+        } else if live {
+            reasons[.date] = reasonSplit
         }
-        if hasSplit {
+        // sim3: policy3#8 分類：活分帳 ＞ 分帳紀錄 ＞ 同行／地點／社交種類 ＞ 殘留欄位
+        if live {
             reasons[.category] = reasonSplit
+        } else if links.splitRecordIDs.contains(upper) {
+            reasons[.category] = reasonSplitRecordEdit
         } else if e.diningMember != nil || e.placeAddress != nil || e.placeLatitude != nil
                     || e.placeLongitude != nil || e.socialSubCategory != nil {
             reasons[.category] = reasonCategoryLinked
+        } else if hasResidue(e) {
+            reasons[.category] = reasonCategoryResidue
         }
+        // sim3: policy3#9 名稱：選過地點就鎖（iPhone 改名稱會一起換地點）
+        if hasPlace(e) {
+            reasons[.title] = reasonTitlePlace
+        }
+        // sim3: policy3#10 備註：開
         return MacEditVerdict(lock: nil, fieldReasons: reasons)
     }
 
-    /// sim expense_can_delete：nil＝能刪。splitRecordIDs／kindRecordIDs＝分帳、細項裡有這個 id 的記錄（含墓碑）
-    static func expenseDeleteReason(_ e: Expense, rawEditable: Bool, liveSplitIDs: Set<UUID>,
-                                    splitRecordIDs: Set<String>, kindRecordIDs: Set<String>) -> String? {
-        let v = expense(e, rawEditable: rawEditable, liveSplitIDs: liveSplitIDs)
+    /// nil＝能刪。links.splitRecordIDs／kindRecordIDs＝分帳、細項裡有這個 id 的記錄（含墓碑）
+    static func expenseDeleteReason(_ e: Expense, rawEditable: Bool, links: MacLinkIDs) -> String? {
+        // sim3: del3#1 整筆鎖 → 日期那欄的原因（直接扣款、活分帳）→ 照片 → 信用卡 → 分帳紀錄 → 細項紀錄
+        let v = expense(e, rawEditable: rawEditable, links: links)
         if let lock = v.lock { return lock }
-        if let r = v.fieldReasons[.amount] { return r }
+        if let r = v.fieldReasons[.date] { return r }
         if !e.photoFileNames.isEmpty { return reasonPhoto }
         if e.linkedCreditCardMilestoneId != nil { return reasonCard }
         let id = e.id.uuidString.uppercased()
-        if splitRecordIDs.contains(id) { return reasonSplitRecord }
-        if kindRecordIDs.contains(id) { return reasonKindRecord }
+        if links.splitRecordIDs.contains(id) { return reasonSplitRecord }
+        if links.kindRecordIDs.contains(id) { return reasonKindRecord }
+        return nil
+    }
+
+    /// 換分類的新值：字串、解得成 VariableCategory、在 8 類（postCheck 也用這支）
+    static func expenseCategoryValueOK(_ value: Any?) -> Bool {
+        guard let raw = value as? String, let c = VariableCategory(rawValue: raw) else { return false }
+        return eightCategories.contains(c)
+    }
+
+    /// 換分類的新值（policyBlock、gate 都看）：nil＝准；鎖不鎖由 verdict 管
+    static func expenseCategoryChangeReason(_ e: Expense, to value: Any?) -> String? {
+        // sim3: catto3#1 不是 8 類裡的字串一律擋
+        expenseCategoryValueOK(value) ? nil : reasonFieldUnknown
+    }
+
+    /// ⌘D 複製：nil＝能複製（外幣可以）
+    static func expenseDuplicateReason(_ e: Expense, rawEditable: Bool, links: MacLinkIDs) -> String? {
+        // sim3: dup3#1 整筆鎖 → 細項紀錄 → 付款方式 → 殘留欄位
+        let v = expense(e, rawEditable: rawEditable, links: links)
+        if let lock = v.lock { return lock }
+        if links.kindRecordIDs.contains(e.id.uuidString.uppercased()) { return reasonDuplicateKind }
+        if e.linkedCreditCardMilestoneId != nil || e.linkedBankMilestoneId != nil { return reasonDuplicatePay }
+        if hasResidue(e) { return reasonDuplicateResidue }
+        return nil
+    }
+
+    /// 從備份加回、看門狗〔補回〕、⌘Z 復原刪除、⌘D 複製：一整筆支出加回去之前（policyBlock 用快取、postCheck 用剛抓到的）
+    static func expenseAddBackReason(raw: [String: Any], links: MacLinkIDs) -> String? {
+        // sim3: addback3#1 解不開或不 editable → newer；整筆鎖 → 那個字；連著銀行、照片、分帳、細項 → 不加回
+        guard let schema = LedgerMerge.schema(for: LedgerMerge.expensesKey),
+              JSONSerialization.isValidJSONObject(raw),
+              let data = try? JSONSerialization.data(withJSONObject: raw, options: []),
+              let e = try? JSONDecoder().decode(Expense.self, from: data),
+              LedgerMerge.editable(schema, raw: raw) else {
+            return reasonNewer
+        }
+        let v = expense(e, rawEditable: true, links: links)
+        if let lock = v.lock { return lock }
+        let id = e.id.uuidString.uppercased()
+        if isDirectDebit(e) || !e.photoFileNames.isEmpty { return reasonExpenseAddBackLinked }
+        if links.splitRecordIDs.contains(id) || links.kindRecordIDs.contains(id) { return reasonExpenseAddBackLinked }
         return nil
     }
 
@@ -237,6 +352,96 @@ enum MacEditPolicy {
     /// 細項那包 {"tags":[{"id":…}]} 裡的 id（大寫）
     static func kindRecordIDs(_ data: Data?) -> Set<String> {
         recordIDs(data, listKey: "tags")
+    }
+
+    /// 細項那包裡「活細項」的支出 id（大寫）：同 id 取 updatedAt 新的（沒有／Bool／不是數字＝最舊；一樣新留先出現的，
+    /// 照 ExpenseKinds.swift:82-90），kind 是字串（含空字串：iPhone formSavingTagV3 只看 kind != nil）、base 在 handledBasesV3
+    static func liveKindIDs(_ data: Data?) -> Set<String> {
+        // sim3: links3#1 只用 JSONSerialization，不解別的欄位
+        guard let data,
+              let obj = (try? JSONSerialization.jsonObject(with: data, options: [])) as? [String: Any],
+              let list = obj["tags"] as? [Any] else { return [] }
+        var best: [String: (t: Double?, tag: [String: Any])] = [:]
+        for element in list {
+            guard let d = element as? [String: Any], let rawID = d["id"] as? String,
+                  let uuid = UUID(uuidString: rawID) else { continue }
+            let k = uuid.uuidString
+            // updatedAt：數字才算（Bool、沒有、不是數字＝最舊）
+            var t: Double? = nil
+            if let n = d["updatedAt"] as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID(), n.doubleValue.isFinite {
+                t = n.doubleValue
+            }
+            if let old = best[k], (old.t ?? -Double.infinity) >= (t ?? -Double.infinity) { continue }
+            best[k] = (t: t, tag: d)
+        }
+        var out = Set<String>()
+        for (k, entry) in best {
+            guard entry.tag["kind"] is String, let base = entry.tag["base"] as? String else { continue }
+            if handledBasesV3.contains(base) { out.insert(k) }
+        }
+        return out
+    }
+
+    /// 分帳、細項那包解得開嗎：沒有那包＝true；JSON 物件而且 listKey 沒有或是陣列＝true；其餘 false（存的時候擋 links_unknown）
+    static func linkDataParses(_ data: Data?, listKey: String) -> Bool {
+        // sim3: links3#2 只有〔不是〕的細項包（沒有 tags）也算解得開
+        guard let data else { return true }
+        guard let obj = (try? JSONSerialization.jsonObject(with: data, options: [])) as? [String: Any] else { return false }
+        return obj[listKey] == nil || obj[listKey] is [Any]
+    }
+
+    /// JSONSerialization 的數字（不是 Bool、有限）；其餘 nil
+    static func plainNumber(_ v: Any?) -> Double? {
+        guard let n = v as? NSNumber, CFGetTypeID(n) != CFBooleanGetTypeID() else { return nil }
+        let d = n.doubleValue
+        return d.isFinite ? d : nil
+    }
+
+    // MARK: - postCheck（合併後真正要寫的那一筆；MacEditCenter.postReason 用）
+
+    // sim3: post3#P3 每包准改的鍵、逐欄值範圍
+    static let expensePostKeys: Set<String> = ["title", "note", "amount", "date", "variableCategory"]
+    static let incomePostKeys: Set<String> = ["title", "note", "amount", "date", "category", "endDate", "endReason"]
+    /// 日期：timeIntervalSinceReferenceDate 在 1970～2100（只擋明顯壞掉的）
+    static let postDateRange: ClosedRange<Double> = -978307200...3124137600
+
+    /// 合併後那一欄的值合不合法（value＝合併後那筆的值；沒有那個鍵＝nil、JSON null＝NSNull）
+    static func postValueOK(key: String, field: String, value: Any?) -> Bool {
+        switch field {
+        case "title":
+            guard let s = value as? String else { return false }
+            return !s.trimmingCharacters(in: .whitespaces).isEmpty
+        case "note":
+            return value is String
+        case "amount":
+            guard let n = plainNumber(value) else { return false }
+            return n > 0
+        case "date":
+            guard let n = plainNumber(value) else { return false }
+            return postDateRange.contains(n)
+        default:
+            break
+        }
+        if key == LedgerMerge.expensesKey {
+            return field == "variableCategory" && expenseCategoryValueOK(value)
+        }
+        guard key == LedgerMerge.incomesKey else { return false }
+        let isNull = value == nil || value is NSNull
+        switch field {
+        case "category":
+            guard let s = value as? String else { return false }
+            return IncomeCategory(rawValue: s) != nil
+        case "endDate":
+            if isNull { return true }
+            guard let n = plainNumber(value) else { return false }
+            return postDateRange.contains(n)
+        case "endReason":
+            if isNull { return true }
+            guard let s = value as? String else { return false }
+            return SalaryEndReason(rawValue: s) != nil
+        default:
+            return false
+        }
     }
 
     private static func recordIDs(_ data: Data?, listKey: String) -> Set<String> {

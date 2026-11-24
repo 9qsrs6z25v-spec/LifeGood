@@ -9,7 +9,9 @@
 // • 重新整理只從 MacAppModel（啟動的下一個 runloop、60 秒計時器、帳號換了）、MacShell 的 scenePhase、⌘R、⟳、表單打開前叫；
 //   不在 body、.task 裡叫。
 // • 統計一支一支照抄 ExpenseStore.swift（25.639），只多 now:、calendar: 參數（iOS 寫死 Date()、Calendar.current），算法逐字一樣；
-//   每支上方寫原始行號。sim_mac1.py §一 一支對一支。
+//   每支上方寫原始行號（[v25.642 mac3] 支出那幾支改寫 48c51a2 的行號；算法沒動）。sim_mac1.py §一 一支對一支。
+// • [v25.642 mac3 G3] 細項那包（kinds）解成 kindIndex（MacKindLite，只顯示；decode 裡 case MacCloud.kindsKey，快照、雲端同一條路）；
+//   clearData 一起清。讀的鍵沒有多（readKeys 不動）。
 
 import Foundation
 import Combine
@@ -250,7 +252,7 @@ final class MacMoneyStore: ObservableObject {
         showSnapshot(entries, account: hash)
     }
 
-    /// sim2: snap#1 快照只拿來顯示：解碼成 expenses／incomes／rates／splitIndex，其餘狀態（雲端那份、抓成功過、tag 表、帳號雜湊）一律不碰
+    /// sim2: snap#1 快照只拿來顯示：解碼成 expenses／incomes／rates／splitIndex（mac3 加 kindIndex），其餘狀態（雲端那份、抓成功過、tag 表、帳號雜湊）一律不碰
     private func showSnapshot(_ entries: [String: MacSnapshotEntry], account hash: String) {
         for key in MacCloud.readKeys {
             guard let entry = entries[key] else { continue }
@@ -366,7 +368,7 @@ final class MacMoneyStore: ObservableObject {
         storeSnapshot(snapshot, dropping: dropped)
     }
 
-    /// 一個鍵解碼（收支照抄 ExpenseStore.swift:955-964 load()＋:978-987 lossyDecodeArray（25.639）逐筆容錯）
+    /// 一個鍵解碼（收支照抄 ExpenseStore.swift:1028-1038 load()＋:1051-1060 lossyDecodeArray（48c51a2）逐筆容錯）
     private func decode(_ key: String, _ data: Data?) {
         let n = MacMoneyStore.countItems(data)
         if counts[key] != n { counts[key] = n }
@@ -381,8 +383,11 @@ final class MacMoneyStore: ObservableObject {
             if data == nil { rates = [] } else if let v = MacMoneyStore.lossyDecodeArray([CurrencyRate].self, data) { rates = v }
         case MacCloud.splitsKey:
             splitIndex = MacSplitIndex(data: data)
+        case MacCloud.kindsKey:
+            // [v25.642 mac3 G3] 細項 Lite（只顯示「汽車 - 罰款」）；快照 showSnapshot、雲端 apply 都走這裡（同一條路）
+            kindIndex = MacKindIndex(data: data)
         default:
-            break   // 細項（kinds）Mac 1 只數筆數、不解碼
+            break   // 其餘鍵不解
         }
     }
 
@@ -453,6 +458,7 @@ final class MacMoneyStore: ObservableObject {
         incomes = []
         rates = []
         splitIndex = .empty
+        kindIndex = .empty
         records = [:]
         counts = [:]
         rawArrays = [:]
@@ -513,7 +519,7 @@ final class MacMoneyStore: ObservableObject {
         return nil
     }
 
-    /// 逐筆容錯解碼：先試整批，失敗再逐筆解、跳過損壞的元素（照抄 ExpenseStore.swift:978-987（25.639）lossyDecodeArray；
+    /// 逐筆容錯解碼：先試整批，失敗再逐筆解、跳過損壞的元素（照抄 ExpenseStore.swift:1051-1060（48c51a2）lossyDecodeArray；
     /// Mac 沒有 UserDefaults，直接吃雲端 bytes）。解不開＝nil（呼叫端保留原值）
     static func lossyDecodeArray<Element: Decodable>(_ type: [Element].Type, _ data: Data?) -> [Element]? {
         guard let data else { return nil }
@@ -525,14 +531,14 @@ final class MacMoneyStore: ObservableObject {
         return nil
     }
 
-    // MARK: - 統計（照抄 ExpenseStore.swift（25.639）；Mac 多 now:、calendar: 參數）
+    // MARK: - 統計（照抄 ExpenseStore.swift（48c51a2）；Mac 多 now:、calendar: 參數）
 
-    /// 這筆算你自己的錢（照抄 ExpenseStore.swift:114-116：ExpenseSplitIndex.ownAmount）
+    /// 這筆算你自己的錢（照抄 ExpenseStore.swift:187-189（48c51a2）：ExpenseSplitIndex.ownAmount）
     func ownAmount(_ e: Expense) -> Double {
         splitIndex.ownAmount(e)
     }
 
-    // 照抄 ExpenseStore.swift:432-439（25.639）
+    // 照抄 ExpenseStore.swift:505-513（48c51a2）
     func ntdValue(of expense: Expense) -> Double {
         let code = expense.currencyCode
         guard expense.fixedCategory == .insurance,
@@ -543,7 +549,7 @@ final class MacMoneyStore: ObservableObject {
         return expense.amount * rate.rate
     }
 
-    // 照抄 ExpenseStore.swift:531-558（25.639）
+    // 照抄 ExpenseStore.swift:604-631（48c51a2）
     func projectedAmount(for expense: Expense, in period: TimePeriod) -> Double {
         guard expense.expenseType == .fixed, let recurrence = expense.recurrence else {
             return expense.amount
@@ -573,13 +579,13 @@ final class MacMoneyStore: ObservableObject {
         }
     }
 
-    // 照抄 ExpenseStore.swift:561-567（25.639）
+    // 照抄 ExpenseStore.swift:634-640（48c51a2）
     func projectedFixedTotal(for periodDate: Date, period: TimePeriod, calendar: Calendar) -> Double {
         let allFixed = expenses.filter { $0.expenseType == .fixed && $0.recurrence != nil }
         return projectedFixedTotal(from: allFixed, for: periodDate, period: period, calendar: calendar)
     }
 
-    // 照抄 ExpenseStore.swift:571-578（25.639）
+    // 照抄 ExpenseStore.swift:644-651（48c51a2）
     func projectedFixedTotal(from fixedExpenses: [Expense], for periodDate: Date,
                              period: TimePeriod, calendar: Calendar) -> Double {
         let dayOfPeriod = calendar.startOfDay(for: periodDate)
@@ -638,31 +644,31 @@ final class MacMoneyStore: ObservableObject {
         return total
     }
 
-    // 照抄 ExpenseStore.swift:357-363（25.639）currentMonthExpenses
+    // 照抄 ExpenseStore.swift:430-436（48c51a2）currentMonthExpenses
     func currentMonthExpenses(now: Date, calendar: Calendar) -> [Expense] {
         expenses.filter {
             calendar.isDate($0.date, equalTo: now, toGranularity: .month)
         }
     }
 
-    // 照抄 ExpenseStore.swift:366-370（25.639）
+    // 照抄 ExpenseStore.swift:438-442（48c51a2）
     func currentMonthVariableTotal(now: Date, calendar: Calendar) -> Double {
         currentMonthExpenses(now: now, calendar: calendar)
             .filter { $0.expenseType == .variable }
             .reduce(0) { $0 + ownAmount($1) }
     }
 
-    // 照抄 ExpenseStore.swift:373-377（25.639）
+    // 照抄 ExpenseStore.swift:445-450（48c51a2）
     func currentMonthFixedTotal(now: Date, calendar: Calendar) -> Double {
         projectedFixedTotal(for: now, period: .monthly, calendar: calendar)
     }
 
-    // 照抄 ExpenseStore.swift:379-381（25.639）
+    // 照抄 ExpenseStore.swift:452-454（48c51a2）
     func currentMonthTotal(now: Date, calendar: Calendar) -> Double {
         currentMonthVariableTotal(now: now, calendar: calendar) + currentMonthFixedTotal(now: now, calendar: calendar)
     }
 
-    // 照抄 ExpenseStore.swift:385-398（25.639）todayTotal（isDateInToday 換成 isDate(_:inSameDayAs: now)：now＝Date() 時一樣）
+    // 照抄 ExpenseStore.swift:457-470（48c51a2）todayTotal（isDateInToday 換成 isDate(_:inSameDayAs: now)：now＝Date() 時一樣）
     func todayTotal(now: Date, calendar: Calendar) -> Double {
         // 變動支出：只計今天實際紀錄的
         let variableToday = expenses
@@ -675,7 +681,7 @@ final class MacMoneyStore: ObservableObject {
         return variableToday + fixedDaily
     }
 
-    // 照抄 ExpenseStore.swift:402-421（25.639）variableCategoryTotals(for:)＋筆數＋占比；
+    // 照抄 ExpenseStore.swift:475-491（48c51a2）variableCategoryTotals(for:)＋筆數＋占比；
     // 同額照 VariableCategory.allCases 順序（iOS 沒定、字典順序不固定；Mac 定下來，brief 取捨 8）
     func categoryRows(now: Date, calendar: Calendar) -> [MacCategoryRow] {
         let filtered = expenses.filter {
@@ -752,7 +758,7 @@ final class MacMoneyStore: ObservableObject {
     }
 }
 
-/// 包裝單一元素，解碼失敗時不丟錯、回傳 nil（照抄 ExpenseStore.swift:990-995（25.639）FailableDecodable）
+/// 包裝單一元素，解碼失敗時不丟錯、回傳 nil（照抄 ExpenseStore.swift:1063-1068（48c51a2）FailableDecodable）
 struct MacFailableDecodable<T: Decodable>: Decodable {
     let value: T?
     init(from decoder: Decoder) throws {

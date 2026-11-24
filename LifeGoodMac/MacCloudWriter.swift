@@ -9,6 +9,8 @@
 // 只收「動作」（新增一筆原字典、改幾個欄位、刪一筆），不收模型陣列、不收 Lite 型別。
 // [v25.641 mac2 G1] S1：改一筆時 ② 重抓之後、③ 套動作之前，用剛抓到的那筆再判斷一次（gate；每一輪重試、〔用 iPhone 的〕重套之後都再跑）。
 // S5：〔用 iPhone 的〕成組換（fieldGroups：結束日、結束原因）。sim_mac2.py save2／theirs_fields。
+// [v25.642 mac3 G1] judge_mac §Q6 W-1～W-5（sim_mac3.py save3）：② 支出那包同一次多抓分帳、細項（MacFreshLinks，只放 bytes）；
+// 有 bytes 卻解不開 → 不存；gate 多傳剛抓到的分帳細項；那筆不在了又有分帳或細項紀錄 → 不給另存；⑥ 之後、⑦ 之前 postCheck 看合併後那筆。
 import CloudKit
 import Foundation
 import os
@@ -68,6 +70,13 @@ enum MacWriteOutcome {
     case failed(String)
 }
 
+/// ② 同一次抓到的分帳、細項 bytes（支出那包才抓；收入 fetched＝false）
+struct MacFreshLinks {
+    let fetched: Bool
+    let splitData: Data?
+    let kindData: Data?
+}
+
 /// 存的進度（表單按鈕字）
 enum MacWritePhase {
     case fetching
@@ -91,10 +100,12 @@ final class MacCloudWriter {
         self.cloud = cloud
     }
 
-    /// gate：改一筆時拿剛抓到的那筆原字典＋這次的改動再判斷一次，回傳不是 nil＝擋（原因字）；新增、刪除不走 gate
+    /// gate：改一筆時拿剛抓到的那筆原字典＋這次的改動＋剛抓到的分帳細項再判斷一次，回傳不是 nil＝擋（原因字）；新增、刪除不走 gate。
+    /// postCheck：動作、剛抓到那筆、合併後那筆、剛抓到的分帳細項；回傳不是 nil＝擋（刪除不跑；nil＝不檢查，退路 R4）
     func save(key: String, action: MacLedgerAction, base: Data, resolution: MacConflictResolution,
               journal: MacJournal, golden: LedgerMergeGolden.Report, writeEnabled: Bool,
-              gate: (@MainActor ([String: Any], [String: Any?]) -> String?)? = nil) async -> MacWriteOutcome {
+              gate: (@MainActor ([String: Any], [String: Any?], MacFreshLinks) -> String?)? = nil,
+              postCheck: (@MainActor (MacLedgerAction, [String: Any]?, [String: Any]?, MacFreshLinks) -> String?)? = nil) async -> MacWriteOutcome {
         lastEntry = nil
         // ① 開關、黃金案例、白名單
         guard writeEnabled else { return .locked("還沒打開「允許這台 Mac 修改」（在資料來源頁）") }
@@ -107,20 +118,36 @@ final class MacCloudWriter {
         var action = action
         for attempt in 1...Self.maxAttempts {
             onPhase?(.fetching)
-            // ② 重抓
+            // ② 重抓（sim3: fresh3#1 支出那包同一次多抓分帳、細項；抓失敗照舊回錯，不當成「沒有」）
+            let keys = key == MacCloud.expensesKey ? [key, MacCloud.splitsKey, MacCloud.kindsKey] : [key]
             let fetched: MacKVRecord
+            let fresh: MacFreshLinks
             do {
-                let map = try await cloud.fetch([key], withPayload: true)
+                let map = try await cloud.fetch(keys, withPayload: true)
                 guard let r = map[key], r.record != nil, r.data != nil else { return .noRecord }
                 fetched = r
+                if key == MacCloud.expensesKey {
+                    fresh = MacFreshLinks(fetched: true, splitData: map[MacCloud.splitsKey]?.data,
+                                          kindData: map[MacCloud.kindsKey]?.data)
+                } else {
+                    fresh = MacFreshLinks(fetched: false, splitData: nil, kindData: nil)
+                }
             } catch {
                 return Self.outcome(for: error)
             }
             guard let record = fetched.record, let remote = fetched.data else { return .noRecord }
 
+            // sim3: fresh3#2 支出那包：分帳或細項有 bytes 卻解不開 → 這次不存（在 gate 之前）
+            if key == MacCloud.expensesKey,
+               !(MacEditPolicy.linkDataParses(fresh.splitData, listKey: "splits")
+                 && MacEditPolicy.linkDataParses(fresh.kindData, listKey: "tags")) {
+                return .locked(MacEditPolicy.reasonLinksUnknown)
+            }
+
             // sim2: gate#1（S1）用剛抓到的那筆重新判斷；serverRecordChanged 重試的每一輪都會再跑
+            // sim3: gate3#1 多傳剛抓到的分帳、細項
             if case .edit(let id, let changes) = action, let gate, let item = Self.item(id, in: remote),
-               let reason = gate(item, changes) {
+               let reason = gate(item, changes, fresh) {
                 return .locked(reason)
             }
 
@@ -128,6 +155,10 @@ final class MacCloudWriter {
             guard let local = Self.apply(action, to: base) else {
                 // 新增套不上去＝開表單那份看不懂（不是被別台刪掉）
                 if case .add = action { return .cannotMerge }
+                // sim3: detach3#1（③）改的那筆不在了：剛抓到的分帳或細項有這個 id → 不給〔另存〕
+                if case .edit(let id, _) = action, key == MacCloud.expensesKey, Self.detachLinked(id, fresh) {
+                    return .locked(MacEditPolicy.reasonDetachLinked)
+                }
                 return .goneElsewhere
             }
             // ④ 三方合併
@@ -135,7 +166,13 @@ final class MacCloudWriter {
                 return .cannotMerge
             }
             // ⑤ 這筆在另一台刪了（改過的贏會把它加回去）→ 不悄悄寫回，由編輯器問〔另存成新的一筆〕
-            if !result.resurrected.isEmpty { return .goneElsewhere }
+            if !result.resurrected.isEmpty {
+                // sim3: detach3#1（⑤）剛抓到的分帳或細項有這個 id → 不給〔另存〕
+                if case .edit(let id, _) = action, key == MacCloud.expensesKey, Self.detachLinked(id, fresh) {
+                    return .locked(MacEditPolicy.reasonDetachLinked)
+                }
+                return .goneElsewhere
+            }
             // ⑥ 同一欄位兩邊都改
             let itemID = action.itemID
             let sameField = result.conflicts.filter { c in c.kind == .sameField && c.id == itemID }
@@ -154,16 +191,28 @@ final class MacCloudWriter {
                         changes.updateValue(remoteItem?[field], forKey: field)
                     }
                     action = .edit(id: id, changes: changes)
-                    // sim2: gate#2 重套之後再判斷一次
-                    if let gate, let item = remoteItem, let reason = gate(item, changes) {
+                    // sim2: gate#2 重套之後再判斷一次（sim3: gate3#2 一樣傳剛抓到的分帳、細項）
+                    if let gate, let item = remoteItem, let reason = gate(item, changes, fresh) {
                         return .locked(reason)
                     }
                     guard let again = Self.apply(action, to: base),
                           let merged = LedgerMerge.threeWay(schema, base: base, local: again.data, remote: remote) else {
                         return .cannotMerge
                     }
-                    if !merged.resurrected.isEmpty { return .goneElsewhere }
+                    if !merged.resurrected.isEmpty {
+                        // sim3: detach3#1（〔用 iPhone 的〕）剛抓到的分帳或細項有這個 id → 不給〔另存〕
+                        if key == MacCloud.expensesKey, Self.detachLinked(id, fresh) {
+                            return .locked(MacEditPolicy.reasonDetachLinked)
+                        }
+                        return .goneElsewhere
+                    }
                     result = merged
+                }
+            }
+            // sim3: post3 合併後真正要寫的那一筆整筆驗（⑥ 含〔用 iPhone 的〕重合併之後、⑦ 之前；刪除不跑）
+            if case .delete = action {} else if let postCheck {
+                if let reason = postCheck(action, Self.item(itemID, in: remote), Self.item(itemID, in: result.data), fresh) {
+                    return .locked(reason)
                 }
             }
             // ⑦ 跟雲端一樣：不寫
@@ -309,6 +358,13 @@ final class MacCloudWriter {
               let b = item(id, in: base), let r = item(id, in: remote) else { return false }
         let keys = Set(b.keys).union(r.keys).subtracting(changes.keys)
         return keys.contains { k in !LedgerMerge.same(b[k], r[k]) }
+    }
+
+    // MARK: - ⑤ 〔另存〕前：剛抓到的分帳、細項有沒有這個 id（含墓碑）
+
+    private static func detachLinked(_ id: String, _ fresh: MacFreshLinks) -> Bool {
+        let t = id.uppercased()
+        return MacEditPolicy.splitRecordIDs(fresh.splitData).contains(t) || MacEditPolicy.kindRecordIDs(fresh.kindData).contains(t)
     }
 
     // MARK: - ⑨ 刪除前重抓分帳、細項

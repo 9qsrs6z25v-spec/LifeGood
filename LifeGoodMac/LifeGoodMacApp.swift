@@ -22,7 +22,7 @@ struct LifeGoodMacApp: App {
         }
         .defaultSize(width: 1180, height: 760)
         .commands {
-            MacAppCommands(model: model, ui: model.ui)
+            MacAppCommands(model: model, ui: model.ui, money: model.money)
             MacEditCommands(edit: model.edit, ui: model.ui)
         }
     }
@@ -55,11 +55,11 @@ enum MacPage: String, Hashable, CaseIterable {
         }
     }
 
-    /// 開放的頁（其他頁側欄反灰、標「下一版」、不能選）。[v25.641 mac2] 加收入
-    var isOpen: Bool { self == .overview || self == .income || self == .source }
+    /// 開放的頁（其他頁側欄反灰、標「下一版」、不能選）。[v25.641 mac2] 加收入；[v25.642 mac3] 加變動支出
+    var isOpen: Bool { self == .overview || self == .income || self == .variable || self == .source }
 
-    /// [v25.642 mac3] 這一頁有搜尋框（⌘F 反灰用）。總設計先放：G2 改成含 .variable
-    var hasSearch: Bool { self == .income }
+    /// [v25.642 mac3] 這一頁有搜尋框（⌘F 反灰用）：收入、變動支出
+    var hasSearch: Bool { self == .income || self == .variable }
 
     /// [v25.641 mac2] 視窗標題（總覽「收支總覽」；其他頁＝title）。總設計先放：G2 的 MacShell 用
     var navTitle: String {
@@ -77,7 +77,11 @@ enum MacPage: String, Hashable, CaseIterable {
         case .income:
             if case .income = ref { return true }
             return false
-        case .variable, .fixed, .chart, .source:
+        case .variable:
+            // [v25.642 mac3] 變動支出頁：支出 true、收入 false（sim3 page_shows）
+            if case .expense = ref { return true }
+            return false
+        case .fixed, .chart, .source:
             return false
         }
     }
@@ -95,6 +99,8 @@ final class MacUIState: ObservableObject {
                 UserDefaults.standard.set(page.rawValue, forKey: "mac.sidebar.selection")
                 selection = nil
                 searchFieldFocused = false
+                // [v25.642 mac3] 換頁「搜全部月份」歸零（月份留著）
+                variableSearchAll = false
             }
         }
     }
@@ -104,11 +110,63 @@ final class MacUIState: ObservableObject {
     @Published var searchRequest: Int = 0
     /// [v25.641 mac2] 搜尋框有焦點（收入頁 .onChange 寫）；有焦點時 ⌘E、⌘⌫ 反灰，⌘⌫ 留給文字框（G1 選單讀）
     @Published var searchFieldFocused: Bool = false
+    /// [v25.642 mac3] 變動支出頁看哪個月：nil＝跟著本月（過午夜跨月自己跟上）；有值＝那個月 1 號 00:00。不存 UserDefaults
+    @Published var variableMonth: Date? = nil
+    /// [v25.642 mac3] 變動支出頁「搜全部月份」（有搜尋字才出現；搜尋字清空、換頁歸零）
+    @Published var variableSearchAll: Bool = false
 
     init() {
         let raw = UserDefaults.standard.string(forKey: "mac.sidebar.selection") ?? ""
         let saved = MacPage(rawValue: raw) ?? .overview
         page = saved.isOpen ? saved : .overview
+    }
+
+    // MARK: [v25.642 mac3] 變動支出的月份（iPhone 變動頁沒有月份切換，這是電腦版自己的；judge_mac §Q8-2）
+
+    /// sim3: month#1　下限＝最早那筆變動支出的月初；上限＝max(本月月初, 最晚那筆的月初)；沒有變動支出 → nil（三顆反灰）
+    func variableMonthBounds(money: MacMoneyStore, now: Date, calendar: Calendar) -> (lower: Date, upper: Date)? {
+        var earliest: Date? = nil
+        var latest: Date? = nil
+        for e in money.expenses where e.expenseType == .variable {
+            if earliest.map({ d in e.date < d }) ?? true { earliest = e.date }
+            if latest.map({ d in e.date > d }) ?? true { latest = e.date }
+        }
+        guard let first = earliest, let last = latest else { return nil }
+        let lower = MacVariableMonth.start(of: first, calendar: calendar)
+        let upper = max(MacVariableMonth.start(of: now, calendar: calendar), MacVariableMonth.start(of: last, calendar: calendar))
+        return (lower, upper)
+    }
+
+    /// sim3: month#2　走 n 個月之後的 variableMonth：日曆算術、到界線不動（回原值）、走到本月＝nil
+    func steppedVariableMonth(_ n: Int, money: MacMoneyStore, now: Date, calendar: Calendar) -> Date? {
+        guard let bounds = variableMonthBounds(money: money, now: now, calendar: calendar) else { return variableMonth }
+        let current = MacVariableMonth.start(of: now, calendar: calendar)
+        let shown = variableMonth ?? current
+        guard let moved = calendar.date(byAdding: .month, value: n, to: shown) else { return variableMonth }
+        let target = MacVariableMonth.start(of: moved, calendar: calendar)
+        if target < bounds.lower || target > bounds.upper { return variableMonth }
+        return target == current ? nil : target
+    }
+
+    /// sim3: month#2　⌘[、⌘]、工具列〔‹〕〔›〕
+    func stepVariableMonth(_ n: Int, money: MacMoneyStore, now: Date, calendar: Calendar) {
+        let target = steppedVariableMonth(n, money: money, now: now, calendar: calendar)
+        if target != variableMonth { variableMonth = target }
+    }
+
+    /// ⌘[、⌘] 反灰：不在變動支出頁、勾著搜全部月份、沒有變動支出、到界線
+    func canStepVariableMonth(_ n: Int, money: MacMoneyStore, now: Date, calendar: Calendar) -> Bool {
+        guard page == .variable, !variableSearchAll,
+              variableMonthBounds(money: money, now: now, calendar: calendar) != nil else { return false }
+        return steppedVariableMonth(n, money: money, now: now, calendar: calendar) != variableMonth
+    }
+
+    /// ⌘T 反灰：不在變動支出頁、勾著搜全部月份、沒有變動支出、已是本月
+    func canReturnVariableMonth(money: MacMoneyStore, now: Date, calendar: Calendar) -> Bool {
+        guard page == .variable, !variableSearchAll,
+              variableMonthBounds(money: money, now: now, calendar: calendar) != nil,
+              let m = variableMonth else { return false }
+        return m != MacVariableMonth.start(of: now, calendar: calendar)
     }
 }
 
@@ -163,10 +221,13 @@ final class MacAppModel: ObservableObject {
 // MARK: - 選單「顯示」
 
 /// [v25.641 mac2] ⌘2 收入、⌘F 搜尋（只在收入頁）；系統「尋找」「拼字」那一組（.textEditing）整組拿掉，⌘F 不撞鍵
+/// [v25.642 mac3] ⌘3 變動支出；⌘F 收入、變動支出兩頁；⌘[ ⌘] ⌘T 切月份（只在變動支出頁；⌥←／⌥→ 不綁，留給文字框跳字）
 @MainActor
 struct MacAppCommands: Commands {
     let model: MacAppModel
     @ObservedObject var ui: MacUIState
+    /// [v25.642 mac3] 月份上下限跟著帳本（資料到了選單反灰要跟著更新）
+    @ObservedObject var money: MacMoneyStore
 
     var body: some Commands {
         CommandMenu("顯示") {
@@ -178,11 +239,24 @@ struct MacAppCommands: Commands {
             Button("收入") { ui.page = .income }
                 .keyboardShortcut("2")
                 .disabled(!MacPage.income.isOpen)
+            Button("變動支出") { ui.page = .variable }
+                .keyboardShortcut("3")
+                .disabled(!MacPage.variable.isOpen)
             Button("資料來源") { ui.page = .source }
             Divider()
             Button("搜尋") { ui.searchRequest += 1 }
                 .keyboardShortcut("f")
-                .disabled(ui.page != .income)
+                .disabled(!ui.page.hasSearch)
+            Divider()
+            Button("上個月") { ui.stepVariableMonth(-1, money: money, now: Date(), calendar: .current) }
+                .keyboardShortcut("[")
+                .disabled(!ui.canStepVariableMonth(-1, money: money, now: Date(), calendar: .current))
+            Button("下個月") { ui.stepVariableMonth(1, money: money, now: Date(), calendar: .current) }
+                .keyboardShortcut("]")
+                .disabled(!ui.canStepVariableMonth(1, money: money, now: Date(), calendar: .current))
+            Button("回到本月") { ui.variableMonth = nil }
+                .keyboardShortcut("t")
+                .disabled(!ui.canReturnVariableMonth(money: money, now: Date(), calendar: .current))
             Divider()
             Button("詳情") { ui.showInspector.toggle() }
                 .keyboardShortcut("i", modifiers: [.command, .option])

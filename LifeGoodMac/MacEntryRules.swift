@@ -5,6 +5,8 @@
 // 改一筆只交「改了哪幾欄」：date 寫 timeIntervalSinceReferenceDate（＝JSONEncoder 預設的日期編法）。
 // [v25.641 mac2 G1] 收入照 judge_mac §P5（sim_mac2.py new_income2／income_changes2／display／field_name；sim2 編號 entry#）：
 // 新記可選週期／固定薪水／結束日；改週期收入能在獎金、禮金、確幸之間換分類、固定薪水設／改／拿掉結束日（endDate、endReason 兩欄一起寫）。
+// [v25.642 mac3 G1] 支出照 judge_mac §Q5 表單規則（sim_mac3.py expense_changes3／new_expense3／duplicate3；sim3 編號 entry3#）：
+// 名稱、備註照 iPhone 用 .whitespaces 去頭尾（換行不去）；⌘D 複製照抄 VariableExpenseView.swift:560-591 的參數表。收入不動。
 import Foundation
 
 /// 表單結束日那一區（開關、哪一天、原因）
@@ -60,15 +62,55 @@ enum MacEntryRules {
             return (nil, "分類只有 " + MacEditPolicy.eightCategoryNames.joined(separator: "、"))
         }
         guard let amount = parseAmount(amountText) else { return (nil, amountError) }
-        var t = title.trimmingCharacters(in: .whitespacesAndNewlines)
+        // sim3: entry3#2 名稱、備註照 iPhone 只去頭尾空白（AddExpenseView.swift:4028、:4271；換行不去）
+        var t = title.trimmingCharacters(in: .whitespaces)
         // 照抄 AddExpenseView.swift:4038-4041（25.639）：變動支出名稱留空時以分類名稱當預設
         if t.isEmpty {
             t = category.rawValue
         }
         let e = Expense(id: id, title: t, amount: amount, date: combine(day: day, timeOf: now),
-                        expenseType: .variable, variableCategory: category, note: note)
+                        expenseType: .variable, variableCategory: category, note: note.trimmingCharacters(in: .whitespaces))
         guard let raw = dictionary(e) else { return (nil, "這筆編不出來，請再試一次") }
         return (raw, nil)
+    }
+
+    // 照抄 VariableExpenseView.swift:560-591（48c51a2）duplicateExpense 的 Expense(...) 參數表 — sim3: entry3#3
+    // （UUID()→id、Date()→now、title→e.title、expense.→e.；evKwh、fuelLiters 那兩行用不到：有殘留欄位的那筆不給複製）
+    /// ⌘D 複製成新的一筆：呼叫前先過 MacEditPolicy.expenseDuplicateReason；id、now 在確認框打開那一刻定下來
+    static func duplicate(_ e: Expense, id: UUID, now: Date) -> [String: Any]? {
+        let copy = Expense(
+            id: id,
+            title: e.title,
+            amount: e.amount,
+            date: now,
+            expenseType: e.expenseType,
+            variableCategory: e.variableCategory,
+            fixedCategory: e.fixedCategory,
+            recurrence: e.recurrence,
+            insuranceSubCategory: e.insuranceSubCategory,
+            loanSubCategory: e.loanSubCategory,
+            linkedInsuranceId: e.linkedInsuranceId,
+            linkedStockId: e.linkedStockId,
+            linkedRealEstateId: e.linkedRealEstateId,
+            linkedVehicleId: e.linkedVehicleId,
+            vehicleExpenseCategory: e.vehicleExpenseCategory,
+            realEstateExpenseCategory: e.realEstateExpenseCategory,
+            taxSavingSubCategory: e.taxSavingSubCategory,
+            socialSubCategory: e.socialSubCategory,
+            socialRecipient: e.socialRecipient,
+            taxDeductibleOverride: e.taxDeductibleOverride,
+            note: e.note,
+            currencyCode: e.currencyCode,
+            diningMember: e.diningMember,
+            linkedBankMilestoneId: e.linkedBankMilestoneId,
+            linkedBankCurrency: e.linkedBankCurrency,
+            linkedCreditCardMilestoneId: e.linkedCreditCardMilestoneId,
+            placeName: e.placeName,
+            placeAddress: e.placeAddress,
+            placeLatitude: e.placeLatitude,
+            placeLongitude: e.placeLongitude
+        )
+        return dictionary(copy)
     }
 
     /// 收入：薪水＝固定薪水開著就每月、關著就單次（不給每年）；獎金、禮金、確幸照選的週期、isFixedSalary＝false；
@@ -154,10 +196,11 @@ enum MacEntryRules {
     /// 支出：跟原本那筆比，回傳要改的欄位（鎖住的欄位不收）；金額不對回傳 error
     static func expenseChanges(original e: Expense, draft: Draft,
                                verdict: MacEditVerdict) -> (changes: [String: Any?], error: String?) {
+        // sim3: entry3#1 名稱、備註照 iPhone 只去頭尾空白（換行不去）；其餘照 Mac 1
         var out: [String: Any?] = [:]
         let cat = verdict.canEdit(.category) ? draft.expenseCategory : (e.variableCategory ?? draft.expenseCategory)
         if verdict.canEdit(.title) {
-            var t = draft.title.trimmingCharacters(in: .whitespacesAndNewlines)
+            var t = draft.title.trimmingCharacters(in: .whitespaces)
             if t.isEmpty { t = cat.rawValue }                      // AddExpenseView.swift:4038-4041
             if t != e.title { out.updateValue(t, forKey: "title") }
         }
@@ -172,8 +215,9 @@ enum MacEntryRules {
         if verdict.canEdit(.category), e.variableCategory != draft.expenseCategory {
             out.updateValue(draft.expenseCategory.rawValue, forKey: "variableCategory")
         }
-        if verdict.canEdit(.note), draft.note != e.note {
-            out.updateValue(draft.note, forKey: "note")
+        if verdict.canEdit(.note) {
+            let n = draft.note.trimmingCharacters(in: .whitespaces)
+            if n != e.note { out.updateValue(n, forKey: "note") }
         }
         return (out, nil)
     }

@@ -2,6 +2,8 @@
 // [v25.640 mac1] 右邊的詳情（brief.md §G2-8、judge_mac.md §F1、§O6）：選到的那一筆。
 // 金額、分類（categoryName）、日期、備註、付款（只寫「信用卡／銀行／不指定」，不顯示卡號、帳號）；
 // 下面放 G3 的 MacInspectorEditSection(ref:)（每欄能不能改＋原因、〔編輯〕〔刪除〕）。
+// [v25.642 mac3] 變動支出：分類寫細項說法（「汽車 - 罰款」）、付款跟表格同一支字（MacVariableTable.payText），
+// 多地點、同行、收受人、禮金種類、節稅項目、旅行、照片幾列（有才列、只看）。同行、收受人的字不能選取拷貝。
 
 import SwiftUI
 
@@ -102,14 +104,70 @@ fileprivate enum MacInspectorRows {
             rows.append(MacInspectorRow(label: "記的幣別", value: e.currencyCode))
         }
         rows.append(MacInspectorRow(label: "類型", value: typeText(e)))
-        rows.append(MacInspectorRow(label: "分類", value: e.categoryName))
+        // [v25.642 mac3] 變動支出寫細項說法；固定支出照舊 categoryName（細項推的規則 Mac 4 再補）
+        let category = e.expenseType == .variable ? e.macDisplayCategoryName(kinds: money.kindIndex) : e.categoryName
+        rows.append(MacInspectorRow(label: "分類", value: category))
         rows.append(MacInspectorRow(label: e.expenseType == .fixed ? "起始日" : "日期", value: dateText(e)))
         if e.expenseType == .fixed, let end = e.endDate {
             rows.append(MacInspectorRow(label: "結束日", value: MacText.fullDay(end)))
         }
-        rows.append(MacInspectorRow(label: "付款", value: paymentText(e)))
+        // [v25.642 mac3] 付款跟變動支出表格同一支字（「信用卡」「銀行」「銀行・USD」）
+        rows.append(MacInspectorRow(label: "付款", value: MacVariableTable.payText(e, empty: "不指定")))
+        if e.expenseType == .variable {
+            rows += variableRows(e)
+        }
         rows.append(MacInspectorRow(label: "備註", value: e.note.isEmpty ? "—" : e.note))
         return rows
+    }
+
+    /// [v25.642 mac3] 變動支出多的幾列（有才列；都只能看，改請在 iPhone）
+    private static func variableRows(_ e: Expense) -> [MacInspectorRow] {
+        var rows: [MacInspectorRow] = []
+        if let place = placeText(e) {
+            rows.append(MacInspectorRow(label: "地點", value: place))
+        }
+        if let member = filled(e.diningMember) {
+            rows.append(MacInspectorRow(label: "同行", value: member))
+        }
+        // 收受人、禮金種類只在社交、節稅項目只在節稅才列（換過分類留下的舊欄位不列；同 Expense.categoryName 的判斷）
+        if e.variableCategory == .social, let recipient = filled(e.socialRecipient) {
+            rows.append(MacInspectorRow(label: "收受人", value: recipient))
+        }
+        if e.variableCategory == .social, let gift = e.socialSubCategory {
+            rows.append(MacInspectorRow(label: "禮金種類", value: gift.rawValue))
+        }
+        if e.variableCategory == .taxSaving, let item = e.taxSavingSubCategory {
+            rows.append(MacInspectorRow(label: "節稅項目", value: item.rawValue))
+        }
+        if e.linkedTripPlanId != nil {
+            rows.append(MacInspectorRow(label: "旅行", value: "連著旅行"))
+        }
+        if !e.photoFileNames.isEmpty {
+            rows.append(MacInspectorRow(label: "照片", value: "\(e.photoFileNames.count) 張（請在 iPhone 看）"))
+        }
+        return rows
+    }
+
+    /// 地點：名稱＋地址（只有一個就寫那一個；一樣只寫一次）
+    private static func placeText(_ e: Expense) -> String? {
+        let name = filled(e.placeName)
+        let address = filled(e.placeAddress)
+        switch (name, address) {
+        case let (n?, a?):
+            return n == a ? n : n + "（" + a + "）"
+        case let (n?, nil):
+            return n
+        case let (nil, a?):
+            return a
+        case (nil, nil):
+            return nil
+        }
+    }
+
+    /// 去頭尾空白後非空才算有
+    private static func filled(_ s: String?) -> String? {
+        guard let t = s?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty else { return nil }
+        return t
     }
 
     static func income(_ i: Income) -> [MacInspectorRow] {
@@ -140,13 +198,6 @@ fileprivate enum MacInspectorRows {
 
     private static func dateText(_ e: Expense) -> String {
         e.expenseType == .variable ? MacText.fullDayTime(e.date) : MacText.fullDay(e.date)
-    }
-
-    /// 只寫哪一種，不顯示卡號、帳號（judge_mac.md §O7）
-    private static func paymentText(_ e: Expense) -> String {
-        if e.linkedCreditCardMilestoneId != nil { return "信用卡" }
-        if e.linkedBankMilestoneId != nil { return "銀行" }
-        return "不指定"
     }
 
     /// 「2026/12/31（離職）」；沒有原因只寫日期
