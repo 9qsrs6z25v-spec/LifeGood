@@ -58,6 +58,9 @@ enum MacPage: String, Hashable, CaseIterable {
     /// 開放的頁（其他頁側欄反灰、標「下一版」、不能選）。[v25.641 mac2] 加收入
     var isOpen: Bool { self == .overview || self == .income || self == .source }
 
+    /// [v25.642 mac3] 這一頁有搜尋框（⌘F 反灰用）。總設計先放：G2 改成含 .variable
+    var hasSearch: Bool { self == .income }
+
     /// [v25.641 mac2] 視窗標題（總覽「收支總覽」；其他頁＝title）。總設計先放：G2 的 MacShell 用
     var navTitle: String {
         switch self {

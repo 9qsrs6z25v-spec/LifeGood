@@ -122,6 +122,8 @@ final class MacMoneyStore: ObservableObject {
     @Published private(set) var incomes: [Income] = []
     @Published private(set) var rates: [CurrencyRate] = []
     @Published private(set) var splitIndex: MacSplitIndex = .empty
+    /// [v25.642 mac3] 細項 Lite（只顯示「汽車 - 罰款」；總設計先放：G3 接線、G2 讀）
+    @Published private(set) var kindIndex: MacKindIndex = .empty
     /// 每個鍵剛抓到的樣子（5 個讀的鍵；雲端沒有＝record nil）
     @Published private(set) var records: [String: MacKVRecord] = [:]
     /// 每個鍵有幾筆（JSONSerialization 數陣列；分帳數 splits、細項數 tags）；解不開＝沒有值

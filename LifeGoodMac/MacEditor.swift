@@ -247,6 +247,14 @@ final class MacEditCenter: ObservableObject {
         writeEnabled && verdict(ref) != nil && deleteReason(ref) == nil
     }
 
+    // [v25.642 mac3] ⌘D 複製成新的一筆（總設計先放骨架：G1 寫內容、G2 的右鍵選單叫；簽名不准改）
+
+    /// 先跳確認框（打開那一刻定下 id、now），〔複製〕才寫
+    func requestDuplicate(_ ref: MacEntryRef) {}
+
+    /// 選單、右鍵、詳情鈕反灰用（骨架回 false＝全部反灰）
+    func canDuplicate(_ ref: MacEntryRef) -> Bool { false }
+
     // MARK: 開表單（先重抓；那筆不在就不開）
 
     func newExpense() { openNew(income: false) }

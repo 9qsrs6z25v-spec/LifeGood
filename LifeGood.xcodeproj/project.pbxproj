@@ -460,6 +460,10 @@
 		A01B000005000013 /* MacIncomePage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000013 /* MacIncomePage.swift */; };
 		A01B000005000014 /* MacIncomeChart.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000014 /* MacIncomeChart.swift */; };
 		A01B000005000015 /* MacSnapshotCache.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000015 /* MacSnapshotCache.swift */; };
+		A01B000005000016 /* MacKindLite.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000016 /* MacKindLite.swift */; };
+		A01B000005000017 /* MacVariableBoard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000017 /* MacVariableBoard.swift */; };
+		A01B000005000018 /* MacVariablePage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000018 /* MacVariablePage.swift */; };
+		A01B000005000019 /* MacVariableCells.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000019 /* MacVariableCells.swift */; };
 		A01B000005000004 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A01A000005000004 /* Assets.xcassets */; };
 		A01B000005000050 /* Expense.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000002 /* Expense.swift */; };
 		A01B000005000051 /* Income.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100001B /* Income.swift */; };
@@ -976,6 +980,10 @@
 		A01A000005000013 /* MacIncomePage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacIncomePage.swift; sourceTree = "<group>"; };
 		A01A000005000014 /* MacIncomeChart.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacIncomeChart.swift; sourceTree = "<group>"; };
 		A01A000005000015 /* MacSnapshotCache.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacSnapshotCache.swift; sourceTree = "<group>"; };
+		A01A000005000016 /* MacKindLite.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacKindLite.swift; sourceTree = "<group>"; };
+		A01A000005000017 /* MacVariableBoard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacVariableBoard.swift; sourceTree = "<group>"; };
+		A01A000005000018 /* MacVariablePage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacVariablePage.swift; sourceTree = "<group>"; };
+		A01A000005000019 /* MacVariableCells.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacVariableCells.swift; sourceTree = "<group>"; };
 		A01A000005000003 /* LifeGoodMac.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LifeGoodMac.entitlements; sourceTree = "<group>"; };
 		A01A000005000004 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -1546,6 +1554,10 @@
 				A01A000005000013 /* MacIncomePage.swift */,
 				A01A000005000014 /* MacIncomeChart.swift */,
 				A01A000005000015 /* MacSnapshotCache.swift */,
+				A01A000005000016 /* MacKindLite.swift */,
+				A01A000005000017 /* MacVariableBoard.swift */,
+				A01A000005000018 /* MacVariablePage.swift */,
+				A01A000005000019 /* MacVariableCells.swift */,
 				A01A000005000004 /* Assets.xcassets */,
 				A01A000005000003 /* LifeGoodMac.entitlements */,
 			);
@@ -2218,6 +2230,10 @@
 				A01B000005000013 /* MacIncomePage.swift in Sources */,
 				A01B000005000014 /* MacIncomeChart.swift in Sources */,
 				A01B000005000015 /* MacSnapshotCache.swift in Sources */,
+				A01B000005000016 /* MacKindLite.swift in Sources */,
+				A01B000005000017 /* MacVariableBoard.swift in Sources */,
+				A01B000005000018 /* MacVariablePage.swift in Sources */,
+				A01B000005000019 /* MacVariableCells.swift in Sources */,
 				A01B000005000050 /* Expense.swift in Sources */,
 				A01B000005000051 /* Income.swift in Sources */,
 				A01B000005000052 /* WidgetMoneyFormat.swift in Sources */,
