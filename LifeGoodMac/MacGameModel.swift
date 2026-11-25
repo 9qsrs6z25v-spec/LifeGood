@@ -97,6 +97,8 @@ final class MacGameModel: ObservableObject {
     private var justEnabled = false
     /// 第一次打開那行字（記憶體，這次開 App 才顯示）
     private var backfillNote: String? = nil
+    /// 那行字是哪個帳號的（換帳號就清掉，不把上一個帳號的徽章數帶過去）
+    private var noteHash: String? = nil
     /// 一天最多跳一次（記憶體，不存；★5）
     private var lastBounceDay: Date? = nil
     /// 上次算的那天 00:00（計時器跨午夜才重算）
@@ -169,6 +171,10 @@ final class MacGameModel: ObservableObject {
         guard let h = money.accountHash, Self.isAccountHash(h) else {
             snapshot = .empty
             return
+        }
+        if h != noteHash {
+            backfillNote = nil
+            noteHash = h
         }
         let key = "mac.game.state." + h
         let facts = compute(now: now, calendar: cal)
