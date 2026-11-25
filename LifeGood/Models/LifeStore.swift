@@ -85,6 +85,8 @@ class LifeStore: ObservableObject {
     /// [v25.590 轉組織 v1a-1 驗證] 一改就重設 OrgMoveIndex.equipmentOwners（「還有沒有待分派」照機台現在的負責人算）。
     /// 要退回這一件：didSet 拿掉 `OrgMoveIndex.setEquipmentOwners(equipmentPool); `
     @Published var equipmentPool: [ManagedEquipment] = [] { didSet { OrgMoveIndex.setEquipmentOwners(equipmentPool); if !isLoading { save() } } }
+    /// [v25.643] 機台停用（EquipmentStatus，檔尾；鍵 life_equipment_status_v1）。要退回：刪這個屬性與 ownedKeys、reloadFromCloud、save、load、清除全部資料、createTasksForNewAlarms 裡標 [v25.643] 的那幾行，以及檔尾那一段
+    @Published var equipmentStatus: [EquipmentStatus] = [] { didSet { if !isLoading { save() } } }
 
     /// [v25.553] 只放記憶體的遞增數字：workouts、workoutPrefs、healthProfile 一改就加一（不存檔、不發通知；
     /// 那三個本身是 @Published，畫面會重畫，重畫時讀到新的數字，.task(id:) 才重算一次）
@@ -10180,5 +10182,89 @@ extension LifeStore {
     func competencyBallotReference(for personId: UUID) -> String? {
         CompetencyMath.ballotReferenceLine(setup: competencySetup, personId: personId,
                                            cells: CompetencyMath.latestCells(competencySessions(of: personId)))
+    }
+}
+
+// MARK: - [v25.643] 機台停用（同步鍵 life_equipment_status_v1）
+
+/// 一台機台的停用狀態（id ＝ ManagedEquipment.id）。存在 LifeStore.equipmentStatus，最上層是陣列；
+/// 跟 iCloud 同步、進完整備份與「職涯」匯出。ManagedEquipment 一個欄位都沒加：還沒更新的 iPhone／iPad 存一次會用自己的欄位清單
+/// 重寫整包機台池、洗掉不認得的欄位；這個鍵它不碰。
+/// 重新啟用不刪這一筆，改 retired = false＋新的 updatedAt（另一台還沒同步的舊「停用」才不會把它長回來）。
+/// 刪機台、複製機台都不動這一包（複製出來是新 id＝使用中；刪掉的留一筆孤兒無害）。
+/// 要退回這一件：刪這一段、LifeStore 裡標 [v25.643] 的那幾行、CloudSyncManager.syncKeys 那一行、UnifiedExport 標 [v25.643] 的那幾行
+struct EquipmentStatus: Codable, Equatable {
+    static let syncKey = "life_equipment_status_v1"
+    var id: UUID
+    var retired: Bool
+    /// 停用那天（當天 0 點）；重新啟用＝nil
+    var retiredAt: Date?
+    /// 寫入一律填；讀到 nil 當 distantPast
+    var updatedAt: Date?
+    /// 以後的版本多加的欄位原樣留著、原樣寫回（這台存一次不會洗掉）
+    var extra: [String: JSONValue]?
+
+    init(id: UUID, retired: Bool, retiredAt: Date?, updatedAt: Date?, extra: [String: JSONValue]? = nil) {
+        self.id = id
+        self.retired = retired
+        self.retiredAt = retiredAt
+        self.updatedAt = updatedAt
+        self.extra = extra
+    }
+}
+
+extension EquipmentStatus {
+    enum CodingKeys: String, CodingKey, CaseIterable {
+        case id, retired, retiredAt, updatedAt
+    }
+    static let knownKeys: Set<String> = Set(CodingKeys.allCases.map { $0.rawValue })
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)          // 解不開＝這一筆丟掉（lossyDecodeArray 逐筆）
+        retired = (try? c.decodeIfPresent(Bool.self, forKey: .retired)) ?? false
+        retiredAt = try? c.decodeIfPresent(Date.self, forKey: .retiredAt)
+        updatedAt = try? c.decodeIfPresent(Date.self, forKey: .updatedAt)
+        extra = CompetencyCoding.readExtra(decoder, known: Self.knownKeys)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        try CompetencyCoding.writeExtra(extra, encoder, known: Self.knownKeys)
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(retired, forKey: .retired)
+        try c.encodeIfPresent(retiredAt, forKey: .retiredAt)
+        try c.encodeIfPresent(updatedAt, forKey: .updatedAt)
+    }
+
+    /// 照 id 合併：同一台取 updatedAt 新的（一樣新留 mine）；只有一邊有就留著（iCloud 增量、備份合併匯入共用）
+    static func merged(_ mine: [EquipmentStatus], _ other: [EquipmentStatus]) -> [EquipmentStatus] {
+        CompetencyCoding.mergeList(mine, other, key: { $0.id }, stamp: { $0.updatedAt ?? .distantPast }) ?? []
+    }
+}
+
+extension LifeStore {
+    /// 停用中的機台 id（畫面一次 body 算一次，拿去 filter）
+    var retiredEquipmentIds: Set<UUID> { Set(equipmentStatus.filter { $0.retired }.map { $0.id }) }
+
+    func isEquipmentRetired(_ id: UUID) -> Bool {
+        equipmentStatus.contains { $0.id == id && $0.retired }
+    }
+
+    /// 停用那天；沒停用（或舊資料沒日期）＝nil
+    func equipmentRetiredAt(_ id: UUID) -> Date? {
+        equipmentStatus.first(where: { $0.id == id && $0.retired })?.retiredAt
+    }
+
+    /// 停用／重新啟用（只在使用者按〔儲存〕、開關或日期有改時呼叫；開 App、同步、背景一律不寫）。一次存檔。
+    func setEquipmentRetired(id: UUID, retired: Bool, at date: Date?, now: Date = Date()) {
+        var entry = equipmentStatus.last(where: { $0.id == id })
+            ?? EquipmentStatus(id: id, retired: false, retiredAt: nil, updatedAt: nil)
+        entry.retired = retired
+        entry.retiredAt = retired ? Calendar.current.startOfDay(for: date ?? now) : nil
+        entry.updatedAt = now
+        var list = equipmentStatus.filter { $0.id != id }
+        list.append(entry)
+        equipmentStatus = list
     }
 }

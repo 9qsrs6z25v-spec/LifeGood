@@ -323,6 +323,101 @@ struct SubordinateEquipmentSection: View {
     }
 }
 
+// MARK: - [v25.643] 已停用的機台（部門所屬設備、執掌設備共用）
+
+/// 清單最下面「已停用（N 台）」：預設收起，點標題展開；點一列開機台詳情卡（重新啟用在詳情卡右上〔編輯〕）。
+/// 沒有停用的機台＝整塊不畫。字串在 ViewBuilder 外組好。
+struct EquipmentRetiredFold: View {
+    @EnvironmentObject var lifeStore: LifeStore
+    let items: [ManagedEquipment]
+    let onOpen: (ManagedEquipment) -> Void
+    @State private var expanded = false
+
+    /// 明確寫出初始化：本型別有 private @State，且被 OrganizationView 跨檔案建立
+    init(items: [ManagedEquipment], onOpen: @escaping (ManagedEquipment) -> Void) {
+        self.items = items
+        self.onOpen = onOpen
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if !items.isEmpty {
+                Rectangle().fill(Color(.separator).opacity(0.20)).frame(height: 0.5)
+                Button {
+                    withAnimation(.easeInOut(duration: 0.2)) { expanded.toggle() }
+                } label: {
+                    HStack(spacing: 8) {
+                        Image(systemName: "nosign")
+                            .font(.system(size: 12, weight: .semibold)).foregroundStyle(.secondary)
+                        Text(Self.title(items.count))
+                            .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                        Spacer()
+                        Image(systemName: expanded ? "chevron.up" : "chevron.down")
+                            .font(.caption2.weight(.semibold)).foregroundStyle(.tertiary)
+                    }
+                    .padding(.horizontal, 14).padding(.vertical, 10)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+                .accessibilityHint(expanded ? "收起已停用的機台" : "展開已停用的機台")
+                if expanded {
+                    ForEach(items) { eq in
+                        EquipmentRetiredRow(name: eq.name.isEmpty ? "未命名設備" : eq.name,
+                                            detail: detailText(eq), onTap: { onOpen(eq) })
+                    }
+                    Spacer().frame(height: 4)
+                }
+            }
+        }
+    }
+
+    static func title(_ n: Int) -> String { "已停用（\(n) 台）" }
+
+    /// 例：CDA・2026/11/20 停用；舊資料沒有日期＝CDA・已停用
+    private func detailText(_ eq: ManagedEquipment) -> String {
+        var parts: [String] = []
+        if !eq.system.isEmpty { parts.append(eq.system) }
+        if let d = lifeStore.equipmentRetiredAt(eq.id) {
+            parts.append(Self.dateFmt.string(from: d) + " 停用")
+        } else {
+            parts.append("已停用")
+        }
+        return parts.joined(separator: "・")
+    }
+
+    private static let dateFmt: DateFormatter = {
+        let f = DateFormatter(); f.locale = Locale(identifier: "zh_Hant_TW"); f.dateFormat = "yyyy/M/d"; return f
+    }()
+}
+
+/// 摺疊區一列：灰字機台名＋右邊「CDA・2026/11/20 停用」＋箭頭
+private struct EquipmentRetiredRow: View {
+    let name: String
+    let detail: String
+    let onTap: () -> Void
+
+    var body: some View {
+        Button(action: onTap) {
+            HStack(spacing: 10) {
+                Image(systemName: "gearshape.2")
+                    .font(.system(size: 13, weight: .medium)).foregroundStyle(.tertiary)
+                    .frame(width: 36)
+                Text(name)
+                    .font(.subheadline).foregroundStyle(.secondary).lineLimit(1)
+                Spacer(minLength: 8)
+                Text(detail)
+                    .font(.caption2).foregroundStyle(.tertiary).lineLimit(1)
+                Image(systemName: "chevron.right")
+                    .font(.caption2.weight(.semibold)).foregroundStyle(.quaternary)
+            }
+            .padding(.horizontal, 14).padding(.vertical, 9)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel(name + "，" + detail)
+    }
+}
+
 // MARK: - PM／警報時間軸章節
 
 struct SubordinateEquipmentTimelineSection: View {
