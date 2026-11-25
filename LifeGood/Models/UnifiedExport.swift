@@ -157,6 +157,8 @@ struct UnifiedExport: Codable {
         var orgMoves: OrgMoveBook?
         /// [v25.598] 轉組織 v5：組織重整、我自己調動（OrgReorgBook）。舊備份沒有，所以是 Optional；跟部屬一起走（完整備份、「職涯」）
         var orgReorgs: OrgReorgBook?
+        /// [v25.643] 機台停用（EquipmentStatus）。舊備份沒有，所以是 Optional；跟機台池一起走（完整備份、「職涯」）
+        var equipmentStatus: [EquipmentStatus]?
         /// [v25.599] 職能雷達 v1a-1：職能項目設定、評分（CompetencySetupBook、CompetencyRatingBook）。舊備份沒有，所以是 Optional；
         /// 跟部屬一起走（完整備份、「職涯」）
         var competencySetup: CompetencySetupBook?
@@ -249,6 +251,8 @@ struct UnifiedExport: Codable {
                 orgMoves: scope.carriesCareer ? life.orgMoves : nil,
                 // [v25.598] 轉組織 v5：組織重整、我自己調動跟部屬一起走（完整備份、「職涯」）
                 orgReorgs: scope.carriesCareer ? life.orgReorgs : nil,
+                // [v25.643] 機台停用跟機台池一起走（完整備份、「職涯」）
+                equipmentStatus: scope.carriesCareer ? life.equipmentStatus : nil,
                 // [v25.599] 職能雷達 v1a-1：職能項目設定、評分跟部屬一起走（完整備份、「職涯」）
                 competencySetup: scope.carriesCareer ? life.competencySetup : nil,
                 competencyRatings: scope.carriesCareer ? life.competencyRatings : nil
@@ -1025,6 +1029,7 @@ enum UnifiedImporter {
                     if let cards = payload.life.businessCards { life.businessCards = cards }
                     if let people = payload.life.orgPeople { life.orgPeople = people }
                     if let pool = payload.life.equipmentPool { life.equipmentPool = pool }
+                    if let es = payload.life.equipmentStatus { life.equipmentStatus = es }   // [v25.643] 舊備份沒有（nil）就不動本機的
                     // 舊格式備份的機台在各部屬身上——覆蓋匯入後立刻搬進機台池
                     life.migrateLegacyEquipmentsToPool()
                 }
@@ -1317,6 +1322,11 @@ enum UnifiedImporter {
                 if let cr = payload.life.competencyRatings {
                     let merged = life.competencyRatings.merged(with: cr)
                     if merged != life.competencyRatings { life.competencyRatings = merged }
+                }
+                // [v25.643] 機台停用：照 id＋updatedAt 合併（同 iCloud）
+                if let es = payload.life.equipmentStatus {
+                    let merged = EquipmentStatus.merged(life.equipmentStatus, es)
+                    if merged != life.equipmentStatus { life.equipmentStatus = merged }
                 }
                 // 舊格式備份的機台上面 appendNewByID 進了部屬的 equipments——搬進機台池
                 life.migrateLegacyEquipmentsToPool()

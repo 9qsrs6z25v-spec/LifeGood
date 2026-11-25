@@ -2340,7 +2340,9 @@ struct SubordinateDetailView: View {
         case .daily: return subordinate.proactivityScore(mentionedCount: mentionedCount, sideRoleDone: sideRoleStat.done, itemDone: itemCredit)
         case .rating: return subordinate.potentialScore
         case .skill: return nil
-        case .duty: return lifeStore.equipmentPool.filter { $0.ownerId == subordinateId }.count
+        case .duty:   // [v25.643] 只算使用中的機台（同執掌分頁標題）
+            let retired = lifeStore.retiredEquipmentIds
+            return lifeStore.equipmentPool.filter { $0.ownerId == subordinateId && !retired.contains($0.id) }.count
         }
     }
 

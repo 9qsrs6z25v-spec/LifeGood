@@ -83,9 +83,13 @@ struct SubordinateEquipmentSection: View {
     var body: some View {
         // 機台存放於共用機台池（機台屬於部門、生老病死跟著機台）；
         // 這裡只列出「這位部屬目前擔任負責人」的機台
-        let equipments = lifeStore.equipmentPool
+        // [v25.643] 停用的機台不算在「執掌設備 N 台」、不列在上面；收進最下面的摺疊區（負責人照留＝最後負責人）
+        let retiredIds = lifeStore.retiredEquipmentIds
+        let mineAll = lifeStore.equipmentPool
             .filter { $0.ownerId == subordinateId }
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
+        let equipments = mineAll.filter { !retiredIds.contains($0.id) }
+        let retiredMine = mineAll.filter { retiredIds.contains($0.id) }
         return VStack(alignment: .leading, spacing: 0) {
             // 段落標題（對齊本頁其他章節規格：漸層側條 + 圖示 + 標題 + 計數 + 新增鈕）
             HStack(spacing: 10) {
@@ -143,6 +147,12 @@ struct SubordinateEquipmentSection: View {
                             .frame(height: 0.5).padding(.leading, 56)
                     }
                 }
+            }
+            // [v25.643] 已停用（N 台）：點一列開詳情卡（訂閱擋法跟上面的列一樣）。出圖時不畫（圖上只放使用中的）
+            if !exportLayout {
+                EquipmentRetiredFold(items: retiredMine, onOpen: { eq in
+                    if subscription.isPremium { editingEquipment = eq } else { showPremiumAlert = true }
+                })
             }
         }
         .background(Color(.systemBackground))
@@ -443,8 +453,10 @@ struct SubordinateEquipmentTimelineSection: View {
 
     private var entries: [TimelineEntry] {
         var result: [TimelineEntry] = []
+        let retiredIds = lifeStore.retiredEquipmentIds   // [v25.643]
         for eq in lifeStore.equipmentPool where eq.ownerId == subordinateId {
-            let name = eq.name.isEmpty ? "未命名設備" : eq.name
+            // [v25.643] 停用的機台歷史照列，名字後面加「（已停用）」
+            let name = (eq.name.isEmpty ? "未命名設備" : eq.name) + (retiredIds.contains(eq.id) ? "（已停用）" : "")
             let pmDates = eq.pmRecords.map(\.date).sorted()
             for pm in eq.pmRecords {
                 result.append(TimelineEntry(id: pm.id, kind: .pm, date: pm.date,
@@ -649,12 +661,21 @@ struct EquipmentEditorSheet: View {
     @State private var isSaving = false
     /// [v25.385] 正在挑上游還是下游
     @State private var linkPicking: EquipmentLinkDirection?
+    /// [v25.643] 停用（存在 LifeStore.equipmentStatus，不在機台上）。打開那一刻的樣子記在 opened*：存檔時跟它比，有改才寫——
+    /// 開著的時候另一台剛停用／重新啟用，這次存檔不會蓋回去（同 openedOwnerId）
+    @State private var retired = false
+    @State private var retiredAt = Date()
+    @State private var openedRetired = false
+    @State private var openedRetiredAt: Date?
+    /// [v25.643] 〔刪除此設備〕先問（以前按了就刪、PM 全沒）
+    @State private var confirmingDelete = false
 
     /// 填寫過的系統別膠囊（全機台池去重、依名稱排序、上限 12）
     private var systemSuggestions: [String] {
         var seen = Set<String>()
         var out: [String] = []
-        for s in lifeStore.equipmentPool.map({ $0.system.trimmingCharacters(in: .whitespaces) })
+        let retiredIds = lifeStore.retiredEquipmentIds   // [v25.643] 全部停用的系統別不再冒出來
+        for s in lifeStore.equipmentPool.filter({ !retiredIds.contains($0.id) }).map({ $0.system.trimmingCharacters(in: .whitespaces) })
         where !s.isEmpty && !seen.contains(s) {
             seen.insert(s); out.append(s)
         }
@@ -716,6 +737,20 @@ struct EquipmentEditorSheet: View {
             Image(systemName: icon)
                 .font(.system(size: 11, weight: .semibold)).foregroundStyle(tint)
             Text(title).font(.subheadline.weight(.bold))
+        }
+    }
+
+    /// [v25.643] 「狀態」一節：停用開關＋停用日期（只到天、不能選未來）。拆出來放：body 已經很長，少給型別檢查一段
+    private var retireSection: some View {
+        Section {
+            Toggle("已停用", isOn: $retired.animation(.easeInOut(duration: 0.2)))
+            if retired {
+                DatePicker("停用日期", selection: $retiredAt, in: ...Date(), displayedComponents: .date)
+            }
+        } header: {
+            editorSectionHeader("狀態", icon: "nosign", tint: Color(.systemGray))
+        } footer: {
+            Text(Self.retireFootnote)
         }
     }
 
@@ -893,8 +928,9 @@ struct EquipmentEditorSheet: View {
                 }
 
                 if editing != nil {
+                    retireSection   // [v25.643] 停用：按〔儲存〕才寫（照組織人員「已離職」那一節）
                     Section {
-                        Button(role: .destructive) { deleteEquipment() } label: {
+                        Button(role: .destructive) { confirmingDelete = true } label: {   // [v25.643] 先問
                             Label("刪除此設備", systemImage: "trash")
                         }
                     }
@@ -922,6 +958,8 @@ struct EquipmentEditorSheet: View {
                     name = e.name; note = e.note; system = e.system
                     departmentId = e.departmentId; ownerId = e.ownerId
                     openedOwnerId = e.ownerId   // [v25.589 轉組織 v0b③] 存檔時跟這個比（見 openedOwnerId）
+                    retired = lifeStore.isEquipmentRetired(e.id); openedRetired = retired   // [v25.643]
+                    openedRetiredAt = lifeStore.equipmentRetiredAt(e.id); retiredAt = openedRetiredAt ?? Date()
                     pmRecords = e.pmRecords.sorted { $0.date > $1.date }
                     alarms = e.alarms.sorted { $0.date > $1.date }
                 } else if let src = duplicating {
@@ -944,6 +982,18 @@ struct EquipmentEditorSheet: View {
                     }
                 }
                 .appStores()
+            }
+            // [v25.643] 刪除先問；使用中的機台多一顆〔改成停用〕（只把上面「已停用」打開，按〔儲存〕才生效）
+            .alert(Self.deleteTitle(name), isPresented: $confirmingDelete) {
+                if !retired {
+                    Button("改成停用") {
+                        withAnimation(.easeInOut(duration: 0.2)) { retired = true }
+                    }
+                }
+                Button(retired ? "刪除" : "仍要刪除", role: .destructive) { deleteEquipment() }
+                Button("取消", role: .cancel) {}
+            } message: {
+                Text(Self.deleteMessage(retired: retired))
             }
         }
     }
@@ -1077,6 +1127,10 @@ struct EquipmentEditorSheet: View {
         if ownerEdited {
             lifeStore.assignEquipmentOwner(equipmentId: id, ownerId: ownerId, carryOpenAlarmTasks: true)
         }
+        // [v25.643] 停用：開關或停用日期跟打開那一刻不一樣才寫（先寫：停用的機台，這次新加的警報下一行不會掛任務）
+        if editing != nil, Self.retireChanged(opened: openedRetired, openedAt: openedRetiredAt, now: retired, at: retiredAt) {
+            lifeStore.setEquipmentRetired(id: id, retired: retired, at: retiredAt)
+        }
         // [v25.589 轉組織 v0b③] 新警報掛給換過之後的負責人（store 現在那一台；查不到才用表單組的）
         lifeStore.createTasksForNewAlarms(equipment: lifeStore.equipment(id: id) ?? eq, newAlarms: newAlarms)
         dismiss()
@@ -1091,6 +1145,30 @@ struct EquipmentEditorSheet: View {
         guard isEditing else { return formOwnerId }
         if let live { return live.ownerId }
         return openedOwnerId
+    }
+
+    /// [v25.643] 停用要不要寫：開關變了；或一樣是停用、但停用日期換了一天
+    private static func retireChanged(opened: Bool, openedAt: Date?, now: Bool, at: Date) -> Bool {
+        if opened != now { return true }
+        guard now, let openedAt else { return false }
+        return !Calendar.current.isDate(openedAt, inSameDayAs: at)
+    }
+
+    private static let retireFootnote =
+        "停用的機台收在部門頁、執掌頁最下面的「已停用」，不會出現在挑選清單；"
+        + "PM、警報、任務、上下游都留著，負責人也不變。停用期間新增的警報不會自動掛任務。"
+        + "要重新啟用就把開關關掉。按〔儲存〕才會生效。"
+
+    /// [v25.643] 刪除確認的字（在 ViewBuilder 外組好）
+    private static func deleteTitle(_ name: String) -> String {
+        let n = name.trimmingCharacters(in: .whitespaces)
+        return n.isEmpty ? "刪掉這台機台？" : "刪掉「\(n)」？"
+    }
+
+    private static func deleteMessage(retired: Bool) -> String {
+        retired
+            ? "PM、警報紀錄會一起刪掉，不能復原。"
+            : "PM、警報紀錄會一起刪掉，不能復原。只是不用了的話，可以改成停用：紀錄都留著，按〔儲存〕就生效，隨時可以重新啟用。"
     }
 
     /// [v25.390] 複製模式：把來源機台的上下游關係也複製一份到新機台上。
@@ -1135,7 +1213,10 @@ struct EquipmentClaimPicker: View {
     /// 依部門分組（依部門名排序，未指定部門排最後），組內依機台名排序
     private var grouped: [(deptName: String, items: [ManagedEquipment])] {
         let q = query.trimmingCharacters(in: .whitespaces)
+        let retiredIds = lifeStore.retiredEquipmentIds   // [v25.643]
         let pool = lifeStore.equipmentPool
+            // [v25.643] 停用的不能被接手；這位名下的停用機台照列（點一下＝釋回）
+            .filter { !retiredIds.contains($0.id) || $0.ownerId == subordinateId }
             .filter { q.isEmpty || $0.name.localizedCaseInsensitiveContains(q)
                 || $0.note.localizedCaseInsensitiveContains(q)
                 || $0.system.localizedCaseInsensitiveContains(q) }
@@ -1161,6 +1242,12 @@ struct EquipmentClaimPicker: View {
         return n.isEmpty ? "未命名" : n
     }
 
+    /// [v25.643] 空狀態的字（在 ViewBuilder 外組好）
+    private var emptyText: String {
+        guard query.isEmpty else { return "找不到符合的機台" }
+        return lifeStore.equipmentPool.isEmpty ? "機台池是空的，先在部門頁或執掌頁新增機台" : "沒有可以選的機台（已停用的不列）"
+    }
+
     var body: some View {
         NavigationStack {
             List {
@@ -1172,7 +1259,7 @@ struct EquipmentClaimPicker: View {
                         HStack(spacing: 6) {
                             Spacer()
                             Image(systemName: "gearshape.2").font(.caption).foregroundStyle(.tertiary)
-                            Text(query.isEmpty ? "機台池是空的，先在部門頁或執掌頁新增機台" : "找不到符合的機台")
+                            Text(emptyText)
                                 .font(.caption).foregroundStyle(.secondary)
                             Spacer()
                         }
@@ -1197,6 +1284,8 @@ struct EquipmentClaimPicker: View {
 
     private func claimRow(_ eq: ManagedEquipment) -> some View {
         let mine = eq.ownerId == subordinateId
+        // [v25.643] 這位名下的停用機台：名字後面寫（已停用）
+        let shown = (eq.name.isEmpty ? "未命名設備" : eq.name) + (lifeStore.isEquipmentRetired(eq.id) ? "（已停用）" : "")
         return Button {
             // 點選接手／釋回：立即寫回（只改負責人欄位，機台記錄不動）
             // [v25.589 轉組織 v0b③] 接手時這台在原負責人身上還沒處理完的警報任務一起過來（一次存檔）；
@@ -1210,7 +1299,7 @@ struct EquipmentClaimPicker: View {
                     .foregroundStyle(mine ? Color.teal : Color(.systemGray3))
                 VStack(alignment: .leading, spacing: 2) {
                     // [v25.520] 機台名放不下就跑馬燈（原本折行）
-                    MarqueeText(eq.name.isEmpty ? "未命名設備" : eq.name)
+                    MarqueeText(shown)
                         .font(.subheadline.weight(.medium)).foregroundStyle(.primary)
                     HStack(spacing: 6) {
                         Text("PM \(eq.pmRecords.count)・警報 \(eq.alarms.count)")
@@ -1562,6 +1651,11 @@ struct EquipmentDetailCard: View {
         }
         chips.append(ownerName.map { HeroChip(text: "負責人 \($0)", icon: "person.fill", colorTag: 2) }
                      ?? HeroChip(text: "未指派負責人", icon: "person.slash", colorTag: 3))
+        // [v25.643] 停用的機台：最前面一顆灰色「已停用 2026/11/20」（重新啟用：右上〔編輯〕把開關關掉）
+        if lifeStore.isEquipmentRetired(eq.id) {
+            let day = lifeStore.equipmentRetiredAt(eq.id).map { " " + Self.dateFmt.string(from: $0) } ?? ""
+            chips.insert(HeroChip(text: "已停用" + day, icon: "nosign", colorTag: 3), at: 0)
+        }
         return chips
     }
 
@@ -2322,6 +2416,7 @@ struct EquipmentRelationCard: View {
 
     private func metaLine(_ eq: ManagedEquipment) -> String {
         var parts: [String] = []
+        if lifeStore.isEquipmentRetired(eq.id) { parts.append("已停用") }   // [v25.643]
         if !eq.system.isEmpty { parts.append(eq.system) }
         if let did = eq.departmentId,
            let d = lifeStore.departments.first(where: { $0.id == did }) {
@@ -2373,7 +2468,8 @@ struct EquipmentLinkPicker: View {
     }
 
     private var candidates: [ManagedEquipment] {
-        let all = lifeStore.equipmentLinkCandidates(for: equipmentId)
+        let retiredIds = lifeStore.retiredEquipmentIds
+        let all = lifeStore.equipmentLinkCandidates(for: equipmentId).filter { !retiredIds.contains($0.id) }   // [v25.643] 停用的不能被新連
         let q = query.trimmingCharacters(in: .whitespaces).lowercased()
         guard !q.isEmpty else { return all }
         return all.filter {
@@ -2890,7 +2986,8 @@ struct EquipmentLinkField: View {
     private func chip(_ id: UUID) -> some View {
         // 名稱現撈；機台被刪時 chosen 已經濾掉，這裡的 fallback 只是保險
         let raw = lifeStore.equipment(id: id)?.name.trimmingCharacters(in: .whitespaces) ?? ""
-        let name = raw.isEmpty ? "未命名設備" : raw
+        // [v25.643] 已經連著的停用機台照列，名字後面寫（已停用）
+        let name = (raw.isEmpty ? "未命名設備" : raw) + (lifeStore.isEquipmentRetired(id) ? "（已停用）" : "")
         return Button {
             selection.removeAll { $0 == id }
         } label: {
@@ -2919,10 +3016,13 @@ struct EquipmentMultiPicker: View {
     var preferredOwnerId: UUID?
 
     @State private var query = ""
+    /// [v25.643] 打開那一刻已經選著的（停用的也照列，才能取消；存一次不會掉）
+    @State private var keptIds: Set<UUID>
 
     init(selection: Binding<[UUID]>, preferredOwnerId: UUID? = nil) {
         self._selection = selection
         self.preferredOwnerId = preferredOwnerId
+        self._keptIds = State(initialValue: Set(selection.wrappedValue))
     }
 
     private func matches(_ eq: ManagedEquipment) -> Bool {
@@ -2940,14 +3040,21 @@ struct EquipmentMultiPicker: View {
         }
     }
 
+    /// [v25.643] 停用的機台只列打開時已經選著的
+    private func pickable(_ eq: ManagedEquipment, _ retired: Set<UUID>) -> Bool {
+        !retired.contains(eq.id) || keptIds.contains(eq.id)
+    }
+
     private var mine: [ManagedEquipment] {
         guard let oid = preferredOwnerId else { return [] }
-        return lifeStore.equipmentPool.filter { $0.ownerId == oid && matches($0) }.sorted(by: byName)
+        let retired = lifeStore.retiredEquipmentIds   // [v25.643] 停用的只列打開時已經選著的
+        return lifeStore.equipmentPool.filter { $0.ownerId == oid && matches($0) && pickable($0, retired) }.sorted(by: byName)
     }
 
     private var others: [ManagedEquipment] {
-        lifeStore.equipmentPool
-            .filter { $0.ownerId != preferredOwnerId && matches($0) }
+        let retired = lifeStore.retiredEquipmentIds   // [v25.643]
+        return lifeStore.equipmentPool
+            .filter { $0.ownerId != preferredOwnerId && matches($0) && pickable($0, retired) }
             .sorted(by: byName)
     }
 
@@ -3013,6 +3120,7 @@ struct EquipmentMultiPicker: View {
     /// 字串在 ViewBuilder 外組好
     private func pickerMeta(_ eq: ManagedEquipment) -> String {
         var parts: [String] = []
+        if lifeStore.isEquipmentRetired(eq.id) { parts.append("已停用") }   // [v25.643]
         if !eq.system.isEmpty { parts.append(eq.system) }
         if let did = eq.departmentId,
            let d = lifeStore.departments.first(where: { $0.id == did }) {

@@ -79,6 +79,9 @@ final class CloudSyncManager: ObservableObject {
         // 部屬身上一個欄位都沒加。收到增量更新時 LifeStore.reloadFromCloud 照 id 合併（評分同一張逐格），第一次同步〔合併〕見 resolveInitialSync
         "life_competency_setup_v1",
         "life_competency_ratings_v1",
+        // [v25.643] 機台停用（EquipmentStatus，LifeStore.swift 檔尾；單獨一個鍵：還沒更新的 iPhone／iPad 不認得、不會碰。ManagedEquipment 一個欄位都沒加。
+        // 收到增量更新時 LifeStore.reloadFromCloud 照 id＋updatedAt 合併；最上層是陣列，第一次同步〔合併〕走 mergeBlob 照 id 合）
+        EquipmentStatus.syncKey,
         // [v25.568] 給網頁版的財富數字（WealthWebFacts：App 算好寫的，網頁版照讀；App 自己不讀。只有合計、暱稱、後 4 碼，沒有完整號碼、有效期限）
         "life_wealth_facts_v1",
         // 股票每週市值快照（英雄卡背景折線）：同步安全性依賴「先拉後推」順序——

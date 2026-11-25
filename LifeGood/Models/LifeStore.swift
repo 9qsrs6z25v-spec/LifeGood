@@ -124,6 +124,8 @@ class LifeStore: ObservableObject {
         "life_org_moves_v1",
         // [v25.598] 轉組織 v5：組織重整、我自己調動（OrgReorgBook.syncKey）
         "life_org_reorgs_v1",
+        // [v25.643] 機台停用（EquipmentStatus.syncKey）
+        EquipmentStatus.syncKey,
         // [v25.599] 職能雷達 v1a-1：職能項目設定、評分（CompetencySetupBook.syncKey、CompetencyRatingBook.syncKey）
         "life_competency_setup_v1", "life_competency_ratings_v1"
     ]
@@ -194,6 +196,9 @@ class LifeStore: ObservableObject {
         let compSetupBefore = competencySetup
         let compRatingsKeyTouched = (note.userInfo?["keys"] as? [String])?.contains(CompetencyRatingBook.syncKey) ?? false
         let compRatingsBefore = competencyRatings
+        // [v25.643] 機台停用：照 id＋updatedAt 各取後改的（兩台各停用各的，兩筆都要留得住）
+        let equipStatusKeyTouched = (note.userInfo?["keys"] as? [String])?.contains(EquipmentStatus.syncKey) ?? false
+        let equipStatusBefore = equipmentStatus
         // [v25.593 轉組織 v2 驗證] 拉下來之後「誰是已轉出」變了（另一台套用、復原、回到我的部屬）就照在職的重排會議通知：
         // load()／合併都在 isLoading 裡，orgMoves 的 didSet 不會排（brief §1-11「iCloud 合併」那一條原本走不到）。
         // 要退回這一件：刪這一行與檔尾那個 if
@@ -263,9 +268,19 @@ class LifeStore: ObservableObject {
                 didCompetency = true
             }
         }
+        // [v25.643] 機台停用：雲端那份併上本機剛才那份（照 id 取 updatedAt 新的）；合出來不一樣（本機有它沒有的）就存回去、推上去
+        var didEquipStatus = false
+        if equipStatusKeyTouched {
+            let merged = EquipmentStatus.merged(equipmentStatus, equipStatusBefore)
+            if merged != equipmentStatus {
+                equipmentStatus = merged
+                didEquipStatus = true
+            }
+        }
         // 若 backfill 新建了 OrgPerson/BusinessCard 或修復了成員連結，立即持久化避免重啟後消失
         let didGrades = autoRelinkMissingGradeTitles()   // [v25.594] 別台加回刪掉的職等：這台也接回去
         if didBackfill || didRepair || didMigrateEq || didSerial || didVault || didTransfers || didHandoffs || didMoves || didReorgs || didCompetency || didGrades { save() }
+        if didEquipStatus { save() }   // [v25.643]（上一行不改：LifeStore 只准加行；兩個都成立時多存一次無害）
         // [v25.593 轉組織 v2 驗證] 已轉出的人變了：會議通知照在職的重排（rebuildAll 裡再濾一次；通知字一個都沒加）
         if OrgMoveIndex.archived != archivedBefore { rebuildMeetingReminders() }
         // [v25.454] 比對拉取前後的旅遊規劃，把別台裝置新增的行程／景點／攜帶物品／
@@ -4650,6 +4665,7 @@ class LifeStore: ObservableObject {
     /// 呼叫端（EquipmentEditorSheet.save）本來就在主執行緒。
     @MainActor
     func createTasksForNewAlarms(equipment: ManagedEquipment, newAlarms: [EquipmentAlarm]) {
+        if isEquipmentRetired(equipment.id) { return }   // [v25.643] 停用的機台新增警報不掛任務（補登歷史用）
         guard let ownerId = equipment.ownerId, !newAlarms.isEmpty,
               let si = subordinates.firstIndex(where: { $0.id == ownerId }) else { return }
         let linkedAlarmIds = Set(subordinates.flatMap(\.tasks).compactMap { $0.equipmentLink?.alarmId })
@@ -8835,6 +8851,7 @@ class LifeStore: ObservableObject {
             orgMoves: orgMoves,
             orgReorgs: orgReorgs,   // [v25.598] 轉組織 v5
             competencySetup: competencySetup,       // [v25.599] 職能雷達 v1a-1
+            equipmentStatus: equipmentStatus,      // [v25.643] 機台停用
             competencyRatings: competencyRatings    // [v25.599] 職能雷達 v1a-1
         )
         saveQueue.async {
@@ -8871,6 +8888,9 @@ class LifeStore: ObservableObject {
             if let d = try? encoder.encode(snap.orgReorgs)      { ud.set(d, forKey: OrgReorgBook.syncKey) }   // [v25.598] 轉組織 v5
             if let d = try? encoder.encode(snap.competencySetup)   { ud.set(d, forKey: CompetencySetupBook.syncKey) }    // [v25.599] 職能雷達 v1a-1
             if let d = try? encoder.encode(snap.competencyRatings) { ud.set(d, forKey: CompetencyRatingBook.syncKey) }   // [v25.599] 職能雷達 v1a-1
+            // [v25.643] 機台停用：空的、而且這台從來沒有這個鍵就不寫——剛升級、還沒拉到別台的停用時，不推一個空陣列上去
+            if !snap.equipmentStatus.isEmpty || ud.object(forKey: EquipmentStatus.syncKey) != nil,
+               let d = try? encoder.encode(snap.equipmentStatus) { ud.set(d, forKey: EquipmentStatus.syncKey) }
             CloudSyncManager.shared.pushAll()
         }
     }
@@ -8965,6 +8985,10 @@ class LifeStore: ObservableObject {
            let cr = try? decoder.decode(CompetencyRatingBook.self, from: data) {
             competencyRatings = cr
         }
+        // [v25.643] 機台停用（逐筆容錯：壞一筆只丟那筆）
+        if let es = lossyDecodeArray([EquipmentStatus].self, key: EquipmentStatus.syncKey, decoder: decoder) {
+            equipmentStatus = es
+        }
     }
 
     /// 讀取 key 目前在 UserDefaults 的原始 Data；若與上次成功套用的內容完全相同則回傳 nil，
@@ -9052,6 +9076,7 @@ class LifeStore: ObservableObject {
         orgReorgs = OrgReorgBook()       // [v25.598] 轉組織 v5
         competencySetup = CompetencySetupBook()     // [v25.599] 職能雷達 v1a-1
         competencyRatings = CompetencyRatingBook()  // [v25.599] 職能雷達 v1a-1
+        equipmentStatus = []   // [v25.643] 機台停用
         OrgMoveReminderLater.clearAll()  // [v25.596] 轉組織 v3：自動套用時沒動的提醒事項（只在這台）
         FriendSuggestMemory.clearAll()  // [v25.636] 朋友頁建議卡「不要再提」的名字（只在這台）
         companySites.removeAll()

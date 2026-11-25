@@ -1243,14 +1243,22 @@ struct DepartmentDetailView: View {
     /// 部門所屬設備（機台池中 departmentId 為本部門者）。機台屬於部門、
     /// 生老病死（PM／警報）跟著機台；點列開機台詳情卡片，點負責人／系統膠囊暫時篩選。
     private var equipmentSection: some View {
-        let all = lifeStore.equipmentPool
+        // [v25.643] 停用的不跟使用中的混在一起：上面（含上下游樹、台數）只算使用中的；停用的收進最下面的摺疊區
+        let retiredIds = lifeStore.retiredEquipmentIds
+        let inDept = lifeStore.equipmentPool
             .filter { $0.departmentId == deptId }
             .sorted { $0.name.localizedStandardCompare($1.name) == .orderedAscending }
-        let equipments = all.filter { eq in
+        let passes: (ManagedEquipment) -> Bool = { eq in
             if let oid = eqFilterOwnerId, eq.ownerId != oid { return false }
             if let sys = eqFilterSystem, eq.system != sys { return false }
             return true
         }
+        let all = inDept.filter { !retiredIds.contains($0.id) }
+        let equipments = all.filter(passes)
+        let retiredShown = inDept.filter { retiredIds.contains($0.id) && passes($0) }
+        let emptyText = all.isEmpty
+            ? (retiredShown.isEmpty ? "尚無設備，按右側 + 新增機台" : "使用中的機台都沒了，停用的在下面")
+            : "沒有符合篩選的機台"
         return VStack(alignment: .leading, spacing: 0) {
             HStack(spacing: 8) {
                 Capsule()
@@ -1285,7 +1293,7 @@ struct DepartmentDetailView: View {
                     Image(systemName: "gearshape.2")
                         .font(.system(size: 13, weight: .medium))
                         .foregroundStyle(.tertiary)
-                    Text(all.isEmpty ? "尚無設備，按右側 + 新增機台" : "沒有符合篩選的機台")
+                    Text(emptyText)
                         .font(.caption).foregroundStyle(.tertiary)
                 }
                 .padding(.horizontal).padding(.bottom, 14)
@@ -1305,6 +1313,8 @@ struct DepartmentDetailView: View {
                 }
                 Spacer().frame(height: 4)
             }
+            // [v25.643] 已停用（N 台）：預設收起；點一列開同一張機台詳情卡
+            EquipmentRetiredFold(items: retiredShown, onOpen: { viewingEquipment = $0 })
         }
         .background(Color(.systemBackground))
         .clipShape(RoundedRectangle(cornerRadius: 16))
