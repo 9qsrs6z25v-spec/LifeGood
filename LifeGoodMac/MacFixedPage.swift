@@ -119,6 +119,8 @@ struct MacFixedLayout: View {
 struct MacFixedHead: View {
     let screen: MacFixedScreen
 
+    // [v25.645 mac5] 看板自己有 12pt 內距：原本直向 12 拿掉、橫向 16 改 4（看板內距合起來一樣 16）、看板外直向 6，
+    // 頭部 250 高才裝得下 36pt 大字＋26pt 膠囊（不然看板下緣會壓到下面的篩選列）
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(alignment: .top, spacing: 20) {
@@ -130,8 +132,10 @@ struct MacFixedHead: View {
             Spacer(minLength: 0)
             MacFixedRail(days: screen.railDays, label: screen.railLabel)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 4)
+        .macBoard(.blue)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
@@ -167,15 +171,20 @@ struct MacFixedDateLine: View {
 
 struct MacFixedCapsule: View {
     let text: String?
+    @Environment(\.colorScheme) private var scheme
 
+    // [v25.645 mac5 G1c] 白膠囊（cellFill 底、cellStroke 0.75 框、capsuleText 字；同變動頁日期行）
     var body: some View {
+        let p = MacPalette(scheme)
         if let text {
             Text(text)
                 .font(.caption)
                 .monospacedDigit()
+                .foregroundStyle(p.capsuleText)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 2)
-                .background(Color.secondary.opacity(0.12), in: Capsule())
+                .background(p.cellFill, in: Capsule())
+                .overlay(Capsule().stroke(p.cellStroke, lineWidth: 0.75))
         }
     }
 }
@@ -196,22 +205,17 @@ struct MacFixedChipColumn: View {
 struct MacFixedChipView: View {
     let chip: MacFixedChip
 
+    // [v25.645 mac5 G1c] 白膠囊（MacPill）
     var body: some View {
-        Label(chip.label + " " + chip.value, systemImage: chip.icon)
-            .font(.caption)
-            .lineLimit(1)
-            .foregroundStyle(color)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(Color.secondary.opacity(0.12), in: Capsule())
+        MacPill(icon: chip.icon, label: chip.label, value: chip.value, tone: tone)
     }
 
-    /// warn 橘、good 綠（照 iPhone 膠囊的 tone）
-    private var color: Color {
+    /// warn 橘、good 綠、其餘 neutral（照 iPhone 膠囊的 tone）
+    private var tone: MacTone {
         switch chip.tone {
-        case .warn: return Color.orange
-        case .good: return Color.green
-        case .neutral: return Color.primary
+        case .warn: return .warn
+        case .good: return .good
+        case .neutral: return .neutral
         }
     }
 }
