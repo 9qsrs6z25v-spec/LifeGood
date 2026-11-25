@@ -145,7 +145,7 @@ struct MacKindIndex {
     func kind(of e: Expense) -> String? { hit(of: e)?.raw }
 
     // [v25.644 mac4] 總設計先放骨架（G3 照抄 ExpenseKinds.swift:134-137（f2c8892）taxKind；簽名不准改）
-    /// 稅或規費的細項（罰款、沒有細項都回 nil）— sim4: kinds4#tax
+    /// 稅或規費的細項（罰款、沒有細項都回 nil）— sim4: kinds4#3
     func taxKind(of e: Expense) -> MacLiteKind? { nil }
 }
 
@@ -155,7 +155,7 @@ enum MacFixedGroupKey: Hashable {
     case category(FixedCategory)
     case tax
 
-    /// 有稅類／規費細項的最後一類歸「稅費」組；每一筆只歸一組 — sim4: kinds4#group
+    /// 有稅類／規費細項的最後一類歸「稅費」組；每一筆只歸一組 — sim4: kinds4#4
     static func of(_ e: Expense, kinds: MacKindIndex) -> MacFixedGroupKey {
         .category(e.fixedCategory ?? .other)
     }

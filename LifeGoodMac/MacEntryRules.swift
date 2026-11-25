@@ -7,6 +7,9 @@
 // 新記可選週期／固定薪水／結束日；改週期收入能在獎金、禮金、確幸之間換分類、固定薪水設／改／拿掉結束日（endDate、endReason 兩欄一起寫）。
 // [v25.642 mac3 G1] 支出照 judge_mac §Q5 表單規則（sim_mac3.py expense_changes3／new_expense3／duplicate3；sim3 編號 entry3#）：
 // 名稱、備註照 iPhone 用 .whitespaces 去頭尾（換行不去）；⌘D 複製照抄 VariableExpenseView.swift:560-591 的參數表。收入不動。
+// [v25.644 mac4 G1] 固定支出照 judge_mac §R5 表單規則（sim_mac4.py fixed_changes／new_fixed／end_changed／snapshot_dicts；
+// sim4 編號 entry4#）：已開始的改金額只給〔從今天起〕（MacFixedCal.historyFrom 逐筆轉字典）、第一期還沒到才改扣款日週期、
+// 停止日不早於最近已扣過那期、停在以前的不准改晚或拿掉、名稱必填（不補分類名）。變動支出、收入不動。
 import Foundation
 
 /// 表單結束日那一區（開關、哪一天、原因）
@@ -14,6 +17,25 @@ struct MacIncomeEndDraft: Equatable {
     var enabled = false
     var day = Date()
     var reason: SalaryEndReason = .jobChange
+}
+
+/// [v25.644 mac4] 固定支出停止那一區（開關、最後一次扣款日、原因）
+struct MacFixedEndDraft: Equatable {
+    var enabled = false
+    var day = Date()
+    var reason: FixedEndReason = .cancelled
+}
+
+/// [v25.644 mac4] 詢問框選了〔從今天起〕：cutoff、firstID、newID 在按下那一刻定（存失敗重按、跳衝突再按都用同一份）
+enum MacAmountPick: Equatable {
+    case fromToday(cutoff: Date, firstID: UUID, newID: UUID)
+}
+
+/// [v25.644 mac4] 已開始那筆改金額：存之前先問（字照 iPhone，只拿掉〔全部都改〕）
+struct MacAmountAsk: Identifiable {
+    let id = UUID()
+    let title: String
+    let message: String
 }
 
 enum MacEntryRules {
@@ -181,6 +203,12 @@ enum MacEntryRules {
         var isFixedSalary: Bool = true
         var end = MacIncomeEndDraft()
         var originalEnd = MacIncomeEndDraft()
+        /// [v25.644 mac4] 固定支出：新記切〔固定〕／改固定支出那筆；分類（預設房租）、週期（預設每月）、停止那一區與打開表單時的值
+        var fixedMode: Bool = false
+        var fixedCategory: FixedCategory = .rent
+        var recurrence: Recurrence = .monthly
+        var fixedEnd = MacFixedEndDraft()
+        var originalFixedEnd = MacFixedEndDraft()
     }
 
     /// 表單金額那格的字：整數不寫小數點、最多兩位小數、不加千分位（「120」「12.5」）
@@ -278,6 +306,138 @@ enum MacEntryRules {
         return (out, nil)
     }
 
+    // MARK: - [v25.644 mac4] 固定支出（sim4 fixed_changes／new_fixed）
+
+    /// 固定支出：跟打開表單那份比，回傳要改的欄位（鎖住的欄位不收）。已開始那筆改金額而 pick 是 nil → 回 ask（不存，先問）；
+    /// 有 pick → amount＋amountHistory 一起寫（〔從今天起〕：今天以前每一期照舊）。順序照 sim：名稱 → 備註 → 金額 → 扣款日 → 週期 → 分類 → 停止 → 問
+    static func fixedChanges(original e: Expense, draft: Draft, verdict: MacEditVerdict, now: Date,
+                             pick: MacAmountPick?) -> (changes: [String: Any?], error: String?, ask: MacAmountAsk?) {
+        // sim4: entry4#1
+        var out: [String: Any?] = [:]
+        // 名稱：.whitespaces 去頭尾；固定支出名稱空的擋（不補分類名，AddExpenseView.swift:4052-4060）
+        let title = draft.title.trimmingCharacters(in: .whitespaces)
+        if verdict.canEdit(.title) {
+            if title.isEmpty { return ([:], MacEditPolicy.errorFixedTitleEmpty, nil) }
+            if title != e.title { out.updateValue(title, forKey: "title") }
+        }
+        if verdict.canEdit(.note) {
+            let n = draft.note.trimmingCharacters(in: .whitespaces)
+            if n != e.note { out.updateValue(n, forKey: "note") }
+        }
+        // 金額：欄位動過才看；差 ≤ 0.004 當沒改；沒開始只寫 amount；已開始要〔從今天起〕
+        var askAmount: Double?
+        if verdict.canEdit(.amount), draft.amountText != draft.originalAmountText {
+            guard let amount = parseAmount(draft.amountText) else { return ([:], amountError, nil) }
+            if Swift.abs(amount - e.amount) > 0.004 {
+                if !MacFixedCal.isStarted(e, now: now) {
+                    out.updateValue(amount, forKey: "amount")
+                } else if case .fromToday(let cutoff, let firstID, let newID)? = pick {
+                    // F3：[AmountSnapshot] 整份 cast 成字典會失敗 → 逐筆轉；筆數對不上就不存
+                    let snaps = MacFixedCal.historyFrom(cutoff, history: e.amountHistory, current: e.amount, firstDate: e.date,
+                                                        newAmount: amount, firstID: firstID, newID: newID)
+                    let dicts = snaps.compactMap { MacEntryRules.dictionary($0) }
+                    if dicts.count != snaps.count { return ([:], MacEditPolicy.reasonValueBad, nil) }
+                    out.updateValue(amount, forKey: "amount")
+                    out.updateValue(dicts, forKey: "amountHistory")
+                } else {
+                    askAmount = amount
+                }
+            }
+        }
+        // 扣款日：同一天不寫；換天＝那天＋原本的時間；不准改到今天以前
+        var newStart = e.date
+        if verdict.canEdit(.date), !sameDay(draft.day, e.date) {
+            let d = combine(day: draft.day, timeOf: e.date)
+            if MacFixedCal.day(d) < MacFixedCal.day(now) { return ([:], MacEditPolicy.errorFixedDatePast, nil) }
+            out.updateValue(d.timeIntervalSinceReferenceDate, forKey: "date")
+            newStart = d
+        }
+        if verdict.canEdit(.recurrence), draft.recurrence != e.recurrence {
+            out.updateValue(draft.recurrence.rawValue, forKey: "recurrence")
+        }
+        if verdict.canEdit(.category), draft.fixedCategory != e.fixedCategory {
+            guard MacEditPolicy.plainFixedCategories.contains(draft.fixedCategory) else {
+                return ([:], MacEditPolicy.reasonFieldUnknown, nil)
+            }
+            out.updateValue(draft.fixedCategory.rawValue, forKey: "fixedCategory")
+        }
+        // 停止：兩欄一起寫或一起拿掉
+        if verdict.canEdit(.endDate), fixedEndChanged(draft.fixedEnd, draft.originalFixedEnd) {
+            if let error = fixedEndChanges(e, end: draft.fixedEnd, start: newStart, now: now, into: &out) {
+                return ([:], error, nil)
+            }
+        }
+        if let askAmount {
+            let name = verdict.canEdit(.title) ? title : e.title
+            let hasPayment = e.linkedBankMilestoneId != nil || e.linkedCreditCardMilestoneId != nil
+            let ask = MacAmountAsk(title: MacFixedCal.amountAskTitle(name: name, old: e.amount, new: askAmount),
+                                   message: MacFixedCal.amountAskMessage(hasPayment: hasPayment,
+                                                                        iPhoneLine: MacEditPolicy.fixedAllIPhone))
+            return ([:], nil, ask)
+        }
+        return (out, nil, nil)
+    }
+
+    /// 停止那一區寫進 out；回傳錯誤字（nil＝照寫）。start＝這次存完的第一期（扣款日改了用新的）
+    private static func fixedEndChanges(_ e: Expense, end: MacFixedEndDraft, start: Date, now: Date,
+                                        into out: inout [String: Any?]) -> String? {
+        let today = MacFixedCal.day(now)
+        let closedPast = e.endDate.map { old in MacFixedCal.day(old) < today } ?? false
+        guard end.enabled else {
+            // 關掉：原本有停止日才拿掉；原本停在以前 → 會多出以前的期數
+            guard e.endDate != nil else { return nil }
+            if closedPast { return MacEditPolicy.reasonFixedEndReopen }
+            out.updateValue(nil, forKey: "endDate")
+            out.updateValue(nil, forKey: "endReason")
+            return nil
+        }
+        let d = MacFixedCal.day(end.day)
+        if d < MacFixedCal.day(start) { return MacEditPolicy.errorEndBefore }
+        if let last = MacFixedCal.lastPastDue(e, now: now), d < last { return MacEditPolicy.reasonFixedEndCut }
+        if closedPast, let old = e.endDate, d > MacFixedCal.day(old) { return MacEditPolicy.reasonFixedEndReopen }
+        let newEnd: Date
+        if let old = e.endDate, sameDay(end.day, old) {
+            newEnd = old
+        } else {
+            newEnd = combine(day: end.day, timeOf: e.date)
+        }
+        out.updateValue(newEnd.timeIntervalSinceReferenceDate, forKey: "endDate")
+        out.updateValue(end.reason.rawValue, forKey: "endReason")
+        return nil
+    }
+
+    /// 停止那一區有沒有動：開關不同＝改；都關＝沒改；都開＝不同天或原因不同（sim4 end_changed）
+    static func fixedEndChanged(_ a: MacFixedEndDraft, _ b: MacFixedEndDraft, calendar: Calendar = .current) -> Bool {
+        if a.enabled != b.enabled { return true }
+        if !a.enabled { return false }
+        return !calendar.isDate(a.day, inSameDayAs: b.day) || a.reason != b.reason
+    }
+
+    /// 新記一筆固定支出：分類六類 → 金額 → 名稱必填 → 停止不早於第一期；Expense(...) → JSONEncoder → 字典。
+    /// 台幣、付款不指定、amountHistory＝[]（照 iPhone 新增）；id、now 由表單開著的期間固定
+    static func newFixed(title: String, amountText: String, day: Date, category: FixedCategory, recurrence: Recurrence,
+                         note: String, end: (day: Date, reason: FixedEndReason)?, id: UUID = UUID(), now: Date = Date()) -> (raw: [String: Any]?, error: String?) {
+        // sim4: entry4#2
+        guard MacEditPolicy.plainFixedCategories.contains(category) else { return (nil, MacEditPolicy.reasonFieldUnknown) }
+        guard let amount = parseAmount(amountText) else { return (nil, amountError) }
+        let t = title.trimmingCharacters(in: .whitespaces)
+        guard !t.isEmpty else { return (nil, MacEditPolicy.errorFixedTitleEmpty) }
+        let date = combine(day: day, timeOf: now)
+        var endDate: Date? = nil
+        var endReason: FixedEndReason? = nil
+        if let end {
+            let calendar = Calendar.current
+            if calendar.startOfDay(for: end.day) < calendar.startOfDay(for: date) { return (nil, MacEditPolicy.errorEndBefore) }
+            endDate = combine(day: end.day, timeOf: date)
+            endReason = end.reason
+        }
+        let e = Expense(id: id, title: t, amount: amount, date: date, expenseType: .fixed, fixedCategory: category,
+                        recurrence: recurrence, note: note.trimmingCharacters(in: .whitespaces), currencyCode: "NT$",
+                        endDate: endDate, endReason: endReason)
+        guard let raw = dictionary(e) else { return (nil, "這筆編不出來，請再試一次") }
+        return (raw, nil)
+    }
+
     /// 結束那一區有沒有動：開關不同＝改；都關＝沒改；都開＝不同天或原因不同
     static func endChanged(_ a: MacIncomeEndDraft, _ b: MacIncomeEndDraft, calendar: Calendar = .current) -> Bool {
         if a.enabled != b.enabled { return true }
@@ -349,6 +509,7 @@ enum MacEntryRules {
         }
         if field == "amountHistory", let list = value as? [Any] { return "\(list.count) 段" }
         if field == "isFixedSalary", let b = value as? Bool { return b ? "是" : "不是" }
+        // [v25.644 mac4] fixedCategory、recurrence、endReason 是 rawValue 字串，照原字寫（下一行）
         if let s = value as? String { return s.isEmpty ? "（空白）" : s }
         if let n = value as? NSNumber { return n.stringValue }
         return "（看不懂的值）"
@@ -360,11 +521,11 @@ enum MacEntryRules {
         case "title": return "名稱"
         case "amount": return "金額"
         case "date": return "日期"
-        case "variableCategory", "category": return "分類"
+        case "variableCategory", "category", "fixedCategory": return "分類"
         case "note": return "備註"
         case "endDate": return "結束日"
         case "endReason": return "結束原因"
-        case "period": return "週期"
+        case "period", "recurrence": return "週期"
         case "isFixedSalary": return "固定薪水"
         case "amountHistory": return "金額歷史"
         default: return field

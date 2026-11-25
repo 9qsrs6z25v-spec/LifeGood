@@ -4,6 +4,8 @@
 // 換 Apple 帳號整個刪掉別的帳號資料夾。偏好一律 mac. 開頭。log 只用 .private，不 print。
 // 看門狗照 scratchpad/radar/build/mac1/ledger_sim.py 的 Mac.watchdog：新增的不見、改的欄位變回改之前的值、刪的回來；
 // 別台後來又改成第三個值不提示。
+// [v25.644 mac4 G1] judge_mac §R6 W4-10（sim_mac4.py supersede4／reverted_fields4；sim4 編號 journal4#）：照 MacCloudWriter.fieldGroups
+// 成組（金額＋金額歷史、結束日＋結束原因）：後一次動到組裡任一欄 → 前一次那組整組不再看；看門狗同組每一欄都被改回才整組算。
 import Foundation
 import os
 
@@ -296,7 +298,8 @@ final class MacJournal: ObservableObject {
     func record(key: String, kind: MacJournalEntry.Kind, itemID: String, label: String,
                 fields: [String: (before: Any?, after: Any?)], rawBefore: [String: Any]?,
                 rawAfter: [String: Any]?) -> MacJournalEntry {
-        let changed = Set(fields.keys)
+        // sim4: journal4#1 supersede 照組：這次動到組裡任一欄，前一次那組每一欄都不再看
+        let changed = Self.expandGroups(Set(fields.keys))
         for i in entries.indices where entries[i].key == key && entries[i].itemID == itemID && !entries[i].resolved {
             switch kind {
             case .add, .delete:
@@ -319,6 +322,40 @@ final class MacJournal: ObservableObject {
         pruneEntries(now: Date())
         persist()
         return entry
+    }
+
+    /// 欄位集合照 MacCloudWriter.fieldGroups 補成整組（組外的欄位照原樣）
+    static func expandGroups(_ fields: Set<String>) -> Set<String> {
+        var out = fields
+        for group in MacCloudWriter.fieldGroups where group.contains(where: { f in fields.contains(f) }) {
+            out.formUnion(group)
+        }
+        return out
+    }
+
+    /// 看門狗 editReverted（sim4 reverted_fields4）：還在看的欄位照組分；同組裡至少一欄真的改過、而且同組每一欄現在都是
+    /// 改之前的值 → 整組算被改回；同組有一欄是第三個值 → 這組不算
+    static func revertedFields(_ e: MacJournalEntry, current cur: [String: Any]) -> [String] {
+        let fields = e.fields
+        let watched = e.watchedFields
+        var done = Set<String>()
+        var out: [String] = []
+        for k in watched where !done.contains(k) {
+            let group = MacCloudWriter.fieldGroups.first { g in g.contains(k) } ?? [k]
+            let members = group.filter { f in watched.contains(f) }
+            done.formUnion(members)
+            let changed = members.contains { f in
+                guard let pair = fields[f] else { return false }
+                return !LedgerMerge.same(pair.before, pair.after)
+            }
+            guard changed else { continue }
+            let allBack = members.allSatisfy { f in
+                guard let pair = fields[f] else { return false }
+                return LedgerMerge.same(cur[f], pair.before)
+            }
+            if allBack { out.append(contentsOf: members) }
+        }
+        return out.sorted()
     }
 
     func entry(_ id: String) -> MacJournalEntry? {
@@ -400,14 +437,8 @@ final class MacJournal: ObservableObject {
                     continue
                 }
                 let cur: [String: Any] = (current.arr[at] as? [String: Any]) ?? [:]
-                let fields = e.fields
-                var reverted: [String] = []
-                for k in e.watchedFields {
-                    guard let pair = fields[k] else { continue }
-                    if !LedgerMerge.same(pair.before, pair.after) && LedgerMerge.same(cur[k], pair.before) {
-                        reverted.append(k)
-                    }
-                }
+                // sim4: journal4#2 照組判斷（金額＋金額歷史、結束日＋結束原因）
+                let reverted = Self.revertedFields(e, current: cur)
                 if !reverted.isEmpty {
                     out.append(MacWatchdogItem(entry: e, reason: .editReverted, revertedFields: reverted))
                 }

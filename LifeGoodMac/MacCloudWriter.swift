@@ -11,6 +11,8 @@
 // S5：〔用 iPhone 的〕成組換（fieldGroups：結束日、結束原因）。sim_mac2.py save2／theirs_fields。
 // [v25.642 mac3 G1] judge_mac §Q6 W-1～W-5（sim_mac3.py save3）：② 支出那包同一次多抓分帳、細項（MacFreshLinks，只放 bytes）；
 // 有 bytes 卻解不開 → 不存；gate 多傳剛抓到的分帳細項；那筆不在了又有分帳或細項紀錄 → 不給另存；⑥ 之後、⑦ 之前 postCheck 看合併後那筆。
+// [v25.644 mac4 G1] judge_mac §R6（sim_mac4.py save4；sim4 編號 write4#）：W4-13 刪除多一道 deleteGate（剛抓到那筆，每一輪都跑）；
+// W4-8 改的那筆 base 裡還在卻套不上 → cannotMerge（不問〔另存〕）；W4-9 金額＋金額歷史成組（〔用 iPhone 的〕一起換）。
 import CloudKit
 import Foundation
 import os
@@ -102,10 +104,12 @@ final class MacCloudWriter {
 
     /// gate：改一筆時拿剛抓到的那筆原字典＋這次的改動＋剛抓到的分帳細項再判斷一次，回傳不是 nil＝擋（原因字）；新增、刪除不走 gate。
     /// postCheck：動作、剛抓到那筆、合併後那筆、剛抓到的分帳細項；回傳不是 nil＝擋（刪除不跑；nil＝不檢查，退路 R4）
+    /// deleteGate：刪除時拿剛抓到的那筆原字典再判斷一次（不是 nil＝擋；雲端已經沒有那筆就不叫，照舊走 ⑦）
     func save(key: String, action: MacLedgerAction, base: Data, resolution: MacConflictResolution,
               journal: MacJournal, golden: LedgerMergeGolden.Report, writeEnabled: Bool,
               gate: (@MainActor ([String: Any], [String: Any?], MacFreshLinks) -> String?)? = nil,
-              postCheck: (@MainActor (MacLedgerAction, [String: Any]?, [String: Any]?, MacFreshLinks) -> String?)? = nil) async -> MacWriteOutcome {
+              postCheck: (@MainActor (MacLedgerAction, [String: Any]?, [String: Any]?, MacFreshLinks) -> String?)? = nil,
+              deleteGate: (@MainActor ([String: Any]) -> String?)? = nil) async -> MacWriteOutcome {
         lastEntry = nil
         // ① 開關、黃金案例、白名單
         guard writeEnabled else { return .locked("還沒打開「允許這台 Mac 修改」（在資料來源頁）") }
@@ -144,6 +148,12 @@ final class MacCloudWriter {
                 return .locked(MacEditPolicy.reasonLinksUnknown)
             }
 
+            // sim4: write4#1（W4-13）刪除：剛抓到那筆再判斷一次（每一輪重試都跑）
+            if case .delete(let id) = action, let deleteGate, let item = Self.item(id, in: remote),
+               let reason = deleteGate(item) {
+                return .locked(reason)
+            }
+
             // sim2: gate#1（S1）用剛抓到的那筆重新判斷；serverRecordChanged 重試的每一輪都會再跑
             // sim3: gate3#1 多傳剛抓到的分帳、細項
             if case .edit(let id, let changes) = action, let gate, let item = Self.item(id, in: remote),
@@ -155,6 +165,11 @@ final class MacCloudWriter {
             guard let local = Self.apply(action, to: base) else {
                 // 新增套不上去＝開表單那份看不懂（不是被別台刪掉）
                 if case .add = action { return .cannotMerge }
+                // sim4: write4#2（W4-8）改的那筆在 base 裡還在、卻套不上（值寫不成 JSON 之類）＝不是被別台刪掉 → 不問〔另存〕
+                if case .edit(let id, _) = action, let arr = LedgerMerge.parseArray(base),
+                   LedgerMerge.index(arr).pos[id] != nil {
+                    return .cannotMerge
+                }
                 // sim3: detach3#1（③）改的那筆不在了：剛抓到的分帳或細項有這個 id → 不給〔另存〕
                 if case .edit(let id, _) = action, key == MacCloud.expensesKey, Self.detachLinked(id, fresh) {
                     return .locked(MacEditPolicy.reasonDetachLinked)
@@ -310,8 +325,9 @@ final class MacCloudWriter {
 
     // MARK: - 〔用 iPhone 的〕成組換（S5）
 
-    /// 要一起換的欄位組：組裡任一欄衝突，這次改到的同組欄位全部換成雲端的值
-    static let fieldGroups: [[String]] = [["endDate", "endReason"]]
+    /// 要一起換的欄位組：組裡任一欄衝突，這次改到的同組欄位全部換成雲端的值（日誌 supersede、看門狗也照組）
+    // sim4: write4#3（W4-9）金額＋金額歷史成組
+    static let fieldGroups: [[String]] = [["endDate", "endReason"], ["amount", "amountHistory"]]
 
     static func theirsFields(_ conflictFields: [String], changes: [String: Any?]) -> [String] {
         var out = Set(conflictFields)

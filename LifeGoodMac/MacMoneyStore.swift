@@ -746,10 +746,10 @@ final class MacMoneyStore: ObservableObject {
 
     // MARK: [v25.644 mac4] 固定支出頁用（總設計先放骨架；G3 照抄、G2 叫；簽名不准改，judge_mac §R9）
 
-    // 照抄 ExpenseStore.swift:319-321（f2c8892）budgetBaseIncome — sim4: board4#income（G3 填內容）
+    // 照抄 ExpenseStore.swift:319-321（f2c8892）budgetBaseIncome — sim4: money4#1（G3 填內容）
     func budgetBaseIncome(now: Date, calendar: Calendar) -> Double { 0 }
 
-    // 照抄 ExpenseStore.swift:423-427（f2c8892）fixedExpenses（Mac 補：同時間照 id）— sim4: table4#fixed（G3 填內容）
+    // 照抄 ExpenseStore.swift:423-427（f2c8892）fixedExpenses（Mac 補：同時間照 id）— sim4: money4#2（G3 填內容）
     var fixedExpenses: [Expense] { [] }
 
     private static func recentRow(_ e: Expense, amount: Double) -> MacRecentRow {
@@ -777,7 +777,7 @@ struct MacFailableDecodable<T: Decodable>: Decodable {
 // MARK: - [v25.644 mac4] 固定支出停止（總設計先放骨架；G3 填內容）
 
 extension Expense {
-    // 照抄 Expense.swift:593-596（f2c8892）isFixedEnded（Date()→now、Calendar.current→calendar）— sim4: ended4#1
+    // 照抄 Expense.swift:593-596（f2c8892）isFixedEnded（Date()→now、Calendar.current→calendar）— sim4: money4#3
     /// 已經停止（結束日在今天之前；結束日當天仍算進行中）。Mac 4 新檔一律叫這支，不叫寫死 Date() 的 isFixedEnded
     func macIsFixedEnded(now: Date, calendar: Calendar) -> Bool { false }
 }
