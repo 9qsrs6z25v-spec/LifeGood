@@ -20,6 +20,8 @@ struct MacLinkIDs {
 /// 表單上能改的欄位（endDate＝結束日，結束原因跟它同一欄）
 enum MacEditField: String, CaseIterable, Hashable {
     case title, note, amount, date, category, endDate
+    /// [v25.644 mac4] 固定支出的週期（只有固定支出那筆用；收入、變動支出的鎖頭清單不列）
+    case recurrence
 
     var label: String {
         switch self {
@@ -29,6 +31,7 @@ enum MacEditField: String, CaseIterable, Hashable {
         case .date: return "日期"
         case .category: return "分類"
         case .endDate: return "結束日"
+        case .recurrence: return "週期"
         }
     }
 
@@ -118,6 +121,10 @@ enum MacEditPolicy {
     static let reasonPostShape = "這次要寫的內容跟你改的不一樣，這次先不存，請按 ⌘R 再試"       // R3['post_shape']
     static let reasonValueBad = "這一欄的值不對，這次先不存"                          // R3['value_bad']
     static let hintIPhoneOnly = "付款方式、同行、地點、照片請在 iPhone 改"            // R3['hint_iphone_only']
+    // [v25.644 mac4] 總設計先放（judge_mac §R9 名稱表；簽名不准改）
+    static let hintFixedIPhoneOnly = "付款方式、細項、節稅、照片、連著的資產請在 iPhone 改"   // R4['hint_fixed_iphone_only']
+    /// 固定支出那筆詳情鎖頭清單列的 7 欄（.endDate 對固定支出畫面字寫「停止」）
+    static let fixedFields: [MacEditField] = [.title, .note, .amount, .date, .recurrence, .category, .endDate]
     static let duplicateButton = "複製"                                               // R3['dup_button']
     /// 確認框標題（R3['dup_confirm']）
     static func duplicateConfirm(_ label: String) -> String { "複製「\(label)」成新的一筆？日期會改成現在。" }

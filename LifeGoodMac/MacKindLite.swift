@@ -143,6 +143,29 @@ struct MacKindIndex {
 
     /// 這筆的細項字（沒有＝nil）— sim3: kinds#14
     func kind(of e: Expense) -> String? { hit(of: e)?.raw }
+
+    // [v25.644 mac4] 總設計先放骨架（G3 照抄 ExpenseKinds.swift:134-137（f2c8892）taxKind；簽名不准改）
+    /// 稅或規費的細項（罰款、沒有細項都回 nil）— sim4: kinds4#tax
+    func taxKind(of e: Expense) -> MacLiteKind? { nil }
+}
+
+// MARK: - [v25.644 mac4] 固定支出頁的分組（照抄 ExpenseKinds.swift:555-571（f2c8892）FixedGroup；總設計先放骨架，G3 填 of）
+
+enum MacFixedGroupKey: Hashable {
+    case category(FixedCategory)
+    case tax
+
+    /// 有稅類／規費細項的最後一類歸「稅費」組；每一筆只歸一組 — sim4: kinds4#group
+    static func of(_ e: Expense, kinds: MacKindIndex) -> MacFixedGroupKey {
+        .category(e.fixedCategory ?? .other)
+    }
+
+    var title: String {
+        switch self {
+        case .category(let c): return c.rawValue
+        case .tax: return "稅費"
+        }
+    }
 }
 
 extension Expense {

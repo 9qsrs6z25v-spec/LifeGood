@@ -348,6 +348,14 @@ final class MacEditCenter: ObservableObject {
                                                     links: cachedLinks())
     }
 
+    // [v25.644 mac4] 〔停止扣款…〕（總設計先放骨架：G1 寫內容、G2 的右鍵選單叫；簽名不准改，judge_mac §R6 W4-15）
+
+    /// 開同一張編輯表單、停止區預設打開（存檔走 §R4 #6 同一條路）— sim4: stop4#1
+    func requestStop(_ ref: MacEntryRef) {}
+
+    /// 選單、右鍵、詳情鈕反灰用：canEdit 而且停止那欄能改、不是「原本停在以前」— sim4: stop4#2
+    func canStop(_ ref: MacEntryRef) -> Bool { false }
+
     /// 確認框〔複製〕：確認框收起來之後才寫（新增一筆；policyBlock、postCheck A1～A3 照擋）
     func confirmDuplicate(_ ask: MacDuplicateAsk) {
         DispatchQueue.main.async { [weak self] in

@@ -464,6 +464,13 @@
 		A01B000005000017 /* MacVariableBoard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000017 /* MacVariableBoard.swift */; };
 		A01B000005000018 /* MacVariablePage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000018 /* MacVariablePage.swift */; };
 		A01B000005000019 /* MacVariableCells.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000019 /* MacVariableCells.swift */; };
+		A01B000005000020 /* MacLoanMath.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000020 /* MacLoanMath.swift */; };
+		A01B000005000021 /* MacFixedBoard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000021 /* MacFixedBoard.swift */; };
+		A01B000005000022 /* MacFixedPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000022 /* MacFixedPage.swift */; };
+		A01B000005000023 /* MacFixedCells.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000023 /* MacFixedCells.swift */; };
+		A01B000005000024 /* MacFixedChart.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000024 /* MacFixedChart.swift */; };
+		A01B000005000025 /* MacFixedFormFields.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000025 /* MacFixedFormFields.swift */; };
+		A01B000005000026 /* MacFixedCal.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000026 /* MacFixedCal.swift */; };
 		A01B000005000004 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A01A000005000004 /* Assets.xcassets */; };
 		A01B000005000050 /* Expense.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000002 /* Expense.swift */; };
 		A01B000005000051 /* Income.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100001B /* Income.swift */; };
@@ -984,6 +991,13 @@
 		A01A000005000017 /* MacVariableBoard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacVariableBoard.swift; sourceTree = "<group>"; };
 		A01A000005000018 /* MacVariablePage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacVariablePage.swift; sourceTree = "<group>"; };
 		A01A000005000019 /* MacVariableCells.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacVariableCells.swift; sourceTree = "<group>"; };
+		A01A000005000020 /* MacLoanMath.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacLoanMath.swift; sourceTree = "<group>"; };
+		A01A000005000021 /* MacFixedBoard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacFixedBoard.swift; sourceTree = "<group>"; };
+		A01A000005000022 /* MacFixedPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacFixedPage.swift; sourceTree = "<group>"; };
+		A01A000005000023 /* MacFixedCells.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacFixedCells.swift; sourceTree = "<group>"; };
+		A01A000005000024 /* MacFixedChart.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacFixedChart.swift; sourceTree = "<group>"; };
+		A01A000005000025 /* MacFixedFormFields.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacFixedFormFields.swift; sourceTree = "<group>"; };
+		A01A000005000026 /* MacFixedCal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacFixedCal.swift; sourceTree = "<group>"; };
 		A01A000005000003 /* LifeGoodMac.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LifeGoodMac.entitlements; sourceTree = "<group>"; };
 		A01A000005000004 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -1558,6 +1572,13 @@
 				A01A000005000017 /* MacVariableBoard.swift */,
 				A01A000005000018 /* MacVariablePage.swift */,
 				A01A000005000019 /* MacVariableCells.swift */,
+				A01A000005000020 /* MacLoanMath.swift */,
+				A01A000005000021 /* MacFixedBoard.swift */,
+				A01A000005000022 /* MacFixedPage.swift */,
+				A01A000005000023 /* MacFixedCells.swift */,
+				A01A000005000024 /* MacFixedChart.swift */,
+				A01A000005000025 /* MacFixedFormFields.swift */,
+				A01A000005000026 /* MacFixedCal.swift */,
 				A01A000005000004 /* Assets.xcassets */,
 				A01A000005000003 /* LifeGoodMac.entitlements */,
 			);
@@ -2234,6 +2255,13 @@
 				A01B000005000017 /* MacVariableBoard.swift in Sources */,
 				A01B000005000018 /* MacVariablePage.swift in Sources */,
 				A01B000005000019 /* MacVariableCells.swift in Sources */,
+				A01B000005000020 /* MacLoanMath.swift in Sources */,
+				A01B000005000021 /* MacFixedBoard.swift in Sources */,
+				A01B000005000022 /* MacFixedPage.swift in Sources */,
+				A01B000005000023 /* MacFixedCells.swift in Sources */,
+				A01B000005000024 /* MacFixedChart.swift in Sources */,
+				A01B000005000025 /* MacFixedFormFields.swift in Sources */,
+				A01B000005000026 /* MacFixedCal.swift in Sources */,
 				A01B000005000050 /* Expense.swift in Sources */,
 				A01B000005000051 /* Income.swift in Sources */,
 				A01B000005000052 /* WidgetMoneyFormat.swift in Sources */,
