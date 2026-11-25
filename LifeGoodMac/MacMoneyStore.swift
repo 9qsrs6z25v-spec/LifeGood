@@ -12,6 +12,8 @@
 //   每支上方寫原始行號（[v25.642 mac3] 支出那幾支改寫 48c51a2 的行號；算法沒動）。sim_mac1.py §一 一支對一支。
 // • [v25.642 mac3 G3] 細項那包（kinds）解成 kindIndex（MacKindLite，只顯示；decode 裡 case MacCloud.kindsKey，快照、雲端同一條路）；
 //   clearData 一起清。讀的鍵沒有多（readKeys 不動）。
+// • [v25.644 mac4 G3] 固定支出頁用的三支：budgetBaseIncome(now:calendar:)、fixedExpenses（同時間照 id）、
+//   Expense.macIsFixedEnded(now:calendar:)（照抄 ExpenseStore.swift、Expense.swift（f2c8892），只換 now、calendar；sim4: money4#1～#3）。
 
 import Foundation
 import Combine
@@ -746,11 +748,22 @@ final class MacMoneyStore: ObservableObject {
 
     // MARK: [v25.644 mac4] 固定支出頁用（總設計先放骨架；G3 照抄、G2 叫；簽名不准改，judge_mac §R9）
 
-    // 照抄 ExpenseStore.swift:319-321（f2c8892）budgetBaseIncome — sim4: money4#1（G3 填內容）
-    func budgetBaseIncome(now: Date, calendar: Calendar) -> Double { 0 }
+    // 照抄 ExpenseStore.swift:319-321（f2c8892）budgetBaseIncome（now、calendar 由參數帶進來）— sim4: money4#1
+    /// 拿來算「占收入幾成」的收入：本月已入帳與近 6 個月中位數取大的（月初薪水還沒進來時不會只剩一筆配息）
+    func budgetBaseIncome(now: Date, calendar: Calendar) -> Double {
+        max(currentMonthIncomeTotal(now: now, calendar: calendar), estimatedMonthlyIncome(now: now, calendar: calendar))
+    }
 
-    // 照抄 ExpenseStore.swift:423-427（f2c8892）fixedExpenses（Mac 補：同時間照 id）— sim4: money4#2（G3 填內容）
-    var fixedExpenses: [Expense] { [] }
+    // 照抄 ExpenseStore.swift:423-427（f2c8892）fixedExpenses（Mac 補：同時間照 id 字串，同 MacVariableTable.newerFirst）— sim4: money4#2
+    /// 固定支出，日期新到舊
+    var fixedExpenses: [Expense] {
+        expenses
+            .filter { $0.expenseType == .fixed }
+            .sorted { a, b in
+                if a.date != b.date { return a.date > b.date }
+                return a.id.uuidString < b.id.uuidString
+            }
+    }
 
     private static func recentRow(_ e: Expense, amount: Double) -> MacRecentRow {
         let isFixed = e.expenseType == .fixed
@@ -779,5 +792,8 @@ struct MacFailableDecodable<T: Decodable>: Decodable {
 extension Expense {
     // 照抄 Expense.swift:593-596（f2c8892）isFixedEnded（Date()→now、Calendar.current→calendar）— sim4: money4#3
     /// 已經停止（結束日在今天之前；結束日當天仍算進行中）。Mac 4 新檔一律叫這支，不叫寫死 Date() 的 isFixedEnded
-    func macIsFixedEnded(now: Date, calendar: Calendar) -> Bool { false }
+    func macIsFixedEnded(now: Date, calendar: Calendar) -> Bool {
+        guard isRecurringFixed, let end = endDate else { return false }
+        return calendar.startOfDay(for: end) < calendar.startOfDay(for: now)
+    }
 }

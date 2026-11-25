@@ -254,7 +254,24 @@ struct MacFixedRailTrack: View {
 }
 
 /// 一天一格：軸線＋點（過去灰實心、下一站 accent 實心大一號、之後 accent 空心）＋今天的旗；滑鼠停著看那天扣什麼
+/// （沒扣款的那天 help 是空字串：不掛 .help，免得跳出空的提示框）
 struct MacFixedRailCell: View {
+    let day: MacFixedRailDay
+
+    var body: some View {
+        if day.help.isEmpty {
+            MacFixedRailSlot(day: day)
+                .contentShape(Rectangle())
+        } else {
+            MacFixedRailSlot(day: day)
+                .contentShape(Rectangle())
+                .help(day.help)
+        }
+    }
+}
+
+/// 格子本身：軸線＋點＋旗（撐滿寬、至少 30 高）
+struct MacFixedRailSlot: View {
     let day: MacFixedRailDay
 
     var body: some View {
@@ -265,8 +282,6 @@ struct MacFixedRailCell: View {
             MacFixedRailMark(day: day)
         }
         .frame(maxWidth: .infinity, minHeight: 30)
-        .contentShape(Rectangle())
-        .help(day.help)
     }
 }
 

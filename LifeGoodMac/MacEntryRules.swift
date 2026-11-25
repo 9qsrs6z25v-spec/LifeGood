@@ -308,6 +308,8 @@ enum MacEntryRules {
 
     // MARK: - [v25.644 mac4] 固定支出（sim4 fixed_changes／new_fixed）
 
+    // 照 AddExpenseView.swift:3985-4005（amountChangeAsk 問不問的條件與字）、:4028（名稱 .whitespaces）、:4052-4060（名稱必填）、
+    // :4271（備註 .whitespaces）、:4287-4288（停止兩欄一起寫）（f2c8892）；只給〔從今天起〕
     /// 固定支出：跟打開表單那份比，回傳要改的欄位（鎖住的欄位不收）。已開始那筆改金額而 pick 是 nil → 回 ask（不存，先問）；
     /// 有 pick → amount＋amountHistory 一起寫（〔從今天起〕：今天以前每一期照舊）。順序照 sim：名稱 → 備註 → 金額 → 扣款日 → 週期 → 分類 → 停止 → 問
     static func fixedChanges(original e: Expense, draft: Draft, verdict: MacEditVerdict, now: Date,
@@ -384,6 +386,7 @@ enum MacEntryRules {
         return MacFixedCal.day(old) < MacFixedCal.day(now)
     }
 
+    // 照 AddExpenseView.swift:2720-2721（打開停止開關的預設原因）（f2c8892）；日子改成 max(今天, 第一期, 最近已扣過那期)（§R5）
     /// 停止區預設（〔停止扣款…〕開表單、打開開關）：日子＝max(今天, 第一期, 最近已扣過那期)、時分照 e.date；
     /// 原因＝這個分類最可能的那個（共用 FixedEndReason.suggested(for:)）— sim4: entry4#3
     static func fixedStopDefault(_ e: Expense, now: Date) -> MacFixedEndDraft {
