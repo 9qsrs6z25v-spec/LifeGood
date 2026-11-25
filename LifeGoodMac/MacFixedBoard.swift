@@ -423,23 +423,16 @@ enum MacFixedTable {
         }
     }
 
-    /// 欄名（整串一組的標題「依金額排序」）：key path 跟這張表逐一比（同型別 PartialKeyPath 才比）
-    private static let columnNames: [(path: PartialKeyPath<MacFixedRow>, name: String)] = [
-        (path: \MacFixedRow.title, name: "項目"),
-        (path: \MacFixedRow.category, name: "分類"),
-        (path: \MacFixedRow.periodRank, name: "週期"),
-        (path: \MacFixedRow.amount, name: "金額"),
-        (path: \MacFixedRow.monthly, name: "月均"),
-        (path: \MacFixedRow.nextDue, name: "下次扣款"),
-        (path: \MacFixedRow.payText, name: "扣款方式"),
-        (path: \MacFixedRow.statusRank, name: "狀態"),
-    ]
-
+    /// 欄名（整串一組的標題「依金額排序」；同 Mac 3 MacVariableTable.columnName 的比法）
     static func columnName(_ c: MacFixedSort) -> String {
-        let path: PartialKeyPath<MacFixedRow> = c.keyPath
-        for pair in columnNames where pair.path == path {
-            return pair.name
-        }
+        if c.keyPath == \MacFixedRow.title { return "項目" }
+        if c.keyPath == \MacFixedRow.category { return "分類" }
+        if c.keyPath == \MacFixedRow.periodRank { return "週期" }
+        if c.keyPath == \MacFixedRow.amount { return "金額" }
+        if c.keyPath == \MacFixedRow.monthly { return "月均" }
+        if c.keyPath == \MacFixedRow.nextDue { return "下次扣款" }
+        if c.keyPath == \MacFixedRow.payText { return "扣款方式" }
+        if c.keyPath == \MacFixedRow.statusRank { return "狀態" }
         return "點的欄"
     }
 
@@ -614,10 +607,10 @@ struct MacFixedTrend {
         for (i, pair) in sorted.enumerated() {
             actual.append(MacFixedTrendPoint(id: i, date: pair.element.date, amount: pair.element.amount))
         }
-        return MacFixedTrend(actual: actual, forecast: forecast(actual, calendar: cal))
+        return MacFixedTrend(actual: actual, forecast: forecastPoints(actual, calendar: cal))
     }
 
-    static func forecast(_ pts: [MacFixedTrendPoint], calendar cal: Calendar) -> [MacFixedTrendPoint] {
+    static func forecastPoints(_ pts: [MacFixedTrendPoint], calendar cal: Calendar) -> [MacFixedTrendPoint] {
         guard pts.count >= 2, let last = pts.last else { return [] }
         let base = pts[0].date.timeIntervalSince1970
         let xs: [Double] = pts.map { p in (p.date.timeIntervalSince1970 - base) / 86400 }

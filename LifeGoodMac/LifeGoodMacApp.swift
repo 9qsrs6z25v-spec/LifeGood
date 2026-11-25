@@ -55,8 +55,8 @@ enum MacPage: String, Hashable, CaseIterable {
         }
     }
 
-    /// 開放的頁（其他頁側欄反灰、標「下一版」、不能選）。[v25.641 mac2] 加收入；[v25.642 mac3] 加變動支出
-    var isOpen: Bool { self == .overview || self == .income || self == .variable || self == .source }
+    /// 開放的頁（其他頁側欄反灰、標「下一版」、不能選）。[v25.641 mac2] 加收入；[v25.642 mac3] 加變動支出；[v25.644 mac4] 加固定支出
+    var isOpen: Bool { self == .overview || self == .income || self == .variable || self == .fixed || self == .source }
 
     /// [v25.642 mac3] 這一頁有搜尋框（⌘F 反灰用）：收入、變動支出
     var hasSearch: Bool { self == .income || self == .variable }
@@ -81,7 +81,11 @@ enum MacPage: String, Hashable, CaseIterable {
             // [v25.642 mac3] 變動支出頁：支出 true、收入 false（sim3 page_shows）
             if case .expense = ref { return true }
             return false
-        case .fixed, .chart, .source:
+        // [v25.644 mac4] 固定支出頁：支出 true（選到變動支出由 MacFixedSelectionGuard 清掉）、收入 false
+        case .fixed:
+            if case .expense = ref { return true }
+            return false
+        case .chart, .source:
             return false
         }
     }
@@ -222,6 +226,7 @@ final class MacAppModel: ObservableObject {
 
 /// [v25.641 mac2] ⌘2 收入、⌘F 搜尋（只在收入頁）；系統「尋找」「拼字」那一組（.textEditing）整組拿掉，⌘F 不撞鍵
 /// [v25.642 mac3] ⌘3 變動支出；⌘F 收入、變動支出兩頁；⌘[ ⌘] ⌘T 切月份（只在變動支出頁；⌥←／⌥→ 不綁，留給文字框跳字）
+/// [v25.644 mac4] ⌘4 固定支出（全 Mac 只綁這一次）；這頁 ⌘F（hasSearch 不含）、⌘[ ⌘] ⌘T（不是變動支出頁）反灰
 @MainActor
 struct MacAppCommands: Commands {
     let model: MacAppModel
@@ -242,6 +247,9 @@ struct MacAppCommands: Commands {
             Button("變動支出") { ui.page = .variable }
                 .keyboardShortcut("3")
                 .disabled(!MacPage.variable.isOpen)
+            Button("固定支出") { ui.page = .fixed }
+                .keyboardShortcut("4")
+                .disabled(!MacPage.fixed.isOpen)
             Button("資料來源") { ui.page = .source }
             Divider()
             Button("搜尋") { ui.searchRequest += 1 }

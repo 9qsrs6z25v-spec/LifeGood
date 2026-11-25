@@ -378,11 +378,25 @@ enum MacEntryRules {
         return (out, nil, nil)
     }
 
+    /// 原本就停在今天以前（改晚、拿掉都會多出以前的期數）
+    static func fixedEndClosedPast(_ e: Expense, now: Date) -> Bool {
+        guard let old = e.endDate else { return false }
+        return MacFixedCal.day(old) < MacFixedCal.day(now)
+    }
+
+    /// 停止區預設（〔停止扣款…〕開表單、打開開關）：日子＝max(今天, 第一期, 最近已扣過那期)、時分照 e.date；
+    /// 原因＝這個分類最可能的那個（共用 FixedEndReason.suggested(for:)）— sim4: entry4#3
+    static func fixedStopDefault(_ e: Expense, now: Date) -> MacFixedEndDraft {
+        // sim4: entry4#3
+        let day = combine(day: MacFixedCal.stopLowerBound(e, now: now), timeOf: e.date)
+        let reason = FixedEndReason.suggested(for: e.fixedCategory).first ?? .cancelled
+        return MacFixedEndDraft(enabled: true, day: day, reason: reason)
+    }
+
     /// 停止那一區寫進 out；回傳錯誤字（nil＝照寫）。start＝這次存完的第一期（扣款日改了用新的）
     private static func fixedEndChanges(_ e: Expense, end: MacFixedEndDraft, start: Date, now: Date,
                                         into out: inout [String: Any?]) -> String? {
-        let today = MacFixedCal.day(now)
-        let closedPast = e.endDate.map { old in MacFixedCal.day(old) < today } ?? false
+        let closedPast = fixedEndClosedPast(e, now: now)
         guard end.enabled else {
             // 關掉：原本有停止日才拿掉；原本停在以前 → 會多出以前的期數
             guard e.endDate != nil else { return nil }

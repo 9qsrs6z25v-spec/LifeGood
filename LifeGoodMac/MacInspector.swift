@@ -4,6 +4,8 @@
 // 下面放 G3 的 MacInspectorEditSection(ref:)（每欄能不能改＋原因、〔編輯〕〔刪除〕）。
 // [v25.642 mac3] 變動支出：分類寫細項說法（「汽車 - 罰款」）、付款跟表格同一支字（MacVariableTable.payText），
 // 多地點、同行、收受人、禮金種類、節稅項目、旅行、照片幾列（有才列、只看）。同行、收受人的字不能選取拷貝。
+// [v25.644 mac4] 固定支出改叫 MacFixedInspector（MacFixedPage.swift：基本資料 → 貸款進度 → 儲蓄險 → 金額走勢 → 備註）；
+// 變動支出、收入照舊。
 
 import SwiftUI
 
@@ -45,7 +47,11 @@ fileprivate struct MacInspectorFacts: View {
         switch ref {
         case .expense(let id):
             if let e = money.expense(id) {
-                MacExpenseFacts(rows: MacInspectorRows.expense(e, money: money), title: e.title)
+                if e.expenseType == .fixed {
+                    MacFixedInspector(expense: e, money: money)
+                } else {
+                    MacExpenseFacts(rows: MacInspectorRows.expense(e, money: money), title: e.title)
+                }
             } else {
                 MacMissingFacts()
             }
