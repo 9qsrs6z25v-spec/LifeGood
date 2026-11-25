@@ -1214,9 +1214,12 @@ struct EquipmentClaimPicker: View {
     private var grouped: [(deptName: String, items: [ManagedEquipment])] {
         let q = query.trimmingCharacters(in: .whitespaces)
         let retiredIds = lifeStore.retiredEquipmentIds   // [v25.643]
+        let deptIds = Set(lifeStore.departments.map { $0.id })   // [v25.643]
         let pool = lifeStore.equipmentPool
             // [v25.643] 停用的不能被接手；這位名下的停用機台照列（點一下＝釋回）
-            .filter { !retiredIds.contains($0.id) || $0.ownerId == subordinateId }
+            .filter { !retiredIds.contains($0.id) || $0.ownerId == subordinateId
+                // [v25.643] 停用、沒負責人、也沒部門（或部門已刪）的照列：部門頁、執掌頁都列不到它，這裡是唯一入口
+                || ($0.ownerId == nil && !deptIds.contains($0.departmentId ?? UUID())) }
             .filter { q.isEmpty || $0.name.localizedCaseInsensitiveContains(q)
                 || $0.note.localizedCaseInsensitiveContains(q)
                 || $0.system.localizedCaseInsensitiveContains(q) }
