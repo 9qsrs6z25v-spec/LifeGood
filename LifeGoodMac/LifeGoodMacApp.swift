@@ -5,6 +5,8 @@
 // • MacAppModel 持有全部 store；sheet、詳情、選單一律 .macStores(app)（Mac 沒有 AppStores／.appStores()）。
 // • 重新整理只從這裡（啟動的下一個 runloop、60 秒計時器、iCloud 帳號換了）、MacShell 的 scenePhase、⌘R、⟳ 觸發；
 //   不在 body、.task 裡寫 store。
+// • [v25.645 mac5] 圖表頁 ⌘5（MacPage.shows：圖表頁支出 true）；記帳小鎮 MacGameModel（只存這台 Mac 的 mac.game.*）掛進 .macStores，
+//   選單「顯示 › 遊戲元素」開關（judge_mac.md §S7-1）。
 
 import SwiftUI
 import AppKit
@@ -22,7 +24,7 @@ struct LifeGoodMacApp: App {
         }
         .defaultSize(width: 1180, height: 760)
         .commands {
-            MacAppCommands(model: model, ui: model.ui, money: model.money)
+            MacAppCommands(model: model, ui: model.ui, money: model.money, game: model.game)
             MacEditCommands(edit: model.edit, ui: model.ui)
         }
     }
@@ -55,8 +57,8 @@ enum MacPage: String, Hashable, CaseIterable {
         }
     }
 
-    /// 開放的頁（其他頁側欄反灰、標「下一版」、不能選）。[v25.641 mac2] 加收入；[v25.642 mac3] 加變動支出；[v25.644 mac4] 加固定支出
-    var isOpen: Bool { self == .overview || self == .income || self == .variable || self == .fixed || self == .source }
+    /// 開放的頁（其他頁側欄反灰、標「下一版」、不能選）。[v25.641 mac2] 加收入；[v25.642 mac3] 加變動支出；[v25.644 mac4] 加固定支出；[v25.645 mac5] 加圖表
+    var isOpen: Bool { self == .overview || self == .income || self == .variable || self == .fixed || self == .source || self == .chart }
 
     /// [v25.642 mac3] 這一頁有搜尋框（⌘F 反灰用）：收入、變動支出
     var hasSearch: Bool { self == .income || self == .variable }
@@ -85,7 +87,11 @@ enum MacPage: String, Hashable, CaseIterable {
         case .fixed:
             if case .expense = ref { return true }
             return false
-        case .chart, .source:
+        // [v25.645 mac5] 圖表頁：支出 true、收入 false（看門狗〔看一下〕不跳頁直接選）— sim5: page5#1
+        case .chart:
+            if case .expense = ref { return true }
+            return false
+        case .source:
             return false
         }
     }
@@ -182,6 +188,8 @@ final class MacAppModel: ObservableObject {
     let ui: MacUIState
     let journal: MacJournal
     let edit: MacEditCenter
+    /// [v25.645 mac5] 記帳小鎮（不收 MacJournal、MacEditCenter）
+    let game: MacGameModel
     private var bag: Set<AnyCancellable> = []
 
     init() {
@@ -192,6 +200,8 @@ final class MacAppModel: ObservableObject {
         self.ui = ui
         self.journal = journal
         self.edit = MacEditCenter(money: money, journal: journal, ui: ui)
+        // [v25.645 mac5] 一定在 [weak self] 閉包（下面的 Timer、CKAccountChanged）之前：stored property 要先都有值
+        self.game = MacGameModel(money: money)
         // 60 秒：App 在前景才抓（judge_mac.md §O3-1：前景每 60 秒）
         Timer.publish(every: 60, on: .main, in: .common)
             .autoconnect()
@@ -227,12 +237,15 @@ final class MacAppModel: ObservableObject {
 /// [v25.641 mac2] ⌘2 收入、⌘F 搜尋（只在收入頁）；系統「尋找」「拼字」那一組（.textEditing）整組拿掉，⌘F 不撞鍵
 /// [v25.642 mac3] ⌘3 變動支出；⌘F 收入、變動支出兩頁；⌘[ ⌘] ⌘T 切月份（只在變動支出頁；⌥←／⌥→ 不綁，留給文字框跳字）
 /// [v25.644 mac4] ⌘4 固定支出（全 Mac 只綁這一次）；這頁 ⌘F（hasSearch 不含）、⌘[ ⌘] ⌘T（不是變動支出頁）反灰
+/// [v25.645 mac5] ⌘5 圖表（全 Mac 只綁這一次）；〔詳情〕上面「遊戲元素」開關（不綁快捷鍵）
 @MainActor
 struct MacAppCommands: Commands {
     let model: MacAppModel
     @ObservedObject var ui: MacUIState
     /// [v25.642 mac3] 月份上下限跟著帳本（資料到了選單反灰要跟著更新）
     @ObservedObject var money: MacMoneyStore
+    /// [v25.645 mac5] 記帳小鎮開關（打勾跟著 enabled）
+    @ObservedObject var game: MacGameModel
 
     var body: some Commands {
         CommandMenu("顯示") {
@@ -250,6 +263,9 @@ struct MacAppCommands: Commands {
             Button("固定支出") { ui.page = .fixed }
                 .keyboardShortcut("4")
                 .disabled(!MacPage.fixed.isOpen)
+            Button("圖表") { ui.page = .chart }
+                .keyboardShortcut("5")
+                .disabled(!MacPage.chart.isOpen)
             Button("資料來源") { ui.page = .source }
             Divider()
             Button("搜尋") { ui.searchRequest += 1 }
@@ -265,6 +281,8 @@ struct MacAppCommands: Commands {
             Button("回到本月") { ui.variableMonth = nil }
                 .keyboardShortcut("t")
                 .disabled(!ui.canReturnVariableMonth(money: money, now: Date(), calendar: .current))
+            Divider()
+            Toggle("遊戲元素", isOn: Binding(get: { game.enabled }, set: { on in game.setEnabled(on) }))
             Divider()
             Button("詳情") { ui.showInspector.toggle() }
                 .keyboardShortcut("i", modifiers: [.command, .option])
@@ -285,5 +303,6 @@ extension View {
             .environmentObject(app.ui)
             .environmentObject(app.journal)
             .environmentObject(app.edit)
+            .environmentObject(app.game)
     }
 }

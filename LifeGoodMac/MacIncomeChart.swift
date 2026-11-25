@@ -31,13 +31,13 @@ struct MacIncomeChart: View {
 
     private func bar(_ b: MacIncomeBar) -> some ChartContent {
         BarMark(x: .value("月", b.label), yStart: .value("收入", 0.0), yEnd: .value("收入", b.amount), width: .ratio(0.6))
-            .foregroundStyle(Color.green.opacity(b.isCurrent ? 1.0 : 0.55))
+            .foregroundStyle(MacPageTheme.green.top.opacity(b.isCurrent ? 1.0 : 0.55))
             .cornerRadius(3)
     }
 
     private func expectedBar(_ cur: MacIncomeBar, _ e: Double) -> some ChartContent {
         BarMark(x: .value("月", cur.label), yStart: .value("收入", cur.amount), yEnd: .value("收入", e), width: .ratio(0.6))
-            .foregroundStyle(Color.green.opacity(0.18))
+            .foregroundStyle(MacPageTheme.green.top.opacity(0.18))
     }
 
     private func expectedRule(_ e: Double) -> some ChartContent {

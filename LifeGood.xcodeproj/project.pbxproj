@@ -471,6 +471,14 @@
 		A01B000005000024 /* MacFixedChart.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000024 /* MacFixedChart.swift */; };
 		A01B000005000025 /* MacFixedFormFields.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000025 /* MacFixedFormFields.swift */; };
 		A01B000005000026 /* MacFixedCal.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000026 /* MacFixedCal.swift */; };
+		A01B000005000027 /* MacTheme.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000027 /* MacTheme.swift */; };
+		A01B000005000028 /* MacChartBoard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000028 /* MacChartBoard.swift */; };
+		A01B000005000029 /* MacChartPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000029 /* MacChartPage.swift */; };
+		A01B000005000030 /* MacChartGraph.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000030 /* MacChartGraph.swift */; };
+		A01B000005000031 /* MacChartSky.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000031 /* MacChartSky.swift */; };
+		A01B000005000032 /* MacGameRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000032 /* MacGameRules.swift */; };
+		A01B000005000033 /* MacGameModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000033 /* MacGameModel.swift */; };
+		A01B000005000034 /* MacGameViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000034 /* MacGameViews.swift */; };
 		A01B000005000004 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A01A000005000004 /* Assets.xcassets */; };
 		A01B000005000050 /* Expense.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000002 /* Expense.swift */; };
 		A01B000005000051 /* Income.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100001B /* Income.swift */; };
@@ -998,6 +1006,14 @@
 		A01A000005000024 /* MacFixedChart.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacFixedChart.swift; sourceTree = "<group>"; };
 		A01A000005000025 /* MacFixedFormFields.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacFixedFormFields.swift; sourceTree = "<group>"; };
 		A01A000005000026 /* MacFixedCal.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacFixedCal.swift; sourceTree = "<group>"; };
+		A01A000005000027 /* MacTheme.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacTheme.swift; sourceTree = "<group>"; };
+		A01A000005000028 /* MacChartBoard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacChartBoard.swift; sourceTree = "<group>"; };
+		A01A000005000029 /* MacChartPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacChartPage.swift; sourceTree = "<group>"; };
+		A01A000005000030 /* MacChartGraph.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacChartGraph.swift; sourceTree = "<group>"; };
+		A01A000005000031 /* MacChartSky.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacChartSky.swift; sourceTree = "<group>"; };
+		A01A000005000032 /* MacGameRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacGameRules.swift; sourceTree = "<group>"; };
+		A01A000005000033 /* MacGameModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacGameModel.swift; sourceTree = "<group>"; };
+		A01A000005000034 /* MacGameViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacGameViews.swift; sourceTree = "<group>"; };
 		A01A000005000003 /* LifeGoodMac.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LifeGoodMac.entitlements; sourceTree = "<group>"; };
 		A01A000005000004 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -1579,6 +1595,14 @@
 				A01A000005000024 /* MacFixedChart.swift */,
 				A01A000005000025 /* MacFixedFormFields.swift */,
 				A01A000005000026 /* MacFixedCal.swift */,
+				A01A000005000027 /* MacTheme.swift */,
+				A01A000005000028 /* MacChartBoard.swift */,
+				A01A000005000029 /* MacChartPage.swift */,
+				A01A000005000030 /* MacChartGraph.swift */,
+				A01A000005000031 /* MacChartSky.swift */,
+				A01A000005000032 /* MacGameRules.swift */,
+				A01A000005000033 /* MacGameModel.swift */,
+				A01A000005000034 /* MacGameViews.swift */,
 				A01A000005000004 /* Assets.xcassets */,
 				A01A000005000003 /* LifeGoodMac.entitlements */,
 			);
@@ -2262,6 +2286,14 @@
 				A01B000005000024 /* MacFixedChart.swift in Sources */,
 				A01B000005000025 /* MacFixedFormFields.swift in Sources */,
 				A01B000005000026 /* MacFixedCal.swift in Sources */,
+				A01B000005000027 /* MacTheme.swift in Sources */,
+				A01B000005000028 /* MacChartBoard.swift in Sources */,
+				A01B000005000029 /* MacChartPage.swift in Sources */,
+				A01B000005000030 /* MacChartGraph.swift in Sources */,
+				A01B000005000031 /* MacChartSky.swift in Sources */,
+				A01B000005000032 /* MacGameRules.swift in Sources */,
+				A01B000005000033 /* MacGameModel.swift in Sources */,
+				A01B000005000034 /* MacGameViews.swift in Sources */,
 				A01B000005000050 /* Expense.swift in Sources */,
 				A01B000005000051 /* Income.swift in Sources */,
 				A01B000005000052 /* WidgetMoneyFormat.swift in Sources */,

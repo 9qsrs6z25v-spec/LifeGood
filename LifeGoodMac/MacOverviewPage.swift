@@ -4,6 +4,7 @@
 // 上面 4 格（本月收入／本月支出／本月結餘／今天花了）→ 有分帳時一行說明 → 本月花在哪裡（變動支出，只算自己那份）→ 最近交易 10 筆。
 // 數字全部由 MacMoneyStore.overview(now:calendar:) 一次算好（照抄 ExpenseStore），這裡只排版。
 // 點一筆＝ui.selection（右邊詳情）；連按兩下＝edit.requestEdit；右鍵〔編輯〕〔刪除…〕；⌫＝edit.requestDelete（要確認，G3）。
+// [v25.645 mac5] 最上面一條記帳小鎮（MacGameStrip）；四格放進綠色看板、白卡＋彩色圖示圓（G1a，judge_mac.md §S6-2）。
 
 import SwiftUI
 
@@ -14,7 +15,11 @@ struct MacOverviewPage: View {
 
     var body: some View {
         let numbers = money.overview(now: Date(), calendar: .current)
-        MacOverviewList(numbers: numbers, selection: $ui.selection, edit: edit)
+        // [v25.645 mac5] 最上面記帳小鎮的遊戲列（關掉時是空的）；List 一字不改
+        VStack(spacing: 0) {
+            MacGameStrip()
+            MacOverviewList(numbers: numbers, selection: $ui.selection, edit: edit)
+        }
     }
 }
 
@@ -70,48 +75,58 @@ fileprivate struct MacOverviewCards: View {
                 MacTodayCard(numbers: numbers)
             }
         }
+        .macBoard(.green)
         .padding(.vertical, 6)
+        .listRowSeparator(.hidden)
     }
 }
 
 /// 本月收入（小字：今年累計）
 fileprivate struct MacIncomeCard: View {
     let numbers: MacOverviewNumbers
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         MacStatCard(title: "本月收入", value: MacText.short(numbers.income),
-                    note: "今年累計 " + MacText.short(numbers.yearToDateIncome), tint: .primary)
+                    note: "今年累計 " + MacText.short(numbers.yearToDateIncome), tint: MacPalette(scheme).ink,
+                    icon: "arrow.down.circle.fill", theme: .green)
     }
 }
 
 /// 本月支出（小字：固定・變動）
 fileprivate struct MacSpendCard: View {
     let numbers: MacOverviewNumbers
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         MacStatCard(title: "本月支出", value: MacText.short(numbers.spend),
                     note: "固定 " + MacText.short(numbers.fixed) + "・變動 " + MacText.short(numbers.variable),
-                    tint: .primary)
+                    tint: MacPalette(scheme).ink, icon: "cart.fill", theme: .orange)
     }
 }
 
-/// 本月結餘（小字：本月還沒有收入／透支 NT$…／存下 39%）
+/// 本月結餘（小字：本月還沒有收入／透支 NT$…／存下 39%）；負數數字用 MacTone.bad
 fileprivate struct MacBalanceCard: View {
     let numbers: MacOverviewNumbers
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
+        let p = MacPalette(scheme)
+        let tint: Color = numbers.balance < 0 ? MacTone.bad.color(p) : p.ink
         MacStatCard(title: "本月結餘", value: MacText.short(numbers.balance),
                     note: MacOverviewText.savedLine(income: numbers.income, spend: numbers.spend),
-                    tint: numbers.balance < 0 ? .red : .primary)
+                    tint: tint, icon: "scalemass.fill", theme: .blue)
     }
 }
 
 /// 今天花了（變動支出今天＋固定支出每天攤的）
 fileprivate struct MacTodayCard: View {
     let numbers: MacOverviewNumbers
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        MacStatCard(title: "今天花了", value: MacText.short(numbers.today), note: nil, tint: .primary)
+        MacStatCard(title: "今天花了", value: MacText.short(numbers.today), note: nil, tint: MacPalette(scheme).ink,
+                    icon: "sun.max.fill", theme: .orange)
     }
 }
 
@@ -120,24 +135,28 @@ fileprivate struct MacStatCard: View {
     let value: String
     let note: String?
     let tint: Color
+    let icon: String
+    let theme: MacPageTheme
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text(title)
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
-            Text(value)
-                .font(.system(size: 24, weight: .semibold, design: .rounded))
-                .monospacedDigit()
+        let p = MacPalette(scheme)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                MacIconBadge(icon: icon, top: theme.top, bottom: theme.bottom, size: 24, solid: true)
+                Text(title)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(p.label)
+            }
+            MacStatNumber(text: value)
                 .foregroundStyle(tint)
             Text(note ?? " ")
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(p.label)
                 .lineLimit(1)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(12)
-        .background(Color.secondary.opacity(0.08), in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+        .macCard()
     }
 }
 
@@ -162,23 +181,40 @@ fileprivate struct MacCategoryList: View {
             Text("這個月還沒有變動支出")
                 .foregroundStyle(.secondary)
         } else {
+            // [v25.645 mac5 G1a] 分類色圖示圓；占比後面多一欄比例條（標頭空白）
             Grid(alignment: .leading, horizontalSpacing: 28, verticalSpacing: 6) {
                 GridRow {
                     Text("分類").foregroundStyle(.secondary)
                     Text("金額").foregroundStyle(.secondary).gridColumnAlignment(.trailing)
                     Text("占比").foregroundStyle(.secondary).gridColumnAlignment(.trailing)
+                    Text("")
                     Text("筆數").foregroundStyle(.secondary).gridColumnAlignment(.trailing)
                 }
                 ForEach(rows) { row in
                     GridRow {
-                        Label(row.category.rawValue, systemImage: row.category.icon)
+                        CategoryName(category: row.category)
                         Text(MacText.money(row.amount)).monospacedDigit()
                         Text(MacOverviewText.share(row.share)).monospacedDigit()
+                        MacMeterBar(fraction: min(max(row.share ?? 0, 0), 1), tint: row.category.accentColor)
+                            .frame(width: 120)
                         Text("\(row.count)").monospacedDigit()
                     }
                 }
             }
             .padding(.vertical, 4)
+        }
+    }
+
+    /// 分類名稱前面一顆 20pt 淡色圖示圓（分類色）
+    private struct CategoryName: View {
+        let category: VariableCategory
+
+        var body: some View {
+            HStack(spacing: 8) {
+                MacIconBadge(icon: category.icon, top: category.accentColor, bottom: category.accentColor.opacity(0.7),
+                             size: 20, solid: false)
+                Text(category.rawValue)
+            }
         }
     }
 }
@@ -203,6 +239,7 @@ fileprivate struct MacRecentRows: View {
 
 fileprivate struct MacRecentRowView: View {
     let row: MacRecentRow
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         HStack(spacing: 12) {
@@ -218,7 +255,7 @@ fileprivate struct MacRecentRowView: View {
             Spacer(minLength: 8)
             Text(MacOverviewText.amount(row))
                 .monospacedDigit()
-                .foregroundStyle(row.kind == .income ? Color.green : Color.primary)
+                .foregroundStyle(row.kind == .income ? MacTone.good.color(MacPalette(scheme)) : Color.primary)
         }
     }
 }

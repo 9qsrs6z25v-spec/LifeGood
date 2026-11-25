@@ -103,6 +103,8 @@ struct MacIncomeHeader: View {
     @Binding var range: MacIncomeRange
     let count: Int
 
+    // [v25.645 mac5] 看板自己有 12pt 內距：原本直向 12 拿掉、橫向 16 改 4（看板內距合起來一樣 16）、看板外直向 6，
+    // 頭部 250 高才裝得下 36pt 大字＋26pt 膠囊（不然看板下緣會壓到下面的篩選列）
     var body: some View {
         HStack(alignment: .top, spacing: 20) {
             MacIncomeSummary(board: board, now: now)
@@ -110,8 +112,10 @@ struct MacIncomeHeader: View {
             MacIncomeChartBox(board: board, range: $range, count: count)
                 .frame(minWidth: 200, maxWidth: .infinity)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 4)
+        .macBoard(.green)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
@@ -122,9 +126,7 @@ struct MacIncomeSummary: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text("本月已入帳")
-                .font(.subheadline)
-                .foregroundStyle(.secondary)
+            MacHeroLabel(text: "本月已入帳")
             MacIncomeBigNumber(value: board.income)
             MacIncomeYearLine(yearToDate: board.yearToDate)
             MacIncomeLineText(text: MacIncomeHeadline.line(board))
@@ -137,11 +139,9 @@ struct MacIncomeSummary: View {
 struct MacIncomeBigNumber: View {
     let value: Double
 
+    // [v25.645 mac5 G1b] 36pt 大字（換月份時數字會滾；減少動態效果時直接換，在 MacHeroNumber 裡）
     var body: some View {
-        Text(MacText.short(value))
-            .font(.system(size: 30, weight: .semibold, design: .rounded))
-            .monospacedDigit()
-            .lineLimit(1)
+        MacHeroNumber(text: MacText.short(value), value: value)
     }
 }
 
@@ -202,20 +202,15 @@ struct MacIncomeChipPair: View {
 struct MacIncomeChipView: View {
     let chip: MacIncomeChip
 
+    // [v25.645 mac5 G1b] 白膠囊（MacPill）
     var body: some View {
-        Label(chip.label + " " + chip.value, systemImage: chip.icon)
-            .font(.caption)
-            .lineLimit(1)
-            .foregroundStyle(tint)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(Color.secondary.opacity(0.12), in: Capsule())
+        MacPill(icon: chip.icon, label: chip.label, value: chip.value, tone: tone)
     }
 
-    /// 上月存下＝綠、上月透支＝紅、其餘膠囊照一般字色
-    private var tint: Color {
-        guard let good = chip.good else { return Color.primary }
-        return good ? Color.green : Color.red
+    /// 上月存下＝good（綠）、上月透支＝bad（紅）、其餘膠囊 neutral
+    private var tone: MacTone {
+        guard let good = chip.good else { return .neutral }
+        return good ? .good : .bad
     }
 }
 

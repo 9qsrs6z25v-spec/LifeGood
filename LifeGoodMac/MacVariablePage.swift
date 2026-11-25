@@ -212,6 +212,8 @@ struct MacVariableHead: View {
     let screen: MacVariableScreen
     @Binding var category: VariableCategory?
 
+    // [v25.645 mac5] 看板自己有 12pt 內距：原本直向 12 拿掉、橫向 16 改 4（看板內距合起來一樣 16）、看板外直向 6，
+    // 頭部 250 高才裝得下 36pt 大字＋26pt 膠囊（不然看板下緣會壓到下面的篩選列）
     var body: some View {
         HStack(alignment: .top, spacing: 20) {
             MacVariableSummary(screen: screen)
@@ -219,8 +221,10 @@ struct MacVariableHead: View {
             MacVariableShops(shops: screen.board.shops, otherClickable: screen.otherClickable, category: $category)
                 .frame(minWidth: 220, maxWidth: .infinity, alignment: .topLeading)
         }
-        .padding(.horizontal, 16)
-        .padding(.vertical, 12)
+        .padding(.horizontal, 4)
+        .macBoard(.orange)
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
         .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
@@ -231,9 +235,7 @@ struct MacVariableSummary: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 4) {
             MacVariableDateLine(header: screen.header)
-            Text(screen.header.label)
-                .font(.subheadline)
-                .foregroundStyle(Color.secondary)
+            MacHeroLabel(text: screen.header.label)
             MacVariableBigNumber(text: screen.header.big)
             MacVariableSmallText(text: screen.line, font: .callout)
             MacVariableChipRow(chips: screen.chips)
@@ -247,8 +249,11 @@ struct MacVariableSummary: View {
 /// 「11 月・第 23 天　［本月 86 筆］」（不是本月：只有「［86 筆］」）
 struct MacVariableDateLine: View {
     let header: MacVariableHeader
+    @Environment(\.colorScheme) private var scheme
 
+    // [v25.645 mac5 G1b] 膠囊換白膠囊（cellFill 底、cellStroke 0.75 框、capsuleText 字）
     var body: some View {
+        let p = MacPalette(scheme)
         HStack(spacing: 8) {
             if !header.date.isEmpty {
                 Text(header.date)
@@ -258,9 +263,11 @@ struct MacVariableDateLine: View {
             Text(header.capsule)
                 .font(.caption)
                 .monospacedDigit()
+                .foregroundStyle(p.capsuleText)
                 .padding(.horizontal, 8)
                 .padding(.vertical, 2)
-                .background(Color.secondary.opacity(0.12), in: Capsule())
+                .background(p.cellFill, in: Capsule())
+                .overlay(Capsule().stroke(p.cellStroke, lineWidth: 0.75))
         }
     }
 }
@@ -268,11 +275,9 @@ struct MacVariableDateLine: View {
 struct MacVariableBigNumber: View {
     let text: String
 
+    // [v25.645 mac5 G1b] 36pt 大字；只有字、沒有數值，換月份時直接換、不滾數字（brief T2、L14；MacFixedPage 也借）
     var body: some View {
-        Text(text)
-            .font(.system(size: 30, weight: .semibold, design: .rounded))
-            .monospacedDigit()
-            .lineLimit(1)
+        MacHeroNumber(text: text, value: 0)
     }
 }
 
@@ -324,14 +329,9 @@ struct MacVariableChipPair: View {
 struct MacVariableChipView: View {
     let chip: MacVariableChip
 
+    // [v25.645 mac5 G1b] 白膠囊（MacPill）；圖示照舊
     var body: some View {
-        Label(chip.label + " " + chip.value, systemImage: icon)
-            .font(.caption)
-            .lineLimit(1)
-            .foregroundStyle(chip.good ? Color.green : Color.primary)
-            .padding(.horizontal, 8)
-            .padding(.vertical, 3)
-            .background(Color.secondary.opacity(0.12), in: Capsule())
+        MacPill(icon: icon, label: chip.label, value: chip.value, tone: chip.good ? .good : .neutral)
     }
 
     /// 圖示照 iPhone 看板（MoneyBoards.swift:327-350）
@@ -397,8 +397,11 @@ struct MacVariableShopLabel: View {
     let shop: MacVariableShop
     let selected: Bool
 
+    // [v25.645 mac5 G1b] 名稱前一顆 20pt 分類色圖示圓；ProgressView 換 MacMeterBar
     var body: some View {
         HStack(spacing: 8) {
+            MacIconBadge(icon: shop.category.icon, top: shop.category.accentColor,
+                         bottom: shop.category.accentColor.opacity(0.7), size: 20, solid: false)
             Text(shop.category.rawValue)
                 .fontWeight(selected ? Font.Weight.semibold : Font.Weight.regular)
                 .lineLimit(1)
@@ -411,7 +414,7 @@ struct MacVariableShopLabel: View {
                 .monospacedDigit()
                 .foregroundStyle(Color.secondary)
                 .frame(width: 44, alignment: .trailing)
-            ProgressView(value: min(max(shop.share, 0), 1))
+            MacMeterBar(fraction: min(max(shop.share, 0), 1), tint: shop.category.accentColor)
                 .frame(maxWidth: 220)
         }
         .contentShape(Rectangle())

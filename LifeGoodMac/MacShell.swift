@@ -1,7 +1,7 @@
 // 只編進 LifeGoodMac；只寫白名單鍵、寫前重抓、條件寫入
 // [v25.640 mac1] 視窗骨架（brief.md §G2-6、judge_mac.md §F1、§F3、§O6）：側欄＋內容＋詳情（inspector）＋工具列。
 //
-// • 側欄：收支（總覽 ⌘1；收入 ⌘2〔v25.641〕；變動支出 ⌘3〔v25.642〕；固定支出 ⌘4〔v25.644〕；圖表 反灰標「下一版」不能選）｜資料來源。
+// • 側欄：收支（總覽 ⌘1；收入 ⌘2〔v25.641〕；變動支出 ⌘3〔v25.642〕；固定支出 ⌘4〔v25.644〕；圖表 ⌘5〔v25.645〕）｜資料來源。
 // • 工具列只有「iPhone 同步 hh:mm」和 ⟳；超過 24 小時變橘色＋「打開 iPhone 的 LifeGood 讓資料同步」。
 // • 空白狀態（審核員的 iCloud 是空的）：沒登入、沒資料、家人共享的成員、讀不到 各一段。
 // • 編輯的 sheet、確認框、紅條、看門狗、狀態列由 G3 的 .macEditorHost(app) 掛在整個 split view 上。
@@ -50,7 +50,7 @@ fileprivate struct MacSidebar: View {
                 MacSidebarRow(page: .income, note: "⌘2").tag(MacPage.income)
                 MacSidebarRow(page: .variable, note: "⌘3").tag(MacPage.variable)
                 MacSidebarRow(page: .fixed, note: "⌘4").tag(MacPage.fixed)
-                MacSidebarRow(page: .chart, note: "下一版")
+                MacSidebarRow(page: .chart, note: "⌘5").tag(MacPage.chart)
             }
             Section {
                 MacSidebarRow(page: .source, note: nil).tag(MacPage.source)
@@ -75,16 +75,30 @@ fileprivate struct MacSidebarRow: View {
     let page: MacPage
     let note: String?
 
+    // [v25.645 mac5 G1a] 圖示用這頁的主題色（MacPage.theme）；沒開的頁寫「下一版」，⌘ 字只放在滑過去的說明裡（brief T1）
     var body: some View {
         HStack(spacing: 6) {
-            Label(page.title, systemImage: page.icon)
+            Label {
+                Text(page.title)
+                    .foregroundStyle(page.isOpen ? Color.primary : Color.secondary)
+            } icon: {
+                Image(systemName: page.icon)
+                    .foregroundStyle(page.isOpen ? page.theme.tint : Color.secondary)
+            }
             Spacer(minLength: 4)
-            if let note {
-                Text(note).font(.caption).foregroundStyle(.tertiary)
+            if !page.isOpen {
+                Text("下一版").font(.caption).foregroundStyle(.tertiary)
             }
         }
-        .foregroundStyle(page.isOpen ? Color.primary : Color.secondary)
-        .help(page.isOpen ? page.title : "下一版開放")
+        .symbolRenderingMode(.hierarchical)
+        .help(helpText)
+    }
+
+    /// 開了＝「圖表（⌘5）」；沒開＝「下一版開放」
+    private var helpText: String {
+        guard page.isOpen else { return "下一版開放" }
+        guard let note else { return page.title }
+        return page.title + "（" + note + "）"
     }
 }
 
@@ -117,6 +131,13 @@ fileprivate struct MacDetailArea: View {
                 // [v25.644 mac4] 固定支出頁；沒有帳本照 Mac 1 的空白狀態
                 if money.account.hasLedger {
                     MacFixedPage()
+                } else {
+                    MacEmptyState(state: money.account)
+                }
+            case .chart:
+                // [v25.645 mac5] 圖表頁；沒有帳本照 Mac 1 的空白狀態
+                if money.account.hasLedger {
+                    MacChartPage()
                 } else {
                     MacEmptyState(state: money.account)
                 }
@@ -196,14 +217,17 @@ fileprivate struct MacEmptyCard: View {
     let content: MacEmptyContent
     @EnvironmentObject private var app: MacAppModel
 
+    // [v25.645 mac5 G1a] 大圖示圓（綠）＋步驟字＋綠色〔重新讀取〕；字（MacEmptyContent.make）一個都不改
     var body: some View {
-        ContentUnavailableView {
-            Label(content.title, systemImage: content.icon)
-        } description: {
+        VStack(spacing: 14) {
+            MacEmptyHint(icon: content.icon, tint: MacPageTheme.green.top, title: content.title, detail: nil)
             MacEmptyLines(lines: content.lines)
-        } actions: {
             Button("重新讀取") { app.requestRefresh() }
+                .buttonStyle(.borderedProminent)
+                .tint(MacPageTheme.green.bottom)
         }
+        .frame(maxWidth: 520)
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -227,16 +251,25 @@ fileprivate struct MacEmptyLines: View {
 
 fileprivate struct MacSyncStamp: View {
     @ObservedObject var money: MacMoneyStore
+    @Environment(\.colorScheme) private var scheme
 
+    // [v25.645 mac5 G1a] 字前面一顆 8pt 圓點：正常綠（MacTone.good）、要同步橘（MacTone.warn）；不包膠囊底
     var body: some View {
         let info = MacSyncStamp.info(offline: money.isOffline, lastFetch: money.lastFetch,
                                      phone: money.lastPhoneSync, account: money.account,
                                      showingCache: money.showingCache, cacheSavedAt: money.cacheSavedAt, now: Date())
-        Text(info.text)
-            .font(.callout)
-            .monospacedDigit()
-            .foregroundStyle(info.stale ? Color.orange : Color.secondary)
-            .help("iPhone 最後一次把收支推上 iCloud 的時間")
+        let p = MacPalette(scheme)
+        let dot: Color = info.stale ? MacTone.warn.color(p) : MacTone.good.color(p)
+        HStack(spacing: 6) {
+            Circle()
+                .fill(dot)
+                .frame(width: 8, height: 8)
+            Text(info.text)
+                .font(.callout)
+                .monospacedDigit()
+                .foregroundStyle(info.stale ? MacTone.warn.color(p) : Color.secondary)
+        }
+        .help("iPhone 最後一次把收支推上 iCloud 的時間")
     }
 
     /// 超過 24 小時沒更新＝橘色（judge_mac.md §F1）
