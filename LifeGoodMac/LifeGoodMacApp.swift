@@ -9,6 +9,7 @@
 //   選單「顯示 › 遊戲元素」開關（judge_mac.md §S7-1）。
 // • [v25.646 mac6] 誰還欠我頁 MacPage.owed（不綁 ⌘6；isOpen 由 G2 加）；記帳小鎮 MacGameModel 多收 MacJournal（只讀 kind、key、at）
 //   （judge_mac.md §T7-2）。
+// • [v25.648 mac7] MacUIState 多一個只在記憶體的 variableCategoryRequest（總覽分類卡 → 變動支出頁只看那一類；judge_mac.md §U7-2）。
 
 import SwiftUI
 import AppKit
@@ -132,6 +133,8 @@ final class MacUIState: ObservableObject {
     @Published var variableMonth: Date? = nil
     /// [v25.642 mac3] 變動支出頁「搜全部月份」（有搜尋字才出現；搜尋字清空、換頁歸零）
     @Published var variableSearchAll: Bool = false
+    /// [v25.648 mac7] 總覽分類卡要變動支出頁只看這一類（只在記憶體；變動支出頁 onAppear 讀到就清；sim7: jump7#1）
+    @Published var variableCategoryRequest: VariableCategory? = nil
 
     init() {
         let raw = UserDefaults.standard.string(forKey: "mac.sidebar.selection") ?? ""

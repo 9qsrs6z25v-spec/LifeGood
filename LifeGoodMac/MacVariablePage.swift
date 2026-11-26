@@ -37,6 +37,14 @@ struct MacVariablePage: View {
             .searchable(text: $query, placement: .toolbar, prompt: "搜尋名稱、備註、分類、地點")
             .searchFocused($searchFocused)
             .modifier(MacVariableSelectionGuard(key: key, focus: $searchFocused, ui: ui, money: money))
+            .onAppear { takeCategoryRequest() }
+    }
+
+    /// [v25.648 mac7] 總覽分類卡跳過來：讀到就清、只看那一類（不存 UserDefaults；sim7: jump7#2）
+    private func takeCategoryRequest() {
+        guard let c = ui.variableCategoryRequest else { return }
+        ui.variableCategoryRequest = nil
+        categoryFilter = c
     }
 }
 

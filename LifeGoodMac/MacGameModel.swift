@@ -14,6 +14,8 @@
 //   先讀本機那份再算（打卡要算進記帳日）；版本三分（沒有／壞＝第一次、v1＝就地遷移、v ≥ 3＝只看不寫）。
 //   讀日誌只准 kind == .add、key、at 與 accountHash（第一次在電腦記帳那枚）；不碰分帳、不寫 log、沒有金額與名字。
 //   打卡、回顧〔好〕只在按鈕動作裡寫；月曆只算不寫（翻到哪個月只在記憶體）。Mac 5 的 compute 留著對照（noSpend 空時 compute2 逐位一樣）。
+// • [v25.648 mac7 C0] 第三批年度星路的 @Published（yearRoad）、記憶體（yearShown、yearInput）與動作（openYear、stepYear、refreshYear）
+//   先放空殼（judge_mac.md §U5-4、§U7-2；只加）。G3 換內容並在 recompute 加三行；state、version()、dictionary 一字不動。
 
 import SwiftUI
 import Combine
@@ -137,6 +139,8 @@ final class MacGameModel: ObservableObject {
     @Published private(set) var calendarGrid: MacGameCalendarGrid? = nil
     /// [v25.646 mac6] 按了〔今天沒花錢〕+1（那盞燈 symbolEffect(.bounce, value:) 用）
     @Published private(set) var checkBounce: Int = 0
+    /// [v25.648 mac7] 年度星路（開著才有值；openYear／stepYear 只算不寫）
+    @Published private(set) var yearRoad: MacGameYearRoad? = nil
 
     private let money: MacMoneyStore
     private var bag: Set<AnyCancellable> = []
@@ -162,6 +166,10 @@ final class MacGameModel: ObservableObject {
     private var dayStreakSince: Date? = nil
     /// 這次可以慶祝的紀錄（celebrate 用完清空）
     private var pendingRecords: [MacGameRecordHit] = []
+    /// [v25.648 mac7] 星路翻到哪一年（記憶體，不存；nil＝星路沒開）
+    private var yearShown: Int? = nil
+    /// [v25.648 mac7] 上一次算的星路輸入（recompute 填；記憶體，不存）
+    private var yearInput: MacGameYearInput = .empty
 
     // sim5: game#21（什麼時候算：money 七個 @Published＋回到前景 → debounce 300ms → recompute；60 秒計時器跨午夜才算；不在 body、.task 裡算或寫）
     init(money: MacMoneyStore, journal: MacJournal) {
@@ -281,6 +289,21 @@ final class MacGameModel: ObservableObject {
         calendarGrid = MacGameDays.monthGrid(month: m, facts: dayFacts, noSpend: dayNoSpend, writable: dayWritable,
                                              streakWeeks: dayStreakWeeks, streakSince: dayStreakSince, now: now,
                                              calendar: MacGameRules.calendar)
+    }
+
+    // MARK: [v25.648 mac7] 年度星路（主控骨架：什麼都不做；G3 換內容，只算不寫）
+
+    /// 打開年度星路（只算不寫）
+    // sim7: game#61
+    func openYear() {
+    }
+
+    /// 星路翻年（n＝-1 前一年、1 後一年；只算不寫）
+    func stepYear(_ n: Int) {
+    }
+
+    /// 星路開著才算（recompute 結尾、打開、翻年）
+    private func refreshYear(now: Date) {
     }
 
     /// 16 碼小寫十六進位（MacMoneyStore.hashAccount 的樣子）；不是這個樣子不拼鍵、不刪
