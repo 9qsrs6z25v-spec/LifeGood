@@ -62,7 +62,7 @@ enum MacPage: String, Hashable, CaseIterable {
     }
 
     /// 開放的頁（其他頁側欄反灰、標「下一版」、不能選）。[v25.641 mac2] 加收入；[v25.642 mac3] 加變動支出；[v25.644 mac4] 加固定支出；[v25.645 mac5] 加圖表
-    var isOpen: Bool { self == .overview || self == .income || self == .variable || self == .fixed || self == .source || self == .chart }
+    var isOpen: Bool { self == .overview || self == .income || self == .variable || self == .fixed || self == .source || self == .chart || self == .owed }
 
     /// [v25.642 mac3] 這一頁有搜尋框（⌘F 反灰用）：收入、變動支出
     var hasSearch: Bool { self == .income || self == .variable }
