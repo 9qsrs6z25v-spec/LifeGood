@@ -471,7 +471,7 @@ enum MacOverviewBoardText {
     // ⑬ 照抄 OverviewBoard.swift:540（d070244）未來 7 天標頭右邊的字（MoneyFormat.short → MacText.short）— sim7: ov7#13
     /// 「3 筆・NT$2,960」
     static func upcomingCount(_ bills: [MacOverviewBill]) -> String {
-        let total = bills.reduce(0) { $0 + $1.amount }
+        let total: Double = bills.reduce(0) { $0 + $1.amount }
         return "\(bills.count) 筆・" + MacText.short(total)
     }
 
@@ -516,7 +516,7 @@ enum MacOverviewBoardText {
     // ④ 照抄 OverviewView.swift:218（d070244）分類區標頭右邊的字（ntdWanString → MacText.short）— sim7: ov7#16
     /// 「6 類・NT$2.2萬」；沒有分類＝nil
     static func categoryCount(_ stats: [MacOverviewCategoryStat]) -> String? {
-        let total = stats.reduce(0) { $0 + $1.amount }
+        let total: Double = stats.reduce(0) { $0 + $1.amount }
         return stats.isEmpty ? nil : "\(stats.count) 類・" + MacText.short(total)
     }
 

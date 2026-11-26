@@ -37,7 +37,7 @@ struct MacOverviewHeroBoard: View {
                 MacOverviewHeroLead(data: data, head: head)
                     .frame(maxWidth: .infinity, alignment: .leading)
                 MacOverviewMoneyCell(data: data)
-                    .frame(minWidth: 300, idealWidth: 380, maxWidth: 420)
+                    .frame(minWidth: 360, idealWidth: 400, maxWidth: 440)
             }
             MacOverviewTileRow(tiles: MacOverviewBoardText.tiles(data))
         }
@@ -509,7 +509,7 @@ struct MacOverviewCategoryCards: View {
     private var rows: [Int] { Array(stride(from: 0, to: stats.count, by: 3)) }
 
     var body: some View {
-        let total = stats.reduce(0) { $0 + $1.amount }
+        let total: Double = stats.reduce(0) { $0 + $1.amount }
         VStack(alignment: .leading, spacing: 0) {
             if stats.isEmpty {
                 MacEmptyHint(icon: "chart.bar.xaxis", tint: MacPageTheme.orange.top, title: "尚無分類紀錄",
