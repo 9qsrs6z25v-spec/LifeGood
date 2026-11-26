@@ -575,13 +575,19 @@ final class CloudKitManager {
                         // 只在拉取時前進，推送後緊接的下一次拉取一定會看到自己剛寫入的 record）。
                         // 若內容與本地已存的完全相同，視為 echo，跳過寫入與通知，避免各 Store 收到
                         // 「已變更」的 key 而整批 reload 未變動的資料，造成畫面閃爍。
+                        // [v25.647] 拉下來的＝這台上次推上去（或拉過）的那份：本機可能已經又改過、還沒推上去
+                        // （2 秒防抖、推送中、App 剛回前景先拉後推），不能拿舊的蓋回去。
+                        // 例：複製一筆有入銀行的收入，接著改新那筆的金額，銀行那筆被拉回的舊金額蓋掉（收入走三方合併沒事）。
+                        // 別台推的新內容指紋一定不同，照舊寫入；重置、重建 zone、切共享時指紋帳本會清掉，照舊行為。
+                        let pulledSig = Self.kvSignature(data)
+                        if self.kvPushLedger()[key] == pulledSig { return }
                         if self.defaults.data(forKey: key) != data {
                             self.defaults.set(data, forKey: key)
                             lock.lock(); pulledKVKeys.insert(key); lock.unlock()
                         }
                         // 拉下來的內容＝雲端現況：更新推送指紋帳本，避免下輪 pushAll
                         // 把剛拉回的資料又原樣回推一次（回音推送）
-                        self.markKVPushed(key: key, signature: Self.kvSignature(data))
+                        self.markKVPushed(key: key, signature: pulledSig)
                     }
                 } else if record.recordType == Self.photoRecordType {
                     if let dir = record["directory"] as? String,
