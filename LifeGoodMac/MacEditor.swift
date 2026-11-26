@@ -12,6 +12,9 @@
 // can_stop／open_draft；sim4 編號 field4#、gate4#、post4#、own4#、stop4#、write4#4、journal4#3、entry4#3）：固定支出可改
 // （表單固定模式、〔從今天起〕詢問框、〔停止扣款…〕）、editField 分類型（W4-1）、gate 多看新欄位值與 iPhone 剛改的金額（gate4#2）、
 // postCheck P5～P8／A0／A3F、刪除只開這次開 App 電腦記的那筆（launchedAt＋ownAdd＋deleteGate）、看門狗〔補回〕照組。
+// [v25.646 mac6 G1] judge_mac §T4-5、§T4-8（sim_mac6.py split6#23～#30）：檔尾誰還欠我的 4 支入口（標已還、改成還沒還）＋submitSplit／
+// finishSplit；⌘Z／⌘⇧Z／〔改回〕／〔補回〕開頭分帳分流（收支那條一字不改）；ref(key:itemID:) 不認分帳；看門狗列〔看一下〕；
+// 分帳自我檢查列；分帳備份不給〔挑一筆加回…〕。復原名稱只「標已還」「改成還沒還」；名字不進日誌、復原名稱、狀態列。
 import Combine
 import Foundation
 import SwiftUI
@@ -1223,6 +1226,8 @@ final class MacEditCenter: ObservableObject {
 
     /// 反過來做：新增→刪掉、刪除→把刪前原字典加回、改→只改回這次改的欄位（那欄現在不是電腦寫的值 → 先問）
     private func performInverse(_ entry: MacJournalEntry, purpose: MacWritePurpose) {
+        // sim6: split6#26 分帳那條走分帳的復原（收支那條一字不改）
+        if entry.key == MacCloud.splitsKey { splitInverse(entry, purpose: Self.splitPurpose(purpose)); return }
         guard writeEnabled else { show(writeLockText, isError: true); return }
         show("取得 iCloud 最新資料…", progress: true)
         Task { [weak self] in
@@ -1266,11 +1271,15 @@ final class MacEditCenter: ObservableObject {
                 let names = drifted.sorted().map { k in MacEntryRules.fieldName(k) }.joined(separator: "、")
                 hostAsk = .revert(MacRevertAsk(job: job, fieldNames: names))
             }
+        case .repay, .unrepay:
+            return                                      // 分帳在 performInverse 開頭就分流（這裡到不了）
         }
     }
 
     /// 再做一次：新增→加回、刪除→再刪、改→改成電腦寫的值
     private func performForward(_ entry: MacJournalEntry, purpose: MacWritePurpose) {
+        // sim6: split6#26 分帳那條走分帳的重做
+        if entry.key == MacCloud.splitsKey { splitForward(entry); return }
         guard writeEnabled else { show(writeLockText, isError: true); return }
         show("取得 iCloud 最新資料…", progress: true)
         Task { [weak self] in
@@ -1297,10 +1306,13 @@ final class MacEditCenter: ObservableObject {
             var changes: [String: Any?] = [:]
             for (k, pair) in entry.fields { changes.updateValue(pair.after, forKey: k) }
             return .edit(id: entry.itemID, changes: changes)
+        case .repay, .unrepay:
+            return nil                                  // 分帳在 performForward 開頭就分流
         }
     }
 
     static func ref(key: String, itemID: String) -> MacEntryRef? {
+        guard key != MacCloud.splitsKey else { return nil }   // sim6: split6#28 分帳日誌的 itemID 是「支出|那位」，不當成一筆支出
         guard let uuid = UUID(uuidString: itemID) else { return nil }
         return key == LedgerMerge.incomesKey ? .income(uuid) : .expense(uuid)
     }
@@ -1343,6 +1355,26 @@ final class MacEditCenter: ObservableObject {
         var done = 0
         var problem: String?
         for item in items {
+            // sim6: split6#27 分帳那條走 saveSplit（同一個 isBusy、一次寫一筆；收支那條一字不改）
+            if item.entry.key == MacCloud.splitsKey {
+                guard let splitAction = Self.splitRestoreAction(item, now: Date()) else { continue }
+                let (outcome, entry) = await submitSplit(splitAction, purpose: .restore(item.entry.id))
+                switch outcome {
+                case .saved(let record, _):
+                    money.adopt(record)
+                    journal.resolve(item.entry.id)
+                    if let entry { registerSplitUndo(entry) }
+                    done += 1
+                case .nothingToWrite(let record):
+                    money.adopt(record)
+                    journal.resolve(item.entry.id)
+                    done += 1
+                default:
+                    problem = Self.text(for: outcome)
+                }
+                if problem != nil { break }
+                continue
+            }
             guard let action = restoreAction(item) else { continue }
             if let reason = policyBlock(action, key: item.entry.key) {
                 problem = reason
@@ -1396,6 +1428,8 @@ final class MacEditCenter: ObservableObject {
         case .deleteBack:
             if let ref = Self.ref(key: e.key, itemID: e.itemID), deleteReason(ref) != nil { return nil }
             return .delete(id: e.itemID)
+        case .repayMissing, .unrepayBack, .repayTwice:
+            return nil                                  // 分帳在 restoreAll 開頭分流（splitRestoreAction）
         }
     }
 
@@ -1408,6 +1442,8 @@ final class MacEditCenter: ObservableObject {
     /// 「最近在電腦改的」：〔改回〕＝把那次動作反過來做
     func revertEntry(_ entryID: String) {
         guard let entry = journal.entry(entryID) else { return }
+        // sim6: split6#26 分帳那條〔改回〕＝分帳的 ⌘Z
+        if entry.key == MacCloud.splitsKey { splitInverse(entry, purpose: .revert(entryID)); return }
         performInverse(entry, purpose: .revert(entryID))
     }
 
@@ -1694,6 +1730,13 @@ private struct MacWatchdogRow: View {
         ui.selection = ref
     }
 
+    /// sim6: split6#28 分帳那列〔看一下〕＝換到誰還欠我、選那筆支出（只換頁、不寫）
+    private func openOwed(_ id: UUID) {
+        let ui = edit.ui
+        ui.page = .owed
+        ui.selection = .expense(id)
+    }
+
     var body: some View {
         HStack(spacing: 8) {
             Text(item.text)
@@ -1701,6 +1744,10 @@ private struct MacWatchdogRow: View {
             Spacer()
             if let ref = MacEditCenter.ref(key: item.entry.key, itemID: item.entry.itemID), item.reason != .addMissing {
                 Button("選這筆") { select(ref) }
+                    .buttonStyle(.borderless)
+            }
+            if let id = MacEditCenter.splitExpenseID(item.entry) {
+                Button("看一下") { openOwed(id) }
                     .buttonStyle(.borderless)
             }
         }
@@ -2361,6 +2408,7 @@ struct MacWriteSettingsSection: View {
                 MacWriteToggleRow(toggle: toggle, canEnable: edit.canEnableWrites, lockText: edit.writeLockText,
                                   isOn: journal.writeEnabled)
                 MacGoldenRow(report: journal.golden)
+                MacSplitGoldenRow(report: journal.splitGolden)
                 Divider()
                 MacRecentEditsList(edit: edit, entries: journal.recentEntries())
                 Divider()
@@ -2430,6 +2478,24 @@ private struct MacGoldenRow: View {
     }
 }
 
+/// [v25.646 mac6 G1] 資料來源頁寫入區「分帳自我檢查 N/N」（sim6: split6#30）
+private struct MacSplitGoldenRow: View {
+    let report: MacSplitGolden.Report
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Image(systemName: report.allPassed ? "checkmark.seal.fill" : "xmark.octagon.fill")
+                .foregroundStyle(report.allPassed ? Color.green : Color.red)
+            Text(text)
+        }
+    }
+
+    private var text: String {
+        if report.allPassed { return "分帳自我檢查 \(report.passed)/\(report.total) 通過" }
+        return "分帳自我檢查 \(report.passed)/\(report.total)，沒全過，這台 Mac 先不能標已還"
+    }
+}
+
 private struct MacRecentEditsList: View {
     @ObservedObject var edit: MacEditCenter
     let entries: [MacJournalEntry]
@@ -2465,6 +2531,8 @@ private struct MacRecentEntryRow: View {
         case .add: kind = "記一筆"
         case .edit: kind = "修改"
         case .delete: kind = "刪除"
+        case .repay: kind = "標已還"
+        case .unrepay: kind = "改成還沒還"
         }
         let c = Calendar.current.dateComponents([.month, .day], from: entry.at)
         return "\(kind)・\(c.month ?? 0)/\(c.day ?? 0) \(MacEditCenter.clock(entry.at))"
@@ -2534,7 +2602,10 @@ private struct MacBackupRowView: View {
         HStack {
             Text(title)
             Spacer()
-            Button("挑一筆加回…") { pick = file }
+            // sim6: split6#30 分帳的備份不給〔挑一筆加回…〕（加回一頓／一筆還款牽涉合併規則，不做）
+            if file.key != MacCloud.splitsKey {
+                Button("挑一筆加回…") { pick = file }
+            }
         }
     }
 }
@@ -2859,26 +2930,229 @@ private struct MacInspectorHint: View {
     }
 }
 
-// MARK: - [v25.646 mac6 C0] 誰還欠我的入口（judge_mac.md §T4-8；G1 換內容）
+// MARK: - [v25.646 mac6 G1] 誰還欠我的入口（judge_mac.md §T4-8）
 
-// 同檔 extension 才拿得到 private 的 writer、registerUndo、show；共用同一個 isBusy（一次只寫一筆）。
-// 主控骨架：兩個 block 一律回「這一版電腦只能看」、兩個 request 什麼都不做（頁面鈕反灰，不寫任何東西）。
-// G1：block 依序 寫入開關 → journal.splitGolden.allPassed → 這次開 App 抓過且不是快照 → 離線 → isBusy；
-// request → submitSplit(_:purpose:) → writer.saveSplit → finishSplit。名字不進 registerUndo（只准「標已還」「改成還沒還」）。
+// 同檔 extension 才拿得到 private 的 writer、registerUndo、status、isBusy；共用同一個 isBusy（一次只寫一筆）。
+// block 依序：寫入開關 → 分帳黃金 → 這次開 App 抓過且不是快照 → 離線 → 其餘寫入條件（帳號、收支黃金）→ isBusy。
+// request → runSplit → submitSplit → writer.saveSplit → finishSplit。名字不進 registerUndo、日誌、狀態列。
 extension MacEditCenter {
     /// 〔已還…〕反灰原因（nil＝可以按）
     func repayBlock(_ r: MacOwedMealRef) -> String? {
-        MacSplitPatch.reasonText("page_only")
+        splitBlock()
     }
 
     /// 〔記下來〕（表單按了才呼叫；date＝表單選的日子）
-    func requestRepay(_ r: MacOwedMealRef, date: Date) {}
+    func requestRepay(_ r: MacOwedMealRef, date: Date) {
+        if let block = splitBlock() { show(block, isError: true); return }
+        // sim6: split6#24 新 id（大寫 UUID）、整數秒；金額先放畫面看到的（寫入層換成剛抓到的 outstanding，差 ≥ 0.005 就擋）
+        let rep = MacSplitPatch.repayment(id: UUID().uuidString, date: MacSplitPatch.seconds(date), amount: r.expected)
+        let action = MacSplitAction.repay(expenseID: r.expenseID.uuidString, shareID: r.shareID.uuidString, repayment: rep,
+                                          expected: r.expected)
+        runSplit(action, purpose: .page)
+    }
 
     /// 〔改成還沒還〕反灰原因（nil＝可以按）
     func unrepayBlock(_ r: MacOwedMealRef) -> String? {
-        MacSplitPatch.reasonText("page_only")
+        splitBlock()
     }
 
-    /// 〔改成還沒還〕確認框按了才呼叫
-    func requestUnrepay(_ r: MacOwedMealRef) {}
+    /// 〔改成還沒還〕確認框按了才呼叫（頁面看到的 lastRepayment；寫入層在剛抓到的那份上再確認是最近一筆）
+    func requestUnrepay(_ r: MacOwedMealRef) {
+        if let block = splitBlock() { show(block, isError: true); return }
+        let action = MacSplitAction.unrepay(expenseID: r.expenseID.uuidString, shareID: r.shareID.uuidString,
+                                            repaymentID: r.repaymentID?.uuidString, at: MacSplitPatch.seconds(Date()),
+                                            fromPage: true)
+        runSplit(action, purpose: .page)
+    }
+
+    // sim6: split6#23 兩個鈕共用的反灰原因（頁面用 write_off／snapshot／offline 三個字換成一行說明）
+    private func splitBlock() -> String? {
+        if !journal.writeEnabled { return MacSplitPatch.reasonText("write_off") }
+        if !journal.splitGolden.allPassed { return MacSplitPatch.reasonText("split_golden") }
+        if !money.hasFetchedThisLaunch || money.showingCache { return MacSplitPatch.reasonText("snapshot") }
+        if money.isOffline { return MacSplitPatch.reasonText("offline") }
+        if !writeEnabled { return writeLockText.isEmpty ? MacSplitPatch.reasonText("write_off") : writeLockText }
+        if isBusy { return "上一筆還在存，等一下再按" }
+        return nil
+    }
+
+    // sim6: split6#25 不在表單裡的分帳寫入（頁面、⌘Z、⌘⇧Z、〔改回〕）
+    private func runSplit(_ action: MacSplitAction, purpose: MacSplitPurpose) {
+        guard !isBusy else { show("上一筆還在存，等一下再按", isError: true); return }
+        show("存到 iCloud…", progress: true)
+        Task { [weak self] in
+            guard let self else { return }
+            let (outcome, entry) = await self.submitSplit(action, purpose: purpose)
+            self.finishSplit(action, purpose: purpose, outcome: outcome, entry: entry)
+        }
+    }
+
+    /// 寫分帳（〔補回〕直接叫；回傳結果）
+    func submitSplit(_ action: MacSplitAction, purpose: MacSplitPurpose) async -> (MacWriteOutcome, MacJournalEntry?) {
+        guard !isBusy else { return (.failed("上一筆還在存，等一下再按"), nil) }
+        isBusy = true
+        let outcome = await writer.saveSplit(action, journal: journal, golden: journal.golden, splitGolden: journal.splitGolden,
+                                             writeEnabled: writeEnabled, label: { raw in MacEditCenter.splitLabel(raw) })
+        isBusy = false
+        phase = nil
+        if case .saved = outcome { return (outcome, writer.lastEntry) }
+        return (outcome, nil)
+    }
+
+    /// 寫完：收進 MacMoneyStore、登記復原、狀態列（iPhone 剛做過＝灰字，不是錯誤）
+    private func finishSplit(_ action: MacSplitAction, purpose: MacSplitPurpose, outcome: MacWriteOutcome,
+                             entry: MacJournalEntry?) {
+        switch outcome {
+        case .saved(let record, _):
+            money.adopt(record)
+            afterSplitSaved(purpose, entry: entry)
+        case .nothingToWrite(let record):
+            money.adopt(record)
+            if case .restore(let id) = purpose { journal.resolve(id) }
+            show(MacSplitPatch.reasonText(Self.isRepay(action) ? "already_settled" : "already_undone"))
+        default:
+            show(Self.text(for: outcome), isError: true)
+        }
+        refreshWatchdog(money.records)
+    }
+
+    private func afterSplitSaved(_ purpose: MacSplitPurpose, entry: MacJournalEntry?) {
+        let time = Self.clock(Date())
+        switch purpose {
+        case .page:
+            if let entry { registerSplitUndo(entry) }
+            let text = entry?.kind == .unrepay ? "已改成還沒還" : "記好了：已還（現金）"
+            status = MacEditStatus(text: "\(text) \(time)", isError: false, isProgress: false, undoEntryID: entry?.id)
+        case .undo:
+            show("已復原 \(time)")                          // 復原、重做自己寫的那一筆不登記，不佔 20 步
+        case .redo:
+            show("已重做 \(time)")
+        case .restore(let id):
+            journal.resolve(id)
+            if let entry { registerSplitUndo(entry) }
+            show("已補回 \(time)")
+        case .revert:
+            if let entry { registerSplitUndo(entry) }
+            show("已改回 \(time)")
+        }
+    }
+
+    /// 復原名稱只准這兩個（不帶名字）
+    private func registerSplitUndo(_ entry: MacJournalEntry) {
+        if entry.kind == .unrepay {
+            registerUndo(entry.id, name: "改成還沒還", redo: false)
+        } else {
+            registerUndo(entry.id, name: "標已還", redo: false)
+        }
+    }
+
+    private static func isRepay(_ action: MacSplitAction) -> Bool {
+        if case .repay = action { return true }
+        return false
+    }
+
+    // MARK: ⌘Z／⌘⇧Z／〔改回〕／〔補回〕
+
+    private static func splitPurpose(_ p: MacWritePurpose) -> MacSplitPurpose {
+        switch p {
+        case .redo: return .redo
+        case .restore(let id): return .restore(id)
+        case .revert(let id): return .revert(id)
+        case .form, .delete, .undo, .addBack, .duplicate: return .undo
+        }
+    }
+
+    // sim6: split6#26 ⌘Z（〔改回〕同）：標已還 → 撤「這一步現在代表的那筆」；改成還沒還 → 新 id 再標一次（同日期、同金額）
+    private func splitInverse(_ entry: MacJournalEntry, purpose: MacSplitPurpose) {
+        if let block = splitBlock() { show(block, isError: true); return }
+        guard let action = Self.splitInverseAction(entry, entries: journal.entries, newID: UUID().uuidString, now: Date()) else {
+            show("日誌裡這筆讀不懂，沒辦法復原", isError: true)
+            return
+        }
+        runSplit(action, purpose: purpose)
+    }
+
+    /// ⌘⇧Z：標已還 → 新 id 再標一次（撤銷是黏的）；改成還沒還 → 撤上一步復原新建的那筆
+    private func splitForward(_ entry: MacJournalEntry) {
+        if let block = splitBlock() { show(block, isError: true); return }
+        guard let action = Self.splitForwardAction(entry, entries: journal.entries, newID: UUID().uuidString, now: Date()) else {
+            show("日誌裡這筆讀不懂，沒辦法重做", isError: true)
+            return
+        }
+        runSplit(action, purpose: .redo)
+    }
+
+    static func splitInverseAction(_ entry: MacJournalEntry, entries: [MacJournalEntry], newID: String,
+                                   now: Date) -> MacSplitAction? {
+        guard let info = MacSplitPatch.entryInfo(entry.rawAfter) else { return nil }
+        if entry.kind == .repay {
+            let rid = splitCurrentID(entry, entries: entries, fallback: info.repaymentID)
+            return .unrepay(expenseID: info.expenseID, shareID: info.shareID, repaymentID: rid, at: MacSplitPatch.seconds(now),
+                            fromPage: false)
+        }
+        if entry.kind == .unrepay {
+            let rep = MacSplitPatch.repayment(id: newID, date: info.date, amount: info.amount)
+            return .repay(expenseID: info.expenseID, shareID: info.shareID, repayment: rep, expected: info.amount)
+        }
+        return nil
+    }
+
+    static func splitForwardAction(_ entry: MacJournalEntry, entries: [MacJournalEntry], newID: String,
+                                   now: Date) -> MacSplitAction? {
+        guard let info = MacSplitPatch.entryInfo(entry.rawAfter) else { return nil }
+        if entry.kind == .repay {
+            let rep = MacSplitPatch.repayment(id: newID, date: info.date, amount: info.amount)
+            return .repay(expenseID: info.expenseID, shareID: info.shareID, repayment: rep, expected: info.amount)
+        }
+        if entry.kind == .unrepay {
+            let rid = splitCurrentID(entry, entries: entries, fallback: info.repaymentID)
+            return .unrepay(expenseID: info.expenseID, shareID: info.shareID, repaymentID: rid, at: MacSplitPatch.seconds(now),
+                            fromPage: false)
+        }
+        return nil
+    }
+
+    /// 這一步現在代表的那筆還款：從這筆日誌起（含自己）同一頓同一位最後一筆「標已還」的 id（⌘Z／⌘⇧Z 每次新建的都算）；
+    /// 沒有就是自己那筆。⌘⇧Z「改成還沒還」撤的是上一步復原新建的 R'，不是那位現在的 lastRepayment
+    static func splitCurrentID(_ entry: MacJournalEntry, entries: [MacJournalEntry], fallback: String) -> String {
+        guard let start = entries.firstIndex(where: { e in e.id == entry.id }) else { return fallback }
+        var cur = fallback
+        for e in entries[start...] where e.key == MacCloud.splitsKey && e.itemID == entry.itemID && e.kind == .repay {
+            if let info = MacSplitPatch.entryInfo(e.rawAfter) { cur = info.repaymentID }
+        }
+        return cur
+    }
+
+    // sim6: split6#27 〔補回〕：repayMissing＝同 id、同日期、同金額再標；unrepayBack、repayTwice＝撤電腦那筆
+    static func splitRestoreAction(_ item: MacWatchdogItem, now: Date) -> MacSplitAction? {
+        guard let info = MacSplitPatch.entryInfo(item.entry.rawAfter) else { return nil }
+        if item.reason == .repayMissing {
+            let rep = MacSplitPatch.repayment(id: info.repaymentID, date: info.date, amount: info.amount)
+            return .repay(expenseID: info.expenseID, shareID: info.shareID, repayment: rep, expected: info.amount)
+        }
+        if item.reason == .unrepayBack || item.reason == .repayTwice {
+            return .unrepay(expenseID: info.expenseID, shareID: info.shareID, repaymentID: info.repaymentID,
+                            at: MacSplitPatch.seconds(now), fromPage: false)
+        }
+        return nil
+    }
+
+    // MARK: 字
+
+    // sim6: split6#29 日誌那一行「分帳還款・11/20 飲食」（照 iPhone 存摺備註 ES:1119-1125；不帶名字、店名、金額）
+    static func splitLabel(_ raw: [String: Any]) -> String {
+        var day = ""
+        if let t = MacSplitPatch.number(raw["date"]) {
+            let c = Calendar.current.dateComponents([.month, .day], from: Date(timeIntervalSinceReferenceDate: t))
+            day = "\(c.month ?? 0)/\(c.day ?? 0)"
+        }
+        let category = (raw["variableCategory"] as? String).flatMap { s in VariableCategory(rawValue: s) } ?? VariableCategory.other
+        return "分帳還款・" + day + " " + category.rawValue
+    }
+
+    /// 分帳日誌那筆支出的 id（itemID 前半；看門狗列〔看一下〕用，不經 ref(key:itemID:)）
+    static func splitExpenseID(_ entry: MacJournalEntry) -> UUID? {
+        guard entry.key == MacCloud.splitsKey else { return nil }
+        return UUID(uuidString: entry.itemID.components(separatedBy: "|").first ?? "")
+    }
 }

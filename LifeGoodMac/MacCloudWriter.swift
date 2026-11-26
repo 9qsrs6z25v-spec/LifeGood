@@ -13,6 +13,8 @@
 // 有 bytes 卻解不開 → 不存；gate 多傳剛抓到的分帳細項；那筆不在了又有分帳或細項紀錄 → 不給另存；⑥ 之後、⑦ 之前 postCheck 看合併後那筆。
 // [v25.644 mac4 G1] judge_mac §R6（sim_mac4.py save4；sim4 編號 write4#）：W4-13 刪除多一道 deleteGate（剛抓到那筆，每一輪都跑）；
 // W4-8 改的那筆 base 裡還在卻套不上 → cannotMerge（不問〔另存〕）；W4-9 金額＋金額歷史成組（〔用 iPhone 的〕一起換）。
+// [v25.646 mac6 G1] judge_mac §T4-2（sim_mac6.py split6#15～#18）：writeKeys 多分帳鍵；分帳只走檔尾 saveSplit（raw JSON 局部改：
+// 只加一筆現金還款、或在一筆現金還款加 removedAt）；save 一字不改（schema 擋線照留＝分帳走 save 一定被擋）。
 import CloudKit
 import Foundation
 import os
@@ -87,7 +89,7 @@ enum MacWritePhase {
 
 @MainActor
 final class MacCloudWriter {
-    static let writeKeys = ["lifegood_expenses", "lifegood_incomes"]
+    static let writeKeys = ["lifegood_expenses", "lifegood_incomes", "lifegood_expense_splits_v1"]
     static let maxAttempts = 3
 
     let cloud: MacCloud
@@ -532,5 +534,145 @@ final class MacCloudWriter {
         case .failed(let s): return s
         default: return "iCloud 出錯"
         }
+    }
+}
+
+// MARK: - [v25.646 mac6 G1] 分帳寫入（judge_mac §T4-2；同檔 extension 才拿得到 private 的 conditionalSave、lastEntry、logger）
+
+// 每次存（最多 3 次嘗試）：① 開關、收支黃金、分帳黃金、白名單 ② 同一次重抓分帳＋支出（記錄不存在 → 不建）②b 形狀
+// ③ gate（每一輪都在剛抓到的那份上重跑）④ resolved＋apply（＝local 只有這一個冪等動作的 threeWay）⑤ selfCheck ⑥ postCheck
+// ⑦ 跟雲端一樣不寫 ⑧ 序列化 ⑨ 寫前備份 ⑩ 拿剛抓到的那個 CKRecord 只設 payload／updatedAt／keyName，.ifServerRecordUnchanged
+// ⑪ 讀回 ⑫ 日誌（不帶名字；label 由 MacEditCenter 給「分帳還款・11/20 飲食」）。log 只記個數、.private。
+extension MacCloudWriter {
+    func saveSplit(_ action: MacSplitAction, journal: MacJournal, golden: LedgerMergeGolden.Report, splitGolden: MacSplitGolden.Report, writeEnabled: Bool, label: @MainActor ([String: Any]) -> String) async -> MacWriteOutcome {
+        lastEntry = nil
+        // sim6: split6#15 ① 開關、黃金案例（收支、分帳）、白名單
+        guard writeEnabled else { return .locked(MacSplitPatch.reasonText("write_off")) }
+        guard golden.allPassed else {
+            return .locked("自我檢查 \(golden.passed)/\(golden.total) 沒全過，這台 Mac 先不能改")
+        }
+        guard splitGolden.allPassed else { return .locked(MacSplitPatch.reasonText("split_golden")) }
+        let key = MacCloud.splitsKey
+        guard Self.writeKeys.contains(key) else { return .locked(MacSplitPatch.reasonText("page_only")) }
+        for attempt in 1...Self.maxAttempts {
+            onPhase?(.fetching)
+            // sim6: split6#16 ② 分帳＋支出同一次抓（抓失敗照舊回錯，不當成「沒有」）；任一個記錄不在 → 不建
+            let fetched: MacKVRecord
+            let expensesData: Data
+            do {
+                let map = try await cloud.fetch([MacCloud.splitsKey, MacCloud.expensesKey], withPayload: true)
+                guard let s = map[MacCloud.splitsKey], s.record != nil, s.data != nil,
+                      let e = map[MacCloud.expensesKey], e.record != nil, let ed = e.data else { return .noRecord }
+                fetched = s
+                expensesData = ed
+            } catch {
+                return Self.outcome(for: error)
+            }
+            guard let record = fetched.record, let remoteData = fetched.data else { return .noRecord }
+            // ②b 分帳頂層是物件、splits 是陣列；支出是陣列（解不開不能當空包）
+            guard let root = (try? JSONSerialization.jsonObject(with: remoteData, options: [])) as? [String: Any],
+                  (root["splits"] as? [Any]) != nil, let expenses = LedgerMerge.parseArray(expensesData) else {
+                return .locked(MacSplitPatch.reasonText("split_shape"))
+            }
+            // sim6: split6#17 ③ gate（剛抓到的；每一輪重試都重跑）
+            switch MacSplitPatch.gate(root, expenses: expenses, action: action, now: Date()) {
+            case .go:
+                break
+            case .done:
+                return .nothingToWrite(fetched)
+            case .locked(let k):
+                return .locked(MacSplitPatch.lockText(k, root: root, action: action))
+            }
+            // ④ 金額換成剛抓到的 outstanding、nil 換成 lastRepayment；套在剛抓到的那份上
+            guard let act = MacSplitPatch.resolved(action, in: root),
+                  let result = MacSplitPatch.apply(act, to: root) else { return .cannotMerge }
+            // ⑤ 自我檢查（結構）
+            let problems = MacSplitPatch.selfCheck(remote: root, result: result, action: act)
+            if !problems.isEmpty {
+                logger.error("分帳 selfCheck 沒過 \(problems.count, privacy: .private)")
+                return .selfCheckFailed(problems)
+            }
+            // ⑥ 存之前的檢查（語意：你的份不變、只現金、iPhone 解得開、那筆支出還在）
+            if let k = MacSplitPatch.postCheck(remote: root, result: result, expenses: expenses, action: act) {
+                return .locked(MacSplitPatch.reasonText(k))
+            }
+            // ⑦ 跟雲端一樣：不寫
+            if LedgerMerge.same(result, root) { return .nothingToWrite(fetched) }
+            // ⑧ 序列化
+            guard JSONSerialization.isValidJSONObject(result),
+                  let resultData = try? JSONSerialization.data(withJSONObject: result, options: []) else { return .cannotMerge }
+            // sim6: split6#18 ⑨ 寫前備份雲端那份
+            guard journal.backup(key: key, data: remoteData) else {
+                return .failed("這台 Mac 的備份寫不進去，這次先不存")
+            }
+            // ⑩ 條件寫入（拿剛抓到的那個 CKRecord；撞到 → 回 ② 重抓、重 gate）
+            onPhase?(.saving)
+            let tmp = FileManager.default.temporaryDirectory.appendingPathComponent("mac_kv_\(key).json")
+            do {
+                try resultData.write(to: tmp, options: .atomic)
+            } catch {
+                return .failed("暫存檔寫不進去，這次先不存")
+            }
+            record["payload"] = CKAsset(fileURL: tmp)
+            record["updatedAt"] = Date() as NSDate
+            record["keyName"] = key as NSString
+            let write = await Self.conditionalSave(record, database: cloud.database)
+            try? FileManager.default.removeItem(at: tmp)
+            let saved: CKRecord
+            switch write {
+            case .saved(let r):
+                saved = r
+            case .changed:
+                if attempt < Self.maxAttempts {
+                    try? await Task.sleep(nanoseconds: 500_000_000)
+                }
+                continue
+            case .error(let e):
+                return Self.outcome(for: e)
+            }
+            let entryLabel = label(MacSplitPatch.expenseItem(expenses, id: MacSplitPatch.ids(act).expense) ?? [:])
+            // ⑪ 讀回：同一個 changeTag 要解出來跟 result 一樣（tag 不一樣＝寫完之後別台又存了，這次照樣算存好）
+            var back: MacKVRecord? = nil
+            do {
+                let map = try await cloud.fetch([key], withPayload: true)
+                back = map[key]
+            } catch {
+                back = nil
+            }
+            guard let b = back, b.record != nil, let backData = b.data, Self.splitReadBackOK(b, saved: saved, data: backData, written: result) else {
+                // iCloud 已經回報存好了：日誌照記（看門狗、「最近在電腦改的」看得到），只是不登記復原
+                _ = Self.splitJournalEntry(act, written: result, label: entryLabel, journal: journal)
+                return .failed("寫進去了但讀不回來，請按 ⌘R")
+            }
+            let updatedAt = b.updatedAt ?? (saved["updatedAt"] as? Date) ?? Date()
+            // changeTag 用這次寫入伺服器給的（跟 data 對得上；同 save 的理由）
+            let newRecord = MacKVRecord(key: key, record: saved, data: resultData, changeTag: saved.recordChangeTag,
+                                        updatedAt: updatedAt, fetchedAt: Date())
+            // ⑫ 日誌
+            lastEntry = Self.splitJournalEntry(act, written: result, label: entryLabel, journal: journal)
+            return .saved(newRecord, merged: false)
+        }
+        return .busy
+    }
+
+    /// ⑪ 讀回那份：changeTag 跟這次寫入一樣 → 值要跟 result 一樣；不一樣（別台後來又存）→ 不比
+    private static func splitReadBackOK(_ back: MacKVRecord, saved: CKRecord, data: Data, written: [String: Any]) -> Bool {
+        guard back.changeTag == saved.recordChangeTag else { return true }
+        guard let obj = try? JSONSerialization.jsonObject(with: data, options: []) else { return false }
+        return LedgerMerge.same(obj, written)
+    }
+
+    /// ⑫ 一筆分帳日誌（key＝分帳鍵、itemID＝"<支出UUID>|<那位UUID>"、rawAfter 只有 id／日期／金額；沒有名字）
+    private static func splitJournalEntry(_ action: MacSplitAction, written: [String: Any], label: String,
+                                          journal: MacJournal) -> MacJournalEntry {
+        let info = MacSplitPatch.journalInfo(action, written: written)
+        let kind: MacJournalEntry.Kind
+        if case .repay = action {
+            kind = .repay
+        } else {
+            kind = .unrepay
+        }
+        return journal.record(key: MacCloud.splitsKey, kind: kind, itemID: info.itemID, label: label,
+                              fields: [:], rawBefore: nil, rawAfter: info.rawAfter)
     }
 }

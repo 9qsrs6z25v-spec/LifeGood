@@ -6,6 +6,9 @@
 // 別台後來又改成第三個值不提示。
 // [v25.644 mac4 G1] judge_mac §R6 W4-10（sim_mac4.py supersede4／reverted_fields4；sim4 編號 journal4#）：照 MacCloudWriter.fieldGroups
 // 成組（金額＋金額歷史、結束日＋結束原因）：後一次動到組裡任一欄 → 前一次那組整組不再看；看門狗同組每一欄都被改回才整組算。
+// [v25.646 mac6 G1] judge_mac §T4-5（sim_mac6.py split6#19～#22）：Kind 加 repay／unrepay（分帳日誌：itemID＝"<支出UUID>|<那位UUID>"、
+// rawAfter 只有 id／日期／金額、沒有名字）；看門狗加 repayMissing／unrepayBack／repayTwice（分帳那條在 parseArray 之前分流）；
+// 備份檔名認 MacCloudWriter.writeKeys（分帳備份也掃得到、14 天清）；init 跑一次分帳黃金（splitGolden）。
 import Foundation
 import os
 
@@ -13,6 +16,8 @@ import os
 struct MacJournalEntry: Codable, Identifiable {
     enum Kind: String, Codable {
         case add, edit, delete
+        // sim6: split6#20 [v25.646 mac6] 分帳：標已還、改成還沒還
+        case repay, unrepay
     }
 
     let id: String
@@ -78,6 +83,8 @@ struct MacJournalEntry: Codable, Identifiable {
 /// 看門狗抓到的一筆
 enum MacWatchdogReason: String {
     case addMissing, editReverted, editMissing, deleteBack
+    // sim6: split6#21 [v25.646 mac6] 分帳（rawValue＝MacSplitPatch.watchKey 回的字）
+    case repayMissing, unrepayBack, repayTwice
 }
 
 struct MacWatchdogItem: Identifiable {
@@ -94,6 +101,9 @@ struct MacWatchdogItem: Identifiable {
         case .editReverted: return "電腦改的「\(entry.label)」被改回原本的值"
         case .editMissing: return "電腦改過的「\(entry.label)」在另一台不見了"
         case .deleteBack: return "電腦刪掉的「\(entry.label)」又回來了"
+        case .repayMissing: return "電腦標的已還「\(entry.label)」不見了"
+        case .unrepayBack: return "電腦改成還沒還的「\(entry.label)」又變回已還"
+        case .repayTwice: return "「\(entry.label)」iPhone 也標了已還，現在記了兩次；〔補回〕會把電腦那筆改成還沒還"
         }
     }
 }
@@ -105,7 +115,7 @@ struct MacBackupFile: Identifiable, Hashable {
     let at: Date
     var id: String { url.lastPathComponent }
 
-    var keyName: String { key == LedgerMerge.incomesKey ? "收入" : "支出" }
+    var keyName: String { key == MacCloud.splitsKey ? "分帳" : (key == LedgerMerge.incomesKey ? "收入" : "支出") }   // sim6: split6#19
 }
 
 @MainActor
@@ -116,6 +126,8 @@ final class MacJournal: ObservableObject {
 
     /// LedgerMerge 黃金案例（啟動跑一次；沒全過就不准寫）
     let golden: LedgerMergeGolden.Report
+    /// [v25.646 mac6] 分帳黃金（啟動跑一次；沒全過只鎖分帳兩個動作，收支照舊）
+    let splitGolden: MacSplitGolden.Report
 
     @Published private(set) var accountHash: String?
     @Published private(set) var entries: [MacJournalEntry] = []
@@ -133,6 +145,12 @@ final class MacJournal: ObservableObject {
     init() {
         let g = LedgerMergeGolden.run()
         golden = g
+        // sim6: split6#22
+        let sg = MacSplitGolden.run()
+        splitGolden = sg
+        if !sg.allPassed {
+            logger.error("分帳自我檢查沒全過 \(sg.passed, privacy: .private)/\(sg.total, privacy: .private)")
+        }
         dismissed = Set(UserDefaults.standard.stringArray(forKey: "mac.watchdog.dismissed") ?? [])
         if !g.allPassed {
             logger.error("LedgerMerge 自我檢查沒全過 \(g.passed, privacy: .private)/\(g.total, privacy: .private)")
@@ -273,7 +291,7 @@ final class MacJournal: ObservableObject {
 
     /// 「<鍵>-yyyyMMdd-HHmmss-<fingerprint>.json」→ (鍵, 時間)
     private static func parseBackupName(_ name: String) -> (key: String, at: Date)? {
-        for key in LedgerMerge.keys {
+        for key in MacCloudWriter.writeKeys {
             let prefix = key + "-"
             guard name.hasPrefix(prefix) else { continue }
             let rest = name.dropFirst(prefix.count)
@@ -304,6 +322,8 @@ final class MacJournal: ObservableObject {
             switch kind {
             case .add, .delete:
                 entries[i].resolved = true                         // 之後在電腦又加又刪：舊的那筆不再看
+            case .repay, .unrepay:
+                entries[i].resolved = true                         // sim6: split6#20 同一頓同一位電腦又動了：前一筆不再看
             case .edit:
                 if entries[i].kind == .edit {
                     var s = Set(entries[i].supersededFields)
@@ -420,6 +440,13 @@ final class MacJournal: ObservableObject {
         let limit = Double(Self.recentDays) * 86400
         let now = Date()
         for e in entries where !e.resolved && !dismissed.contains(e.id) && now.timeIntervalSince(e.at) <= limit {
+            // sim6: split6#21 分帳那條：在 parseArray 之前分流（分帳那包是物件）
+            if e.key == MacCloud.splitsKey {
+                if let w = Self.splitWatch(e, splits: records[MacCloud.splitsKey]?.data, expenses: records[MacCloud.expensesKey]?.data) {
+                    out.append(w)
+                }
+                continue
+            }
             if parsed[e.key] == nil {
                 guard let data = records[e.key]?.data, let arr = LedgerMerge.parseArray(data) else { continue }
                 parsed[e.key] = (arr, LedgerMerge.index(arr).pos)
@@ -446,9 +473,18 @@ final class MacJournal: ObservableObject {
                 if at != nil {
                     out.append(MacWatchdogItem(entry: e, reason: .deleteBack, revertedFields: []))
                 }
+            case .repay, .unrepay:
+                continue                                           // 上面已經分流（這裡到不了）
             }
         }
         return out
+    }
+
+    /// [v25.646 mac6] 分帳日誌那筆在現在雲端那份上（MacSplitPatch.watchKey；不提示＝nil）
+    static func splitWatch(_ e: MacJournalEntry, splits: Data?, expenses: Data?) -> MacWatchdogItem? {
+        guard let k = MacSplitPatch.watchKey(kind: e.kind.rawValue, rawAfter: e.rawAfter, splits: splits, expenses: expenses),
+              let reason = MacWatchdogReason(rawValue: k) else { return nil }
+        return MacWatchdogItem(entry: e, reason: reason, revertedFields: [])
     }
 
     /// 〔不用了〕
