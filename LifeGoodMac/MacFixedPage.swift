@@ -1,5 +1,6 @@
 // 只編進 LifeGoodMac；只寫白名單鍵、寫前重抓、條件寫入
 // [v25.644 mac4 G2] 固定支出頁（頭、膠囊、時間軸、分組表格、詳情；judge_mac §R8；brief §2 G2 第 2 條）。
+// [v25.646 mac6 G3c] 時間軸換站牌（MacFixedRailArt：扣過的淡紫打勾、下一站大一號、今天一台電車）；固定詳情標頭換 MacInspectorHeader（§T5-2）。
 //
 // • 跟 Mac 3 變動支出頁同一個骨架：頭固定高 250 的一般 View；Table 在下面撐滿，不放進捲動容器、外面不包型別抹除；
 //   這頁的圖只有詳情欄的金額走勢（MacFixedChart.swift）。
@@ -225,18 +226,23 @@ struct MacFixedChipView: View {
 struct MacFixedRail: View {
     let days: [MacFixedRailDay]
     let label: String
+    // [v25.646 mac6 G3c] 站牌色跟著淺色／深色：這裡算一次 MacRailTint 往下傳（格子不各自讀環境）
+    @Environment(\.colorScheme) private var scheme
 
+    // sim6: rail6#5 一條軸＝兩端字（「1」、月底那天，MacPalette.label 色）＋中間格子；色在這裡算一次往下傳
     var body: some View {
+        let tint = MacRailTint(scheme)
+        let p = MacPalette(scheme)
         HStack(spacing: 6) {
             Text("1")
                 .font(.caption2)
                 .monospacedDigit()
-                .foregroundStyle(Color.secondary)
-            MacFixedRailTrack(days: days)
+                .foregroundStyle(p.label)
+            MacFixedRailTrack(days: days, tint: tint)
             Text(lastDay)
                 .font(.caption2)
                 .monospacedDigit()
-                .foregroundStyle(Color.secondary)
+                .foregroundStyle(p.label)
         }
         .accessibilityElement(children: .ignore)
         .accessibilityLabel(label)
@@ -245,45 +251,56 @@ struct MacFixedRail: View {
     private var lastDay: String { "\(days.count)" }
 }
 
+/// [v25.646 mac6 G3c] 軌道是整條一個 3pt 膠囊墊在格子下面（每格各畫一段會在接縫處出現凹口）
 struct MacFixedRailTrack: View {
     let days: [MacFixedRailDay]
+    let tint: MacRailTint
 
+    // sim6: rail6#6 軌：一條 3pt 膠囊（track 色）從 1 號貫穿到月底，跟格子的中線對齊
     var body: some View {
-        HStack(spacing: 0) {
-            ForEach(days) { d in
-                MacFixedRailCell(day: d)
+        ZStack {
+            Capsule()
+                .fill(tint.track)
+                .frame(height: 3)
+            HStack(spacing: 0) {
+                ForEach(days) { d in
+                    MacFixedRailCell(day: d, tint: tint)
+                }
             }
         }
     }
 }
 
-/// 一天一格：軸線＋點（過去灰實心、下一站 accent 實心大一號、之後 accent 空心）＋今天的旗；滑鼠停著看那天扣什麼
+/// 一天一格：站牌（扣過的淡紫打勾、下一站大顆、之後實心白框）＋今天的電車；滑鼠停著看那天扣什麼
 /// （沒扣款的那天 help 是空字串：不掛 .help，免得跳出空的提示框）
 struct MacFixedRailCell: View {
     let day: MacFixedRailDay
+    let tint: MacRailTint
 
+    // sim6: rail6#8 有扣款那格才掛 .help（字照 Mac 4：那天每筆一行）；沒扣款那格不掛；格子只看、不收點擊
     var body: some View {
         if day.help.isEmpty {
-            MacFixedRailSlot(day: day)
+            MacFixedRailSlot(day: day, tint: tint)
                 .contentShape(Rectangle())
         } else {
-            MacFixedRailSlot(day: day)
+            MacFixedRailSlot(day: day, tint: tint)
                 .contentShape(Rectangle())
                 .help(day.help)
         }
     }
 }
 
-/// 格子本身：軸線＋點＋旗（撐滿寬、至少 30 高）
+/// 格子本身：撐滿寬、至少 30 高（軌道在 MacFixedRailTrack 墊底；這裡只放站牌與電車）
 struct MacFixedRailSlot: View {
     let day: MacFixedRailDay
+    let tint: MacRailTint
 
+    // sim6: rail6#7 每格一樣寬、至少 30 高（站牌往上 9pt 也裝得下）；Color.clear 撐出那條 3pt 的中線位置
     var body: some View {
         ZStack {
-            Rectangle()
-                .fill(Color.secondary.opacity(0.35))
-                .frame(height: 2)
-            MacFixedRailMark(day: day)
+            Color.clear
+                .frame(height: 3)
+            MacFixedRailMark(day: day, tint: tint)
         }
         .frame(maxWidth: .infinity, minHeight: 30)
     }
@@ -291,37 +308,36 @@ struct MacFixedRailSlot: View {
 
 struct MacFixedRailMark: View {
     let day: MacFixedRailDay
+    let tint: MacRailTint
 
+    // sim6: rail6#9 今天：一台 tram.fill（10pt semibold、電車藍）停在軌上；不畫旗子
+    // sim6: rail6#10 站牌圓心在軌上方 9pt，畫在電車上面（今天剛好扣款時兩個都看得到）
     var body: some View {
         ZStack {
-            MacFixedRailDot(station: day.station)
             if day.isToday {
-                Image(systemName: "flag.fill")
-                    .font(.caption2)
-                    .foregroundStyle(Color.accentColor)
-                    .offset(y: -11)
+                Image(systemName: "tram.fill")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(tint.train)
             }
+            MacFixedRailDot(station: day.station, tint: tint)
+                .offset(y: -9)
         }
     }
 }
 
 struct MacFixedRailDot: View {
     let station: MacFixedRailStation?
+    let tint: MacRailTint
 
+    // sim6: rail6#11 挑哪一種站牌：下一站先判（isNext）→ 扣過的（past）→ 之後；那天沒扣款不畫
     var body: some View {
         if let s = station {
             if s.isNext {
-                Circle()
-                    .fill(Color.accentColor)
-                    .frame(width: 10, height: 10)
+                MacRailStopNext(tint: tint)
             } else if s.past {
-                Circle()
-                    .fill(Color.secondary)
-                    .frame(width: 7, height: 7)
+                MacRailStopPast(tint: tint)
             } else {
-                Circle()
-                    .strokeBorder(Color.accentColor, lineWidth: 1.5)
-                    .frame(width: 8, height: 8)
+                MacRailStopLater(tint: tint)
             }
         }
     }
@@ -549,7 +565,8 @@ struct MacFixedInspector: View {
 
     var body: some View {
         let info = MacFixedInspectorInfo.make(expense, money: money, now: Date(), calendar: .current)
-        MacFixedFactsSection(title: info.title, rows: info.facts)
+        // sim6: rail6#13 固定詳情的標頭跟變動支出、收入同一個（G3a 的 MacInspectorHeader；組＝表格分組）
+        MacFixedFactsSection(head: .fixed(expense, money: money), rows: info.facts)
         MacFixedLoanSection(loan: info.loan)
         MacFixedSavingsSection(rows: info.savings)
         MacFixedTrendSection(info: info)
@@ -558,17 +575,17 @@ struct MacFixedInspector: View {
 }
 
 struct MacFixedFactsSection: View {
-    let title: String
+    let head: MacInspectorHeaderInfo
     let rows: [MacFixedInfoRow]
 
+    // sim6: rail6#12 標頭＝MacInspectorHeader（分類色圖示圓＋名稱＋「固定支出・組名」）；下面一列一列照舊
     var body: some View {
         Section {
             ForEach(rows) { row in
                 LabeledContent(row.label, value: row.value)
             }
         } header: {
-            Text(title)
-                .font(.headline)
+            MacInspectorHeader(info: head)
         }
     }
 }
