@@ -10,6 +10,10 @@
 // • recompute 逐行照 sim_mac5 Game.recompute（★3～★5）。
 // • [v25.646 mac6 C0] init 多收 MacJournal（骨架不用；G3b 只讀 entries 的 kind == .add、key、at 與 accountHash）；
 //   第二批的 @Published（calendarGrid、checkBounce）與動作（toggleNoSpend、dismissReview、openCalendar、stepCalendar）先放空殼（§T7-6）。
+// • [v25.646 mac6 G3b] 第二批（§T6）：本機那份升 v2（noSpend 打卡字、lastReview 這週一的字；同一個鍵、不新增鍵）；
+//   先讀本機那份再算（打卡要算進記帳日）；版本三分（沒有／壞＝第一次、v1＝就地遷移、v ≥ 3＝只看不寫）。
+//   讀日誌只准 kind == .add、key、at 與 accountHash（第一次在電腦記帳那枚）；不碰分帳、不寫 log、沒有金額與名字。
+//   打卡、回顧〔好〕只在按鈕動作裡寫；月曆只算不寫（翻到哪個月只在記憶體）。Mac 5 的 compute 留著對照（noSpend 空時 compute2 逐位一樣）。
 
 import SwiftUI
 import Combine
@@ -47,6 +51,15 @@ struct MacGameSnapshot: Equatable {
     let lit: Set<String>
     /// 第一次打開那一行「以前記的帳也算進來了：已點亮 N 枚」（只在記憶體）
     let backfillNote: String?
+    // [v25.646 mac6] 第二批（empty 用預設值）
+    /// 〔今天沒花錢〕出不出現（可寫、今天能打卡）
+    var canCheckToday: Bool = false
+    /// 每週回顧卡（沒有＝不畫）
+    var review: MacGameReview? = nil
+    /// 自己的紀錄（徽章 popover）
+    var records: MacGameRecords = .empty
+    /// 比較新的版本存的：「這一版只看不改」
+    var readOnlyNote: String? = nil
 
     static let empty = MacGameSnapshot(started: false, level: 0, stageName: "空地", stageIcon: "leaf.fill",
                                        xp: 0, floor: 0, next: 100, streakWeeks: 0, streakSince: nil, lights: [],
@@ -58,17 +71,40 @@ private struct MacGameStored {
     var seen: [String] = []
     var earned: [String: Double] = [:]
     var maxXP: Int = 0
+    /// [v25.646 mac6] 打卡的日子字（"2026-11-26"；最多 1,000，舊的先丟）
+    var noSpend: [String] = []
+    /// [v25.646 mac6] 回顧〔好〕過的那週週一的字（沒有＝不放這個鍵）
+    var lastReview: String? = nil
 
     init() {}
 
+    // sim6: game#43（v2：noSpend 逐筆驗字、去重、排序；lastReview 看不懂＝沒有）
     init(_ d: [String: Any]) {
         seen = d["seen"] as? [String] ?? []
         earned = d["earned"] as? [String: Double] ?? [:]
         maxXP = d["maxXP"] as? Int ?? 0
+        let days: [String] = (d["noSpend"] as? [Any] ?? []).compactMap { x in x as? String }
+        noSpend = MacGameDays.cleanNoSpend(days, calendar: MacGameRules.calendar)
+        if let r = d["lastReview"] as? String, MacGameDays.day(r, calendar: MacGameRules.calendar) != nil {
+            lastReview = r
+        }
     }
 
+    // sim6: game#43（寫回一律 v＝2；lastReview 沒有就不放（plist 不收 nil））
     var dictionary: [String: Any] {
-        ["v": 1, "seen": seen, "earned": earned, "maxXP": maxXP]
+        var out: [String: Any] = ["v": 2, "seen": seen, "earned": earned, "maxXP": maxXP, "noSpend": noSpend]
+        if let r = lastReview {
+            out["lastReview"] = r
+        }
+        return out
+    }
+
+    /// 版本三分：沒有／v 讀不到／v < 1＝第一次；v＝1＝Mac 5 寫的（就地遷移）；v ≥ 3＝比這版新（只看不寫）
+    // sim6: game#43
+    static func version(_ raw: [String: Any]?) -> (fresh: Bool, legacy: Bool, newer: Bool) {
+        let v = raw?["v"] as? Int
+        let fresh = raw == nil || v == nil || (v ?? 0) < 1
+        return (fresh, v == 1, (v ?? 0) > 2)
     }
 }
 
@@ -83,6 +119,11 @@ private struct MacGameFacts {
     let current: MacGameMonth?
     let stars: Int
     let badges: Set<String>
+    // [v25.646 mac6] 第二批（compute2 填；Mac 5 的 compute 用預設值）
+    var days: MacGameDayFacts = .empty
+    var firstAdd: Date? = nil
+    var records: MacGameRecords = .empty
+    var recordHits: [MacGameRecordHit] = []
 }
 
 @MainActor
@@ -109,11 +150,24 @@ final class MacGameModel: ObservableObject {
     private var lastBounceDay: Date? = nil
     /// 上次算的那天 00:00（計時器跨午夜才重算）
     private var lastDay: Date? = nil
+    /// [v25.646 mac6] 只讀：kind == .add、key、at、accountHash（第一次在電腦記帳）
+    private let journal: MacJournal
+    /// 月曆翻到哪個月（記憶體，不存；nil＝月曆沒開）
+    private var calendarMonth: Date? = nil
+    /// 上一次算的日子、打卡、可不可寫、連續週數（月曆與打卡用；記憶體）
+    private var dayFacts: MacGameDayFacts = .empty
+    private var dayNoSpend: Set<String> = []
+    private var dayWritable = false
+    private var dayStreakWeeks = 0
+    private var dayStreakSince: Date? = nil
+    /// 這次可以慶祝的紀錄（celebrate 用完清空）
+    private var pendingRecords: [MacGameRecordHit] = []
 
     // sim5: game#21（什麼時候算：money 七個 @Published＋回到前景 → debounce 300ms → recompute；60 秒計時器跨午夜才算；不在 body、.task 裡算或寫）
     init(money: MacMoneyStore, journal: MacJournal) {
         self.enabled = UserDefaults.standard.object(forKey: "mac.game.enabled") as? Bool ?? true
         self.money = money
+        self.journal = journal
         // 七個 @Published＋回到前景都戳同一個 poke（訂閱當下各送一次現值 → debounce 後只算一次）；
         // 不用 AnyPublisher／Publishers.MergeMany（macsymbols 白名單只有 PassthroughSubject），意思一樣
         let poke = PassthroughSubject<Void, Never>()
@@ -124,6 +178,9 @@ final class MacGameModel: ObservableObject {
         money.$accountHash.sink { _ in poke.send(()) }.store(in: &bag)
         money.$hasFetchedThisLaunch.sink { _ in poke.send(()) }.store(in: &bag)
         money.$showingCache.sink { _ in poke.send(()) }.store(in: &bag)
+        // sim6: game#39（日誌換了、換帳號了也重算；@Published 在 willSet 發送 → debounce 之後才讀）
+        journal.$entries.sink { _ in poke.send(()) }.store(in: &bag)
+        journal.$accountHash.sink { _ in poke.send(()) }.store(in: &bag)
         NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)
             .sink { _ in poke.send(()) }
             .store(in: &bag)
@@ -144,6 +201,8 @@ final class MacGameModel: ObservableObject {
         enabled = on
         if !on {
             toast = nil
+            calendarMonth = nil
+            calendarGrid = nil
             return
         }
         if !was {
@@ -160,16 +219,69 @@ final class MacGameModel: ObservableObject {
     // MARK: [v25.646 mac6] 第二批的動作（主控骨架：什麼都不做；G3b 換內容，第一行 guard）
 
     /// 〔今天沒花錢〕、月曆格子補按／取消（day＝那天 00:00）
-    func toggleNoSpend(_ day: Date) {}
+    func toggleNoSpend(_ day: Date) {
+        guard enabled, let h = money.accountHash, Self.isAccountHash(h) else { return }
+        // sim6: game#27（按鈕動作：先算一次（狀態升 v2、日子最新）→ 重讀 → 能取消就取消、能打卡就加 → 寫 → 再算；
+        //               不寫 log、金額、帳的 id；快照、還沒抓完、比較新的版本都不寫）
+        recompute(now: Date())
+        guard dayWritable else { return }
+        let cal = MacGameRules.calendar
+        let key = "mac.game.state." + h
+        guard let raw = UserDefaults.standard.dictionary(forKey: key), !MacGameStored.version(raw).newer else { return }
+        var state = MacGameStored(raw)
+        let d = cal.startOfDay(for: day)
+        let k = MacGameDays.dayKey(d, calendar: cal)
+        let stored = Set(state.noSpend)
+        if MacGameDays.canUncheck(d, facts: dayFacts, noSpend: stored, writable: true, calendar: cal) {
+            state.noSpend.removeAll { x in x == k }
+        } else if MacGameDays.canCheck(d, facts: dayFacts, noSpend: stored, writable: true, calendar: cal) {
+            state.noSpend = MacGameDays.cleanNoSpend(state.noSpend + [k], calendar: cal)
+            if d == dayFacts.today {
+                checkBounce += 1
+            }
+        } else {
+            return
+        }
+        UserDefaults.standard.set(state.dictionary, forKey: key)
+        recompute(now: Date())
+    }
 
     /// 每週回顧〔好〕
-    func dismissReview() {}
+    func dismissReview() {
+        guard enabled, let h = money.accountHash, Self.isAccountHash(h) else { return }
+        // sim6: game#35（〔好〕：可寫才寫 lastReview＝這週一的字；同一週不再出現，下週一又有新的）
+        recompute(now: Date())
+        guard dayWritable else { return }
+        let cal = MacGameRules.calendar
+        let key = "mac.game.state." + h
+        guard let raw = UserDefaults.standard.dictionary(forKey: key), !MacGameStored.version(raw).newer else { return }
+        var state = MacGameStored(raw)
+        state.lastReview = MacGameDays.dayKey(MacGameRules.weekStart(of: Date(), calendar: cal), calendar: cal)
+        UserDefaults.standard.set(state.dictionary, forKey: key)
+        recompute(now: Date())
+    }
 
     /// 打開記帳月曆（只算不寫）
-    func openCalendar() {}
+    // sim6: game#31（打開＝這個月；翻月夾在開始記帳那個月～這個月，最多往回 120 個月；只算不寫）
+    func openCalendar() {
+        calendarMonth = MacGameDays.monthStart(Date(), calendar: MacGameRules.calendar)
+        refreshCalendar(now: Date())
+    }
 
     /// 月曆翻月（n＝-1 上個月、1 下個月；只算不寫）
-    func stepCalendar(_ n: Int) {}
+    func stepCalendar(_ n: Int) {
+        guard let m = calendarMonth else { return }
+        calendarMonth = MacGameDays.stepMonth(m, by: n, start: dayFacts.start, now: Date(), calendar: MacGameRules.calendar)
+        refreshCalendar(now: Date())
+    }
+
+    /// 月曆開著才算（recompute 結尾、打開、翻月）
+    private func refreshCalendar(now: Date) {
+        guard let m = calendarMonth else { return }
+        calendarGrid = MacGameDays.monthGrid(month: m, facts: dayFacts, noSpend: dayNoSpend, writable: dayWritable,
+                                             streakWeeks: dayStreakWeeks, streakSince: dayStreakSince, now: now,
+                                             calendar: MacGameRules.calendar)
+    }
 
     /// 16 碼小寫十六進位（MacMoneyStore.hashAccount 的樣子）；不是這個樣子不拼鍵、不刪
     static func isAccountHash(_ s: String) -> Bool {
@@ -190,6 +302,7 @@ final class MacGameModel: ObservableObject {
         lastDay = cal.startOfDay(for: now)
         guard let h = money.accountHash, Self.isAccountHash(h) else {
             snapshot = .empty
+            dayWritable = false
             return
         }
         if h != noteHash {
@@ -197,33 +310,52 @@ final class MacGameModel: ObservableObject {
             noteHash = h
         }
         let key = "mac.game.state." + h
-        let facts = compute(now: now, calendar: cal)
+        // sim6: game#43（先讀本機那份再算：打卡要算進記帳日；版本三分 fresh／legacy／newer）
         let raw = UserDefaults.standard.dictionary(forKey: key)
-        let fresh = raw == nil || (raw?["v"] as? Int) != 1
+        let ver = MacGameStored.version(raw)
+        let fresh = ver.fresh
         var state = fresh ? MacGameStored() : MacGameStored(raw ?? [:])
+        let facts = compute2(now: now, calendar: cal, noSpend: state.noSpend)
         var lit = Set(state.earned.keys).union(facts.badges)
         let xp = MacGameRules.xp(weeks: facts.weekCount, stars: facts.stars, badges: lit.count)
         let shown = max(xp, state.maxXP)
         let lv = MacGameRules.level(xp: shown).level
-        if isWritable(h) {
+        // sim6: game#45（比較新的版本存的：照算照畫、一個欄位都不寫、不刪別的帳號那份、打卡鈕與〔好〕不出現）
+        let writable = isWritable(h) && !ver.newer
+        if writable {
             removeOtherStates(keep: key)
             if fresh || justEnabled {
                 backfill(&state, facts: facts, level: lv, fresh: fresh)
+                // sim6: game#46（第一次：lastReview＝這週一，這週不出回顧卡）
+                if fresh {
+                    state.lastReview = MacGameDays.dayKey(MacGameRules.weekStart(of: now, calendar: cal), calendar: cal)
+                }
             } else {
+                if ver.legacy {
+                    migrate(&state, facts: facts, level: lv)
+                }
                 // ★4：earned 在可寫狀態第一次看到成立就寫（不管前景）
                 for b in MacGameBadge.all where facts.badges.contains(b.id) && state.earned[b.id] == nil {
-                    state.earned[b.id] = now.timeIntervalSinceReferenceDate
+                    state.earned[b.id] = earnedTime(b.id, facts: facts, now: now)
                 }
                 if NSApplication.shared.isActive {
+                    pendingRecords = facts.recordHits
                     celebrate(&state, level: lv, now: now, calendar: cal)
                 }
             }
             state.maxXP = max(state.maxXP, xp)
             trim(&state)
+            // sim6: game#49（只寫 mac.game.state.<合法雜湊>：沒有金額、名稱、帳的 id；不碰同步鍵、mac.writeEnabled.*、日誌）
             UserDefaults.standard.set(state.dictionary, forKey: key)
             lit = Set(state.earned.keys).union(facts.badges)
         }
-        snapshot = makeSnapshot(facts, state: state, lit: lit, shown: shown)
+        snapshot = makeSnapshot2(facts, state: state, lit: lit, shown: shown, writable: writable, newer: ver.newer, now: now)
+        dayFacts = facts.days
+        dayNoSpend = Set(state.noSpend)
+        dayWritable = writable
+        dayStreakWeeks = facts.streak.weeks
+        dayStreakSince = facts.streak.since
+        refreshCalendar(now: now)
     }
 
     // sim5: game#22（可寫狀態＝enabled && account == .available && 這次開 App 抓過 && 不是快照 && 帳號雜湊合法）
@@ -252,6 +384,8 @@ final class MacGameModel: ObservableObject {
         for b in MacGameBadge.all where state.earned[b.id] != nil {
             add.append(b.id)
         }
+        // sim6: game#46（[v25.646 mac6] 現在成立的紀錄也算看過，不慶祝）
+        add += facts.recordHits.map { r in r.id }
         state.seen += add.filter { !seen.contains($0) }
         let n = state.earned.count
         if fresh && n > 0 {
@@ -267,6 +401,13 @@ final class MacGameModel: ObservableObject {
         let newLevel: Int? = lv > seenLevel ? lv : nil
         let newBadges: [String] = MacGameBadge.all.map { $0.id }.filter { id in
             state.earned[id] != nil && !seen.contains(id)
+        }
+        // sim6: game#37（[v25.646 mac6] 還沒看過的破紀錄併進同一則；一段只跳一次）
+        let newRecords = pendingRecords.filter { r in !seen.contains(r.id) }
+        pendingRecords = []
+        if !newRecords.isEmpty {
+            celebrateRecords(&state, newLevel: newLevel, newBadges: newBadges, records: newRecords, now: now, calendar: cal)
+            return
         }
         guard let t = MacGameText.toast(newLevel: newLevel, newBadges: newBadges) else { return }
         if let n = newLevel {
@@ -291,6 +432,10 @@ final class MacGameModel: ObservableObject {
             var out: [String: Double] = [:]
             for kv in keep { out[kv.key] = kv.value }
             state.earned = out
+        }
+        // sim6: game#28（[v25.646 mac6] 打卡最多 1,000 個，舊的先丟）
+        if state.noSpend.count > MacGameDays.noSpendLimit {
+            state.noSpend = Array(state.noSpend.suffix(MacGameDays.noSpendLimit))
         }
     }
 
@@ -348,5 +493,114 @@ final class MacGameModel: ObservableObject {
                                streakSince: f.streak.since, lights: f.lights, current: f.current,
                                settled: Array(f.months.reversed().prefix(12)), earned: state.earned, lit: lit,
                                backfillNote: backfillNote)
+    }
+
+    // MARK: - [v25.646 mac6] 第二批
+
+    // sim6: game#25（記帳日 R＝資料 ∪ 有效打卡；W、★1、經驗值都吃 R；S 只看資料；公式不改）
+    private func compute2(now: Date, calendar cal: Calendar, noSpend: [String]) -> MacGameFacts {
+        let variableDates: [Date] = money.expenses.filter { $0.expenseType == .variable }.map { $0.date }
+        let onceDates: [Date] = money.incomes.filter { $0.period == .once }.map { $0.date }
+        let d = MacGameDays.facts(variableDates: variableDates, onceIncomeDates: onceDates, noSpend: noSpend, now: now,
+                                  calendar: cal)
+        let first = d.start
+        var months: [MacGameMonth] = []
+        for m in MacGameRules.settledMonthStarts(firstDay: first, now: now, calendar: cal) {
+            months.append(monthStars(m, days: d.recordDays, first: first, now: now, calendar: cal))
+        }
+        var current: MacGameMonth? = nil
+        if first != nil, let cur = cal.date(from: cal.dateComponents([.year, .month], from: now)) {
+            current = monthStars(cur, days: d.recordDays, first: first, now: now, calendar: cal)
+        }
+        let stars = months.reduce(0) { $0 + $1.settledStars }
+        let longest = MacGameRules.longestStreak(d.weeks, calendar: cal)
+        let add = firstMacAdd()
+        let tidy = MacGameDays.fixedTidy(money.expenses, now: now, calendar: cal)
+        var badges = MacGameRules.badges(longest: longest, months: months)
+        badges.formUnion(MacGameDays.badges2(longest: longest, dayCount: d.recordDays.count, macAdd: add != nil, fixedTidy: tidy))
+        let streak = MacGameRules.streak(d.weeks, now: now, calendar: cal)
+        let lights = MacGameDays.weekLights(d, now: now, calendar: cal)
+        let records = MacGameDays.records(weeks: d.weeks, months: months, calendar: cal)
+        let hits = MacGameDays.recordHits(weeks: d.weeks, months: months, now: now, calendar: cal)
+        return MacGameFacts(first: first, weekCount: d.weeks.count, streak: streak, lights: lights, months: months,
+                            current: current, stars: stars, badges: badges, days: d, firstAdd: add, records: records,
+                            recordHits: hits)
+    }
+
+    // sim6: game#39（同一個帳號的日誌裡最早那筆收支 add 的時間；只讀 kind、key、at；用 ==，不 switch）
+    private func firstMacAdd() -> Date? {
+        guard let h = money.accountHash, journal.accountHash == h else { return nil }
+        var first: Date? = nil
+        for e in journal.entries where e.kind == .add && LedgerMerge.keys.contains(e.key) {
+            if let f = first, f <= e.at { continue }
+            first = e.at
+        }
+        return first
+    }
+
+    /// 一般路徑點亮時間：第一次在電腦記帳＝那筆的 at；其餘＝現在
+    private func earnedTime(_ id: String, facts: MacGameFacts, now: Date) -> Double {
+        if id == MacGameDays.firstMacID, let at = facts.firstAdd {
+            return at.timeIntervalSinceReferenceDate
+        }
+        return now.timeIntervalSinceReferenceDate
+    }
+
+    // sim6: game#44（v1 → v2：新 4 枚現在成立的 earned＝0（靜默）；seen 加這幾枚＋現在等級＋現在成立的紀錄；
+    //               noSpend 空、lastReview 不放（升級後第一張回顧照出現）；有補上才寫那行字）
+    private func migrate(_ state: inout MacGameStored, facts: MacGameFacts, level lv: Int) {
+        var added = 0
+        for b in MacGameBadge.all where MacGameDays.addedInV2.contains(b.id) && facts.badges.contains(b.id) {
+            guard state.earned[b.id] == nil else { continue }
+            state.earned[b.id] = 0
+            added += 1
+        }
+        let seen = Set(state.seen)
+        var add: [String] = ["level.\(lv)"]
+        for b in MacGameBadge.all where MacGameDays.addedInV2.contains(b.id) && state.earned[b.id] != nil {
+            add.append(b.id)
+        }
+        add += facts.recordHits.map { r in r.id }
+        state.seen += add.filter { x in !seen.contains(x) }
+        if added > 0 {
+            backfillNote = MacGameText.backfill(state.earned.count)
+        }
+    }
+
+    // sim6: game#37（有破紀錄的那一則：Level up! ＞ New record! ＞ Goal reached!；一天最多跳一次照 ★5）
+    private func celebrateRecords(_ state: inout MacGameStored, newLevel: Int?, newBadges: [String], records: [MacGameRecordHit],
+                                  now: Date, calendar cal: Calendar) {
+        let texts: [String] = records.map { r in r.text }
+        guard let t = MacGameText.toast(newLevel: newLevel, newBadges: newBadges, newRecords: texts) else { return }
+        if let n = newLevel {
+            state.seen.append("level.\(n)")
+        }
+        state.seen += newBadges
+        state.seen += records.map { r in r.id }
+        show(MacGameToast(text: t.text, script: t.script))
+        let today = cal.startOfDay(for: now)
+        if lastBounceDay != today {
+            bounce += 1
+            lastBounceDay = today
+        }
+    }
+
+    // sim6: game#34（快照加第二批：今天能不能打卡、回顧卡、自己的紀錄、只看不改；「最近幾個月」只放 6 個）
+    private func makeSnapshot2(_ f: MacGameFacts, state: MacGameStored, lit: Set<String>, shown: Int, writable: Bool,
+                               newer: Bool, now: Date) -> MacGameSnapshot {
+        let base = makeSnapshot(f, state: state, lit: lit, shown: shown)
+        let cal = MacGameRules.calendar
+        var out = MacGameSnapshot(started: base.started, level: base.level, stageName: base.stageName, stageIcon: base.stageIcon,
+                                  xp: base.xp, floor: base.floor, next: base.next, streakWeeks: base.streakWeeks,
+                                  streakSince: base.streakSince, lights: base.lights, current: base.current,
+                                  settled: Array(base.settled.prefix(6)), earned: base.earned, lit: base.lit,
+                                  backfillNote: base.backfillNote)
+        let noSpend = Set(state.noSpend)
+        out.canCheckToday = MacGameDays.canCheck(f.days.today, facts: f.days, noSpend: noSpend, writable: writable, calendar: cal)
+        out.review = MacGameDays.review(facts: f.days, months: f.months, earned: state.earned, lastReview: state.lastReview,
+                                        streakWeeks: f.streak.weeks, writable: writable, now: now, calendar: cal)
+        out.records = f.records
+        out.readOnlyNote = newer ? MacGameText.readOnly : nil
+        return out
     }
 }

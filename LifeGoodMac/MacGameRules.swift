@@ -5,6 +5,8 @@
 // • 所有函式收 calendar:、now:（sim 換台北、洛杉磯）；頁面傳 MacGameRules.calendar（照抄 WorkoutFacts.swift:38-44（9f25bf5））。
 // • 主控骨架：型別與簽名定案（不准改）；G3 換內容，Swift 每段照 §S4 編號寫 // sim5: game#N。
 // • 字（MacGameText）逐字照 sim_mac5 GAME_TEXT、strip_title、streak_text、next_text、star_help、light_help、earned_text、toast_for（★1）。
+// • [v25.646 mac6 G3b] MacGameLight 表尾加 checked（打勾的葉子）、徽章表尾加 4 枚（前 6 枚一字不改）、lightsHelp／footer 改字、
+//   toast 加預設參數 newRecords（舊兩參數呼叫結果一字不變）。第二批的規則在 MacGameDays.swift。
 
 import Foundation
 
@@ -14,8 +16,9 @@ enum MacGameStar: Equatable {
 }
 
 /// 本週一盞燈：金燈（那天有記帳）／葉子（那天沒有花錢）／空心（以後、開始記帳以前、今天還沒記）
+// sim6: game#29（[v25.646 mac6] 表尾加 checked＝打勾的葉子（按了今天沒花錢））
 enum MacGameLight: Equatable {
-    case lamp, leaf, empty
+    case lamp, leaf, empty, checked
 }
 
 /// 一個月的收支（★2、★3 用；照抄 MacIncomeBoard.swift:154-165（9f25bf5）上個月存下幾成那條）
@@ -78,6 +81,15 @@ struct MacGameBadge: Identifiable, Equatable {
                      hint: "連續 3 個月守住就會亮（沒有收入的月份跳過）"),
         MacGameBadge(id: "badge.stars3", name: "第一次三顆星", icon: "star.circle.fill", tone: .gold,
                      hint: "有一個月拿到三顆星就會亮"),
+        // [v25.646 mac6] 第二批 4 枚（§T6-8；條件在 MacGameDays.badges2）— sim6: game#39～#42
+        MacGameBadge(id: "badge.firstMac", name: "第一次在電腦記帳", icon: "keyboard", tone: .medal,
+                     hint: "在電腦按 ⌘N 記一筆就會亮"),
+        MacGameBadge(id: "badge.fixedTidy", name: "固定支出整理好", icon: "checklist", tone: .save,
+                     hint: "每一筆固定支出都有分類和週期就會亮（舊資料在 iPhone 打開存一次）"),
+        MacGameBadge(id: "badge.week52", name: "一整年", icon: "trophy.fill", tone: .medal,
+                     hint: "連續 52 週都有記帳就會亮"),
+        MacGameBadge(id: "badge.day100", name: "記帳一百天", icon: "sun.max.fill", tone: .gold,
+                     hint: "有記帳的日子累計 100 天就會亮"),
     ]
 }
 
@@ -328,7 +340,7 @@ enum MacGameRules {
 enum MacGameText {
     static let notStarted = "Lv.0 空地・記下第一筆，小鎮就開始蓋"
     static let streakZero = "這週記一筆，就開始算連續週數"
-    static let lightsHelp = "金燈＝那天有記帳，葉子＝那天沒有花錢"
+    static let lightsHelp = "金燈＝那天有記帳，葉子＝那天沒有花錢，打勾的葉子＝按了今天沒花錢"
     static let lightLamp = "那天有記帳"
     static let lightLeaf = "那天沒有花錢"
     static let lightToday = "今天還沒記"
@@ -336,7 +348,7 @@ enum MacGameText {
     static let starNames: [String] = ["有在記", "守住", "存下兩成"]
     static let pending = "月底結算"
     static let notCounted = "這個月沒有收入紀錄，這顆不算"
-    static let footer = "照每筆帳的日期算，補記以前的也算。看過的徽章只存在這台 Mac，不會上 iCloud，也不會傳到 iPhone。"
+    static let footer = "照每筆帳的日期算，補記以前的也算。看過的徽章、打卡只存在這台 Mac，不會上 iCloud，也不會傳到 iPhone。"
     static let turnOff = "關掉遊戲元素"
     static let earnedZero = "已點亮"
     static let scriptLevel = "Level up!"
@@ -387,6 +399,7 @@ enum MacGameText {
         case .lamp: return lightLamp
         case .leaf: return lightLeaf
         case .empty: return isToday ? lightToday : ""
+        case .checked: return lightChecked
         }
     }
 
@@ -402,12 +415,15 @@ enum MacGameText {
     }
 
     /// toast_for（newBadges 照 MacGameBadge.all 的順序）：1 個「剛剛點亮：連續 4 週」／「升到 Lv.4 小巷」，2 個以上「剛剛點亮 N 個，點遊戲列看」
-    static func toast(newLevel: Int?, newBadges: [String]) -> (text: String, script: String)? {
-        let n = (newLevel == nil ? 0 : 1) + newBadges.count
+    /// [v25.646 mac6] newRecords＝破紀錄的字（「新紀錄：連續 9 週」）；手寫 Level up! ＞ New record! ＞ Goal reached!
+    // sim6: game#38（合計 ≥ 2 一則；只有 1 個紀錄寫那句；不傳 newRecords 時結果一字不變）
+    static func toast(newLevel: Int?, newBadges: [String], newRecords: [String] = []) -> (text: String, script: String)? {
+        let n = (newLevel == nil ? 0 : 1) + newBadges.count + newRecords.count
         if n == 0 { return nil }
-        let script = newLevel == nil ? scriptGoal : scriptLevel
+        let script = newLevel != nil ? scriptLevel : (newRecords.isEmpty ? scriptGoal : scriptRecord)
         if n >= 2 { return ("剛剛點亮 \(n) 個，點遊戲列看", script) }
         if let lv = newLevel { return ("升到 Lv.\(lv) " + MacGameRules.stage(lv).name, script) }
+        if let r = newRecords.first { return (r, script) }
         let name = MacGameBadge.all.first(where: { $0.id == newBadges[0] })?.name ?? ""
         return ("剛剛點亮：" + name, script)
     }

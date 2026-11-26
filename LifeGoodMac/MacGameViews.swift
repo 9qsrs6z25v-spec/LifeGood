@@ -7,6 +7,8 @@
 // • 主控骨架：MacGameStrip、MacGameBoardPopover 無參數（總覽那行用）；G3 換內容。
 // • 顏色只用 MacGameTint、MacPageTheme.green、MacPalette（＋系統 secondary）；字一律 MacGameText（照 sim_mac5 GAME_TEXT）。
 // • 這裡只畫：不算、不寫（算與寫都在 MacGameModel 的 Combine sink／計時器／按鈕動作）。
+// • [v25.646 mac6 G3b] 第二排加〔今天沒花錢〕〔月曆〕、第三排回顧卡、燈多打勾的葉子（跳一下）、徽章 popover 4／4／2＋自己的紀錄。
+//   月曆 popover、回顧卡、紀錄兩行在 MacGameCalendarView.swift。
 
 import SwiftUI
 
@@ -17,6 +19,7 @@ struct MacGameStrip: View {
     @EnvironmentObject private var money: MacMoneyStore
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showBoard = false
+    @State private var showCalendar = false
 
     var body: some View {
         if !game.enabled || money.accountHash == nil || !money.account.hasLedger {
@@ -31,6 +34,10 @@ struct MacGameStrip: View {
             MacGameStripTop(snap: game.snapshot, toast: game.toast, bounce: game.bounce, onToast: { game.dismissToast() })
             if game.snapshot.hasProgress {
                 bottomRow
+            }
+            // sim6: game#34（第三排：每週回顧卡；上週沒東西可講就沒有）
+            if let r = game.snapshot.review {
+                MacGameReviewCard(review: r, onDone: { game.dismissReview() })
             }
         }
         .macBoard(.green)
@@ -52,7 +59,44 @@ struct MacGameStrip: View {
             if let note = game.snapshot.backfillNote {
                 MacGameNote(text: note)
             }
+            if let note = game.snapshot.readOnlyNote {
+                MacGameNote(text: note)
+            }
+            checkButton
+            calendarButton
             badgeButton
+        }
+    }
+
+    // sim6: game#26（〔今天沒花錢〕：今天能打卡才有；按了那盞燈變打勾葉子、跳一下）
+    @ViewBuilder
+    private var checkButton: some View {
+        if game.snapshot.canCheckToday {
+            Button {
+                game.toggleNoSpend(MacGameRules.calendar.startOfDay(for: Date()))
+            } label: {
+                Label(MacGameText.noSpendButton, systemImage: "leaf")
+                    .lineLimit(1)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .help(MacGameText.noSpendHelp)
+        }
+    }
+
+    // sim6: game#32（〔月曆〕：打開＝算這個月；popover 內容 .macStores(app)）
+    private var calendarButton: some View {
+        Button {
+            game.openCalendar()
+            showCalendar = true
+        } label: {
+            Image(systemName: "calendar")
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .help(MacGameText.calendarHelp)
+        .popover(isPresented: $showCalendar, arrowEdge: .bottom) {
+            MacGameCalendarPopover().macStores(app)
         }
     }
 
@@ -226,12 +270,15 @@ private struct MacGameLightCell: View {
     let day: String
     let isToday: Bool
     @Environment(\.colorScheme) private var scheme
+    /// [v25.646 mac6] 今天那盞按了〔今天沒花錢〕跳一下（外層 symbolEffectsRemoved 擋減少動態效果）
+    @EnvironmentObject private var game: MacGameModel
 
     private var icon: String {
         switch light {
         case .lamp: return "circle.fill"
         case .leaf: return "leaf.fill"
         case .empty: return "circle"
+        case .checked: return "checkmark.circle.fill"
         }
     }
 
@@ -241,6 +288,7 @@ private struct MacGameLightCell: View {
         case .lamp: return t.star
         case .leaf: return t.leaf
         case .empty: return MacGameTint.dimStroke
+        case .checked: return t.leaf
         }
     }
 
@@ -249,6 +297,7 @@ private struct MacGameLightCell: View {
             Image(systemName: icon)
                 .font(.system(size: 12, weight: .semibold))
                 .foregroundStyle(color)
+                .symbolEffect(.bounce, value: isToday ? game.checkBounce : 0)
                 .frame(width: 16, height: 16)
             Text(day)
                 .font(.caption2)
@@ -321,11 +370,16 @@ struct MacGameBoardPopover: View {
                 MacGameSectionTitle(text: MacGameText.monthsHeader)
                 MacGameMonthGrid(months: game.snapshot.settled)
             }
+            // sim6: game#36（自己的紀錄：最長連續、最多星的月；都沒有就整段不畫）
+            if !game.snapshot.records.isEmpty {
+                MacGameSectionTitle(text: MacGameText.recordsHeader)
+                MacGameRecordLines(records: game.snapshot.records)
+            }
             Divider()
             footer
         }
         .padding(16)
-        .frame(width: 420)
+        .frame(width: 480)
     }
 
     private var footer: some View {
@@ -382,7 +436,8 @@ private struct MacGameBoardHeader: View {
 private struct MacGameBadgeGrid: View {
     let snap: MacGameSnapshot
 
-    private static let rows: [[MacGameBadge]] = [Array(MacGameBadge.all.prefix(3)), Array(MacGameBadge.all.dropFirst(3))]
+    // sim6: game#47（10 枚每排 4：4／4／2）
+    private static let rows: [[MacGameBadge]] = MacGameDays.badgeRows(MacGameBadge.all, per: 4)
 
     var body: some View {
         Grid(horizontalSpacing: 12, verticalSpacing: 14) {
@@ -424,7 +479,7 @@ private struct MacGameBadgeCell: View {
                 .lineLimit(1)
             MacGameBadgeDetail(text: detail)
         }
-        .frame(width: 118, alignment: .top)
+        .frame(width: 104, alignment: .top)
     }
 }
 
