@@ -38,8 +38,10 @@ struct MacVariableCategoryCell: View {
 struct MacVariableAmountCell: View {
     let row: MacVariableRow
 
+    // sim7: tbl7#5 金額 medium（色照舊）
     var body: some View {
         Text(row.amountText)
+            .fontWeight(.medium)
             .monospacedDigit()
             .lineLimit(1)
             .frame(maxWidth: .infinity, alignment: .trailing)
@@ -49,11 +51,12 @@ struct MacVariableAmountCell: View {
 struct MacVariableMineCell: View {
     let row: MacVariableRow
 
+    // sim7: tbl7#6 我的份＝珊瑚色（只有活分帳那列有字；跟誰還欠我同色）
     var body: some View {
         Text(row.mineText)
             .monospacedDigit()
             .lineLimit(1)
-            .foregroundStyle(Color.secondary)
+            .foregroundStyle(MacPageTheme.coral.tint)
             .frame(maxWidth: .infinity, alignment: .trailing)
     }
 }
@@ -104,6 +107,7 @@ struct MacVariableNoteCell: View {
 struct MacVariableDayHeader: View {
     let day: MacVariableDay
 
+    // sim7: tbl7#7 組頭右邊＝合計小膠囊（變動橘）；不讀 Environment
     var body: some View {
         HStack(spacing: 8) {
             Text(day.title)
@@ -111,9 +115,7 @@ struct MacVariableDayHeader: View {
                 .monospacedDigit()
             MacVariableDayBadge(text: day.badge)
             Spacer(minLength: 8)
-            Text(day.summary)
-                .monospacedDigit()
-                .foregroundStyle(Color.secondary)
+            MacTableSumPill(text: day.summary, tint: MacPageTheme.orange.top)
         }
     }
 }
@@ -122,13 +124,10 @@ struct MacVariableDayHeader: View {
 struct MacVariableDayBadge: View {
     let text: String?
 
+    // sim7: tbl7#8 「今天」「昨天」＝橘色標籤（取代 accentColor）；別天沒有
     var body: some View {
         if let text {
-            Text(text)
-                .font(.caption)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 1)
-                .background(Color.accentColor.opacity(0.15), in: Capsule())
+            MacTableDayTag(text: text, tint: MacPageTheme.orange.bottom)
         }
     }
 }

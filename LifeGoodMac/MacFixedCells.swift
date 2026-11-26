@@ -42,8 +42,10 @@ struct MacFixedPeriodCell: View {
 struct MacFixedAmountCell: View {
     let row: MacFixedRow
 
+    // sim7: tbl7#9 金額 medium（已停止照舊淡）
     var body: some View {
         Text(row.amountText)
+            .fontWeight(.medium)
             .monospacedDigit()
             .lineLimit(1)
             .frame(maxWidth: .infinity, alignment: .trailing)
@@ -66,12 +68,14 @@ struct MacFixedMonthlyCell: View {
 
 struct MacFixedNextDueCell: View {
     let row: MacFixedRow
+    let ink: MacTableInk
 
+    // sim7: tbl7#10 快扣款（≤ 1 天）＝ink.warn，其餘灰
     var body: some View {
         Text(row.nextDueText)
             .monospacedDigit()
             .lineLimit(1)
-            .foregroundStyle(row.warn ? Color.orange : Color.secondary)
+            .foregroundStyle(row.warn ? ink.warn : Color.secondary)
             .opacity(row.dimmed ? 0.45 : 1.0)
     }
 }
@@ -89,12 +93,14 @@ struct MacFixedPayCell: View {
 
 struct MacFixedStatusCell: View {
     let row: MacFixedRow
+    let ink: MacTableInk
 
+    // sim7: tbl7#11 還沒開始（statusRank 1）＝ink.hint 藍；進行中、已停止灰（不用紅）
     var body: some View {
         Text(row.status)
             .monospacedDigit()
             .lineLimit(1)
-            .foregroundStyle(Color.secondary)
+            .foregroundStyle(row.statusRank == 1 ? ink.hint : Color.secondary)
             .opacity(row.dimmed ? 0.45 : 1.0)
     }
 }
@@ -104,17 +110,25 @@ struct MacFixedStatusCell: View {
 struct MacFixedGroupHeader: View {
     let group: MacFixedGroupSection
 
+    // sim7: tbl7#12 組頭：分類色圖示圓＋組名＋筆數膠囊（分類色）＋右邊每月合計；整串一組（key＝nil）＝固定頁藍＋清單圖示
     var body: some View {
         HStack(spacing: 8) {
+            MacTableGroupIcon(icon: icon, tint: tint)
             Text(group.title)
                 .fontWeight(.semibold)
-            Text(group.countText)
-                .monospacedDigit()
-                .foregroundStyle(Color.secondary)
+            MacTableCountPill(text: group.countText, tint: tint)
             Spacer(minLength: 8)
             Text(group.headerText)
                 .monospacedDigit()
                 .foregroundStyle(Color.secondary)
         }
+    }
+
+    private var tint: Color {
+        group.key?.macTint ?? MacPageTheme.blue.top
+    }
+
+    private var icon: String {
+        group.key?.macIcon ?? "list.bullet"
     }
 }

@@ -437,6 +437,7 @@ struct MacVariableFilterBar: View {
     let showSearchAll: Bool
     let subtotal: String
 
+    // sim7: tbl7#18 小計換合計膠囊（變動橘）；分類、搜全部月份照舊
     var body: some View {
         HStack(spacing: 12) {
             MacVariableCategoryPicker(selection: $category)
@@ -445,9 +446,7 @@ struct MacVariableFilterBar: View {
                     .toggleStyle(.checkbox)
             }
             Spacer(minLength: 8)
-            Text(subtotal)
-                .monospacedDigit()
-                .foregroundStyle(Color.secondary)
+            MacTableSumPill(text: subtotal, tint: MacPageTheme.orange.top)
         }
         .font(.callout)
         .padding(.horizontal, 12)
@@ -495,10 +494,9 @@ struct MacVariableTableArea: View {
 struct MacVariableEmptyNote: View {
     let text: String
 
+    // sim7: tbl7#19 沒有變動支出：大圖示圓＋原字（變動橘）
     var body: some View {
-        Text(text)
-            .foregroundStyle(Color.secondary)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        MacTableEmpty(icon: "cart.fill", tint: MacPageTheme.orange.top, title: text, detail: nil)
     }
 }
 
@@ -508,18 +506,18 @@ struct MacVariableNoMatch: View {
     @Binding var category: VariableCategory?
     @ObservedObject var ui: MacUIState
 
+    // sim7: tbl7#20 篩完是空的：放大鏡圓＋原字；三顆按鈕跟著頁面顏色、只改頁內狀態（判斷順序＝BASE）
     var body: some View {
-        VStack(spacing: 10) {
-            Text(text)
-                .foregroundStyle(Color.secondary)
+        VStack(spacing: 12) {
+            MacEmptyHint(icon: "magnifyingglass", tint: MacPageTheme.orange.top, title: text, detail: nil)
             if ui.variableSearchAll && screen.hasQuery {
                 EmptyView()
             } else if screen.hasQuery {
-                Button("搜全部月份") { ui.variableSearchAll = true }
+                MacTableEmptyButton(title: "搜全部月份", tint: MacPageTheme.orange.bottom) { ui.variableSearchAll = true }
             } else if category != nil {
-                Button("看全部分類") { category = nil }
+                MacTableEmptyButton(title: "看全部分類", tint: MacPageTheme.orange.bottom) { category = nil }
             } else if !screen.isCurrent {
-                Button("回到本月") { ui.variableMonth = nil }
+                MacTableEmptyButton(title: "回到本月", tint: MacPageTheme.orange.bottom) { ui.variableMonth = nil }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)

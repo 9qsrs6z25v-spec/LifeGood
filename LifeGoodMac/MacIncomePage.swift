@@ -309,10 +309,9 @@ struct MacIncomeTableArea: View {
 struct MacIncomeEmptyNote: View {
     let text: String
 
+    // sim7: tbl7#15 沒有收入：大圖示圓＋原字（收入綠）
     var body: some View {
-        Text(text)
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+        MacTableEmpty(icon: "arrow.down.circle", tint: MacPageTheme.green.tint, title: text, detail: nil)
     }
 }
 
@@ -320,12 +319,12 @@ struct MacIncomeEmptyNote: View {
 struct MacIncomeNoMatch: View {
     @Binding var range: MacIncomeRange
 
+    // sim7: tbl7#16 篩完是空的：放大鏡圓＋原字；不是「全部」才有〔在全部裡找〕（按鈕只改頁內範圍）
     var body: some View {
-        VStack(spacing: 10) {
-            Text(range.emptyText)
-                .foregroundStyle(.secondary)
+        VStack(spacing: 12) {
+            MacEmptyHint(icon: "magnifyingglass", tint: MacPageTheme.green.tint, title: range.emptyText, detail: nil)
             if range != .all {
-                Button("在全部裡找") { range = .all }
+                MacTableEmptyButton(title: "在全部裡找", tint: MacPageTheme.green.bottom) { range = .all }
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -337,19 +336,11 @@ struct MacIncomeTableFooter: View {
     let rows: [MacIncomeRow]
     let range: MacIncomeRange
 
+    // sim7: tbl7#17 表尾：合計膠囊（收入綠）＋有每年的收入才有說明（字＝BASE）
     var body: some View {
-        HStack(spacing: 12) {
-            Text(MacIncomeTable.footer(rows, range: range))
-                .monospacedDigit()
-            if MacIncomeTable.hasYearly(rows) {
-                Text("每年的收入，大字照每月 1/12 算")
-                    .foregroundStyle(.secondary)
-            }
-            Spacer(minLength: 0)
-        }
-        .font(.caption)
-        .padding(.horizontal, 12)
-        .padding(.vertical, 6)
+        MacTableFooterStrip(text: MacIncomeTable.footer(rows, range: range),
+                            note: MacIncomeTable.hasYearly(rows) ? "每年的收入，大字照每月 1/12 算" : nil,
+                            tint: MacPageTheme.green.top)
     }
 }
 
@@ -360,14 +351,17 @@ struct MacIncomeTableView: View {
     @Binding var sortOrder: [MacIncomeSort]
     @ObservedObject var ui: MacUIState
     let edit: MacEditCenter
+    @Environment(\.colorScheme) private var scheme
 
+    // sim7: tbl7#1 讀一次 colorScheme 建 ink（在 Table 之前）；Table、Actions 那幾行＝BASE；builder 只放欄函式
     var body: some View {
+        let ink = MacTableInk(scheme)
         Table(rows, selection: $ui.selection, sortOrder: $sortOrder) {
             dateColumn()
             titleColumn()
             categoryColumn()
             periodColumn()
-            amountColumn()
+            amountColumn(ink)
             bankColumn()
             noteColumn()
         }
@@ -402,9 +396,10 @@ struct MacIncomeTableView: View {
         .width(min: 56, ideal: 140, max: 220)
     }
 
-    private func amountColumn() -> TableColumn<MacIncomeRow, MacIncomeSort, MacIncomeAmountCell, Text> {
+    // sim7: tbl7#2 只多 _ ink 參數，回傳型別＝BASE
+    private func amountColumn(_ ink: MacTableInk) -> TableColumn<MacIncomeRow, MacIncomeSort, MacIncomeAmountCell, Text> {
         TableColumn(Text("金額"), value: \MacIncomeRow.amount) { row in
-            MacIncomeAmountCell(row: row)
+            MacIncomeAmountCell(row: row, ink: ink)
         }
         .width(min: 80, ideal: 110, max: 160)
     }
@@ -449,10 +444,21 @@ struct MacIncomeTitleCell: View {
 struct MacIncomeCategoryCell: View {
     let row: MacIncomeRow
 
+    // sim7: tbl7#3 分類前面一顆分類色點（認不得的字＝透明）；dimmed 整格淡一點
     var body: some View {
-        Text(row.category)
-            .lineLimit(1)
-            .foregroundStyle(row.dimmed ? Color.secondary : Color.primary)
+        HStack(spacing: 6) {
+            Circle()
+                .fill(dot)
+                .frame(width: 8, height: 8)
+            Text(row.category)
+                .lineLimit(1)
+        }
+        .foregroundStyle(row.dimmed ? Color.secondary : Color.primary)
+        .opacity(row.dimmed ? 0.6 : 1)
+    }
+
+    private var dot: Color {
+        IncomeCategory(rawValue: row.category)?.macTint ?? Color.clear
     }
 }
 
@@ -468,12 +474,15 @@ struct MacIncomePeriodCell: View {
 
 struct MacIncomeAmountCell: View {
     let row: MacIncomeRow
+    let ink: MacTableInk
 
+    // sim7: tbl7#4 金額＝看板同一套綠（ink.good）、medium
     var body: some View {
         Text(row.amountText)
+            .fontWeight(.medium)
             .monospacedDigit()
             .lineLimit(1)
-            .foregroundStyle(row.dimmed ? Color.secondary : Color.green)
+            .foregroundStyle(row.dimmed ? Color.secondary : ink.good)
             .frame(maxWidth: .infinity, alignment: .trailing)
     }
 }

@@ -350,6 +350,7 @@ struct MacFixedFilterBar: View {
     @Binding var sortOrder: [MacFixedSort]
     let count: String
 
+    // sim7: tbl7#21 筆數換合計膠囊（固定藍）；顯示已停止、回到分組照舊
     var body: some View {
         HStack(spacing: 12) {
             Toggle("顯示已停止", isOn: $showEnded)
@@ -359,9 +360,7 @@ struct MacFixedFilterBar: View {
                     .help("照 iPhone 一類一組排回來")
             }
             Spacer(minLength: 8)
-            Text(count)
-                .monospacedDigit()
-                .foregroundStyle(Color.secondary)
+            MacTableSumPill(text: count, tint: MacPageTheme.blue.top)
         }
         .font(.callout)
         .padding(.horizontal, 12)
@@ -390,14 +389,9 @@ struct MacFixedTableArea: View {
 }
 
 struct MacFixedEmptyNote: View {
+    // sim7: tbl7#22 沒有固定支出：大圖示圓＋原兩行字（固定藍）
     var body: some View {
-        VStack(spacing: 6) {
-            Text("還沒有固定支出")
-            Text("按 ⌘N 記一筆（選〔固定〕）")
-                .font(.callout)
-        }
-        .foregroundStyle(Color.secondary)
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        MacTableEmpty(icon: "calendar", tint: MacPageTheme.blue.top, title: "還沒有固定支出", detail: "按 ⌘N 記一筆（選〔固定〕）")
     }
 }
 
@@ -405,11 +399,11 @@ struct MacFixedEmptyNote: View {
 struct MacFixedAllEnded: View {
     @Binding var showEnded: Bool
 
+    // sim7: tbl7#23 全部都已停止：暫停圓＋原字＋〔顯示已停止〕（只改頁內 showEnded）
     var body: some View {
-        VStack(spacing: 10) {
-            Text("全部都已停止")
-                .foregroundStyle(Color.secondary)
-            Button("顯示已停止") { showEnded = true }
+        VStack(spacing: 12) {
+            MacEmptyHint(icon: "pause.circle", tint: MacPageTheme.blue.top, title: "全部都已停止", detail: nil)
+            MacTableEmptyButton(title: "顯示已停止", tint: MacPageTheme.blue.bottom) { showEnded = true }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
@@ -422,17 +416,20 @@ struct MacFixedTableView: View {
     @Binding var sortOrder: [MacFixedSort]
     @ObservedObject var ui: MacUIState
     let edit: MacEditCenter
+    @Environment(\.colorScheme) private var scheme
 
+    // sim7: tbl7#13 讀一次 colorScheme 建 ink（在 Table 之前）；Table、rows、ForEach、Actions 那幾行＝BASE；builder 只放欄函式
     var body: some View {
+        let ink = MacTableInk(scheme)
         Table(of: MacFixedRow.self, selection: $ui.selection, sortOrder: $sortOrder) {
             titleColumn()
             categoryColumn()
             periodColumn()
             amountColumn()
             monthlyColumn()
-            nextDueColumn()
+            nextDueColumn(ink)
             payColumn()
-            statusColumn()
+            statusColumn(ink)
         } rows: {
             ForEach(groups) { g in MacFixedGroupRows(group: g) }
         }
@@ -474,9 +471,10 @@ struct MacFixedTableView: View {
         .width(min: 56, ideal: 90, max: 160)
     }
 
-    private func nextDueColumn() -> TableColumn<MacFixedRow, MacFixedSort, MacFixedNextDueCell, Text> {
+    // sim7: tbl7#14 nextDueColumn、statusColumn 只多 _ ink 參數，回傳型別＝BASE
+    private func nextDueColumn(_ ink: MacTableInk) -> TableColumn<MacFixedRow, MacFixedSort, MacFixedNextDueCell, Text> {
         TableColumn(Text("下次扣款"), value: \MacFixedRow.nextDue) { row in
-            MacFixedNextDueCell(row: row)
+            MacFixedNextDueCell(row: row, ink: ink)
         }
         .width(min: 64, ideal: 110, max: 180)
     }
@@ -488,9 +486,9 @@ struct MacFixedTableView: View {
         .width(min: 40, ideal: 72, max: 120)
     }
 
-    private func statusColumn() -> TableColumn<MacFixedRow, MacFixedSort, MacFixedStatusCell, Text> {
+    private func statusColumn(_ ink: MacTableInk) -> TableColumn<MacFixedRow, MacFixedSort, MacFixedStatusCell, Text> {
         TableColumn(Text("狀態"), value: \MacFixedRow.statusRank) { row in
-            MacFixedStatusCell(row: row)
+            MacFixedStatusCell(row: row, ink: ink)
         }
         .width(min: 60, ideal: 140)
     }
@@ -593,16 +591,29 @@ struct MacFixedFactsSection: View {
 struct MacFixedLoanSection: View {
     let loan: MacFixedLoanInfo?
 
+    // sim7: loan7#1 標頭＝MacSectionHeader（貸款圖示、分類色、右邊已繳幾成膠囊）；進度條＝固定頁藍的圓角條（進度是好事，不用貸款那個紅）
     var body: some View {
         if let loan {
-            Section("貸款進度") {
-                ProgressView(value: loan.progressValue, total: loan.progressTotal)
+            let loanFraction = fraction(loan)
+            Section {
+                MacMeterBar(fraction: loanFraction, tint: MacPageTheme.blue.top)
+                    .padding(.vertical, 4)
                 MacFixedLoanSpan(loan: loan)
                 ForEach(loan.rows) { row in
                     LabeledContent(row.label, value: row.value)
                 }
+            } header: {
+                MacSectionHeader(title: "貸款進度", icon: FixedCategory.loan.icon, tint: FixedCategory.loan.macTint, count: loan.percentText)
             }
         }
+    }
+
+    // sim7: loan7#2 total ≤ 0（含 NaN）→ 0；結果不是有限數 → 0；再夾在 0…1（MacMeterBar 對 NaN 不保險，呼叫端先擋）
+    private func fraction(_ loan: MacFixedLoanInfo) -> Double {
+        let total: Double = loan.progressTotal
+        let raw: Double = total > 0 ? loan.progressValue / total : 0
+        guard raw.isFinite else { return 0 }
+        return min(max(raw, 0), 1)
     }
 }
 
@@ -627,15 +638,18 @@ struct MacFixedLoanSpan: View {
 struct MacFixedSavingsSection: View {
     let rows: [MacFixedInfoRow]
 
+    // sim7: loan7#3 標頭＝MacSectionHeader（保險圖示、分類色）；內容一字不動
     var body: some View {
         if !rows.isEmpty {
-            Section("儲蓄險") {
+            Section {
                 ForEach(rows) { row in
                     LabeledContent(row.label, value: row.value)
                 }
                 Text("期數、到期日、預估領回請在 iPhone 看")
                     .font(.caption)
                     .foregroundStyle(Color.secondary)
+            } header: {
+                MacSectionHeader(title: "儲蓄險", icon: FixedCategory.insurance.icon, tint: FixedCategory.insurance.macTint, count: nil)
             }
         }
     }
@@ -644,13 +658,16 @@ struct MacFixedSavingsSection: View {
 struct MacFixedTrendSection: View {
     let info: MacFixedInspectorInfo
 
+    // sim7: loan7#4 標頭＝MacSectionHeader（走勢圖示、固定頁藍）；圖與金額紀錄一字不動
     var body: some View {
-        Section("金額走勢") {
+        Section {
             MacFixedTrendGraph(trend: info.trend)
             ForEach(info.history) { h in
                 LabeledContent(h.date, value: h.amount)
             }
             MacVariableSmallText(text: info.historyMore, font: .caption)
+        } header: {
+            MacSectionHeader(title: "金額走勢", icon: "chart.line.uptrend.xyaxis", tint: MacPageTheme.blue.top, count: nil)
         }
     }
 }
@@ -675,9 +692,12 @@ struct MacFixedTrendGraph: View {
 struct MacFixedNoteSection: View {
     let note: String
 
+    // sim7: loan7#5 標頭＝MacSectionHeader（備註圖示、灰藍）；內容一字不動
     var body: some View {
-        Section("備註") {
+        Section {
             Text(note)
+        } header: {
+            MacSectionHeader(title: "備註", icon: "note.text", tint: MacPageTheme.slate.top, count: nil)
         }
     }
 }

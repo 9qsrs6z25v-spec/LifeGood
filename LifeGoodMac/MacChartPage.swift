@@ -389,7 +389,8 @@ struct MacChartTop: View {
 
     var body: some View {
         VStack(spacing: 12) {
-            MacChartStarBoard(screen: screen, period: $period)
+            // sim7: sky7#6 夜空點一下＝focus（跟圖例、〔換一期 ▾〕同一條）
+            MacChartStarBoard(screen: screen, period: $period, focus: $focus)
                 .frame(height: 128)
                 .macAppear(0)
             MacChartCardRow(screen: screen, pie: $pie, focus: $focus, picked: $picked)
@@ -405,13 +406,15 @@ struct MacChartTop: View {
 struct MacChartStarBoard: View {
     let screen: MacChartScreen
     @Binding var period: TimePeriod
+    @Binding var focus: MacChartFocus?
 
     var body: some View {
         let shape = RoundedRectangle(cornerRadius: MacTheme.boardCorner, style: .continuous)
         HStack(alignment: .top, spacing: 12) {
             MacChartBoardText(screen: screen)
                 .frame(minWidth: 280, maxHeight: .infinity, alignment: .topLeading)
-            MacChartBoardSky(values: screen.skyValues, period: $period)
+            MacChartBoardSky(values: screen.skyValues, points: MacChartSky.hoverPoints(values: screen.skyValues, bars: screen.bars),
+                             period: $period, focus: $focus)
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 10)
@@ -457,12 +460,17 @@ struct MacChartBoardMax: View {
 /// 右欄：星座（只畫不收滑鼠）＋右上期間切換＋右下手寫招呼
 struct MacChartBoardSky: View {
     let values: [Double]
+    /// 滑過層的點（星座沒畫或跟長條數不合＝空：滑過、點都沒反應）
+    let points: [MacChartSkyPoint]
     @Binding var period: TimePeriod
+    @Binding var focus: MacChartFocus?
 
     var body: some View {
         ZStack(alignment: .topTrailing) {
             MacChartSkyView(values: values)
                 .equatable()
+            // sim7: sky7#6 星座上面、期間切換與手寫下面：只收滑鼠，點一下選那一期（不寫 store）
+            MacChartSkyHover(points: points) { label in focus = .period(label) }
             VStack(alignment: .trailing, spacing: 0) {
                 MacChartPeriodPicker(period: $period)
                 Spacer(minLength: 0)

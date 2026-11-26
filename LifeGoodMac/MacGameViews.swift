@@ -9,6 +9,8 @@
 // • 這裡只畫：不算、不寫（算與寫都在 MacGameModel 的 Combine sink／計時器／按鈕動作）。
 // • [v25.646 mac6 G3b] 第二排加〔今天沒花錢〕〔月曆〕、第三排回顧卡、燈多打勾的葉子（跳一下）、徽章 popover 4／4／2＋自己的紀錄。
 //   月曆 popover、回顧卡、紀錄兩行在 MacGameCalendarView.swift。
+// • [v25.648 mac7 G3] 第三批（只加）：第二排〔☆〕年度星路（MacGameYear.swift）、第一行右邊一張小鎮、徽章 popover 最上面一張大的小鎮
+//   （MacGameTown.swift）。只畫、不寫。
 
 import SwiftUI
 
@@ -20,6 +22,7 @@ struct MacGameStrip: View {
     @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @State private var showBoard = false
     @State private var showCalendar = false
+    @State private var showYear = false
 
     var body: some View {
         if !game.enabled || money.accountHash == nil || !money.account.hasLedger {
@@ -64,6 +67,7 @@ struct MacGameStrip: View {
             }
             checkButton
             calendarButton
+            yearButton
             badgeButton
         }
     }
@@ -100,6 +104,22 @@ struct MacGameStrip: View {
         }
     }
 
+    // sim7: game#61（〔☆〕年度星路：打開＝算今年；popover 內容 .macStores(app)；只算不寫）
+    private var yearButton: some View {
+        Button {
+            game.openYear()
+            showYear = true
+        } label: {
+            Image(systemName: "star.circle")
+        }
+        .buttonStyle(.bordered)
+        .controlSize(.small)
+        .help(MacGameText.yearHelp)
+        .popover(isPresented: $showYear, arrowEdge: .bottom) {
+            MacGameYearPopover().macStores(app)
+        }
+    }
+
     private var badgeButton: some View {
         Button {
             showBoard = true
@@ -131,6 +151,8 @@ private struct MacGameStripTop: View {
             if snap.hasProgress {
                 MacGameProgressLine(snap: snap)
             }
+            // sim7: game#51（遊戲列第一行右邊一張小鎮：理想寬 150、窄視窗自己縮；還沒開始也畫（空地＋小苗））
+            MacGameTownStrip(snap: snap)
             Spacer(minLength: 8)
             if let t = toast {
                 MacGameToastPill(toast: t, onTap: onToast)
@@ -362,6 +384,8 @@ struct MacGameBoardPopover: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
+            // sim7: game#51（徽章 popover 最上面一張大的小鎮：高 120、圓角 12）
+            MacGameTownBanner(snap: game.snapshot)
             MacGameBoardHeader(snap: game.snapshot)
             Divider()
             MacGameSectionTitle(text: MacGameText.badgeHeader)

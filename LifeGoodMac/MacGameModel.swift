@@ -16,6 +16,8 @@
 //   打卡、回顧〔好〕只在按鈕動作裡寫；月曆只算不寫（翻到哪個月只在記憶體）。Mac 5 的 compute 留著對照（noSpend 空時 compute2 逐位一樣）。
 // • [v25.648 mac7 C0] 第三批年度星路的 @Published（yearRoad）、記憶體（yearShown、yearInput）與動作（openYear、stepYear、refreshYear）
 //   先放空殼（judge_mac.md §U5-4、§U7-2；只加）。G3 換內容並在 recompute 加三行；state、version()、dictionary 一字不動。
+// • [v25.648 mac7 G3] 星路只算不寫（翻到哪一年只在記憶體）；yearInput 由 recompute 從已算好的量填；關掉遊戲時照月曆清掉。
+//   小鎮不經 Model（畫面從 snapshot 算）。UserDefaults 次數、本機 state 格式＝BASE。
 
 import SwiftUI
 import Combine
@@ -211,6 +213,8 @@ final class MacGameModel: ObservableObject {
             toast = nil
             calendarMonth = nil
             calendarGrid = nil
+            yearShown = nil
+            yearRoad = nil
             return
         }
         if !was {
@@ -296,14 +300,23 @@ final class MacGameModel: ObservableObject {
     /// 打開年度星路（只算不寫）
     // sim7: game#61
     func openYear() {
+        guard enabled else { return }
+        yearShown = MacGameRules.calendar.component(.year, from: Date())
+        refreshYear(now: Date())
     }
 
     /// 星路翻年（n＝-1 前一年、1 後一年；只算不寫）
+    // sim7: game#55（夾在開始記帳那年～今年）
     func stepYear(_ n: Int) {
+        guard let y = yearShown else { return }
+        yearShown = MacGameYearRules.step(y, by: n, start: yearInput.start, now: Date(), calendar: MacGameRules.calendar)
+        refreshYear(now: Date())
     }
 
     /// 星路開著才算（recompute 結尾、打開、翻年）
     private func refreshYear(now: Date) {
+        guard let y = yearShown else { return }
+        yearRoad = MacGameYearRules.road(year: y, input: yearInput, now: now, calendar: MacGameRules.calendar)
     }
 
     /// 16 碼小寫十六進位（MacMoneyStore.hashAccount 的樣子）；不是這個樣子不拼鍵、不刪
@@ -326,6 +339,7 @@ final class MacGameModel: ObservableObject {
         guard let h = money.accountHash, Self.isAccountHash(h) else {
             snapshot = .empty
             dayWritable = false
+            yearInput = .empty
             return
         }
         if h != noteHash {
@@ -378,7 +392,9 @@ final class MacGameModel: ObservableObject {
         dayWritable = writable
         dayStreakWeeks = facts.streak.weeks
         dayStreakSince = facts.streak.since
+        yearInput = MacGameYearInput(months: facts.months, current: facts.current, start: facts.first, weeks: facts.days.weeks, earned: state.earned)
         refreshCalendar(now: now)
+        refreshYear(now: now)
     }
 
     // sim5: game#22（可寫狀態＝enabled && account == .available && 這次開 App 抓過 && 不是快照 && 帳號雜湊合法）
