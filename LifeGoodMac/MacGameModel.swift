@@ -8,6 +8,8 @@
 //   → .debounce(300ms, DispatchQueue.main) → recompute(now: Date())（@Published 在 willSet 發送，一定 debounce 之後才讀）。
 // • 主控骨架：enabled（骨架永遠 false）、snapshot、toast、bounce、init(money:)、setEnabled(_:)、dismissToast() 簽名定案；G3 換內容。
 // • recompute 逐行照 sim_mac5 Game.recompute（★3～★5）。
+// • [v25.646 mac6 C0] init 多收 MacJournal（骨架不用；G3b 只讀 entries 的 kind == .add、key、at 與 accountHash）；
+//   第二批的 @Published（calendarGrid、checkBounce）與動作（toggleNoSpend、dismissReview、openCalendar、stepCalendar）先放空殼（§T7-6）。
 
 import SwiftUI
 import Combine
@@ -90,6 +92,10 @@ final class MacGameModel: ObservableObject {
     @Published private(set) var toast: MacGameToast? = nil
     /// 點亮時 +1（symbolEffect(.bounce, value:) 用）
     @Published private(set) var bounce: Int = 0
+    /// [v25.646 mac6] 記帳月曆（開著才有值；openCalendar／stepCalendar 只算不寫）
+    @Published private(set) var calendarGrid: MacGameCalendarGrid? = nil
+    /// [v25.646 mac6] 按了〔今天沒花錢〕+1（那盞燈 symbolEffect(.bounce, value:) 用）
+    @Published private(set) var checkBounce: Int = 0
 
     private let money: MacMoneyStore
     private var bag: Set<AnyCancellable> = []
@@ -105,7 +111,7 @@ final class MacGameModel: ObservableObject {
     private var lastDay: Date? = nil
 
     // sim5: game#21（什麼時候算：money 七個 @Published＋回到前景 → debounce 300ms → recompute；60 秒計時器跨午夜才算；不在 body、.task 裡算或寫）
-    init(money: MacMoneyStore) {
+    init(money: MacMoneyStore, journal: MacJournal) {
         self.enabled = UserDefaults.standard.object(forKey: "mac.game.enabled") as? Bool ?? true
         self.money = money
         // 七個 @Published＋回到前景都戳同一個 poke（訂閱當下各送一次現值 → debounce 後只算一次）；
@@ -150,6 +156,20 @@ final class MacGameModel: ObservableObject {
     func dismissToast() {
         toast = nil
     }
+
+    // MARK: [v25.646 mac6] 第二批的動作（主控骨架：什麼都不做；G3b 換內容，第一行 guard）
+
+    /// 〔今天沒花錢〕、月曆格子補按／取消（day＝那天 00:00）
+    func toggleNoSpend(_ day: Date) {}
+
+    /// 每週回顧〔好〕
+    func dismissReview() {}
+
+    /// 打開記帳月曆（只算不寫）
+    func openCalendar() {}
+
+    /// 月曆翻月（n＝-1 上個月、1 下個月；只算不寫）
+    func stepCalendar(_ n: Int) {}
 
     /// 16 碼小寫十六進位（MacMoneyStore.hashAccount 的樣子）；不是這個樣子不拼鍵、不刪
     static func isAccountHash(_ s: String) -> Bool {

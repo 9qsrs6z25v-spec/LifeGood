@@ -479,6 +479,15 @@
 		A01B000005000032 /* MacGameRules.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000032 /* MacGameRules.swift */; };
 		A01B000005000033 /* MacGameModel.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000033 /* MacGameModel.swift */; };
 		A01B000005000034 /* MacGameViews.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000034 /* MacGameViews.swift */; };
+		A01B000005000035 /* MacOwedLite.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000035 /* MacOwedLite.swift */; };
+		A01B000005000036 /* MacOwedBoard.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000036 /* MacOwedBoard.swift */; };
+		A01B000005000037 /* MacOwedPage.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000037 /* MacOwedPage.swift */; };
+		A01B000005000038 /* MacOwedCells.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000038 /* MacOwedCells.swift */; };
+		A01B000005000039 /* MacSplitPatch.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000039 /* MacSplitPatch.swift */; };
+		A01B000005000040 /* MacInspectorChrome.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000040 /* MacInspectorChrome.swift */; };
+		A01B000005000041 /* MacGameDays.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000041 /* MacGameDays.swift */; };
+		A01B000005000042 /* MacGameCalendarView.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000042 /* MacGameCalendarView.swift */; };
+		A01B000005000043 /* MacFixedRailArt.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000005000043 /* MacFixedRailArt.swift */; };
 		A01B000005000004 /* Assets.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = A01A000005000004 /* Assets.xcassets */; };
 		A01B000005000050 /* Expense.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A000001000002 /* Expense.swift */; };
 		A01B000005000051 /* Income.swift in Sources */ = {isa = PBXBuildFile; fileRef = A01A00000100001B /* Income.swift */; };
@@ -1014,6 +1023,15 @@
 		A01A000005000032 /* MacGameRules.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacGameRules.swift; sourceTree = "<group>"; };
 		A01A000005000033 /* MacGameModel.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacGameModel.swift; sourceTree = "<group>"; };
 		A01A000005000034 /* MacGameViews.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacGameViews.swift; sourceTree = "<group>"; };
+		A01A000005000035 /* MacOwedLite.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacOwedLite.swift; sourceTree = "<group>"; };
+		A01A000005000036 /* MacOwedBoard.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacOwedBoard.swift; sourceTree = "<group>"; };
+		A01A000005000037 /* MacOwedPage.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacOwedPage.swift; sourceTree = "<group>"; };
+		A01A000005000038 /* MacOwedCells.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacOwedCells.swift; sourceTree = "<group>"; };
+		A01A000005000039 /* MacSplitPatch.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacSplitPatch.swift; sourceTree = "<group>"; };
+		A01A000005000040 /* MacInspectorChrome.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacInspectorChrome.swift; sourceTree = "<group>"; };
+		A01A000005000041 /* MacGameDays.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacGameDays.swift; sourceTree = "<group>"; };
+		A01A000005000042 /* MacGameCalendarView.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacGameCalendarView.swift; sourceTree = "<group>"; };
+		A01A000005000043 /* MacFixedRailArt.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MacFixedRailArt.swift; sourceTree = "<group>"; };
 		A01A000005000003 /* LifeGoodMac.entitlements */ = {isa = PBXFileReference; lastKnownFileType = text.plist.entitlements; path = LifeGoodMac.entitlements; sourceTree = "<group>"; };
 		A01A000005000004 /* Assets.xcassets */ = {isa = PBXFileReference; lastKnownFileType = folder.assetcatalog; path = Assets.xcassets; sourceTree = "<group>"; };
 /* End PBXFileReference section */
@@ -1603,6 +1621,15 @@
 				A01A000005000032 /* MacGameRules.swift */,
 				A01A000005000033 /* MacGameModel.swift */,
 				A01A000005000034 /* MacGameViews.swift */,
+				A01A000005000035 /* MacOwedLite.swift */,
+				A01A000005000036 /* MacOwedBoard.swift */,
+				A01A000005000037 /* MacOwedPage.swift */,
+				A01A000005000038 /* MacOwedCells.swift */,
+				A01A000005000039 /* MacSplitPatch.swift */,
+				A01A000005000040 /* MacInspectorChrome.swift */,
+				A01A000005000041 /* MacGameDays.swift */,
+				A01A000005000042 /* MacGameCalendarView.swift */,
+				A01A000005000043 /* MacFixedRailArt.swift */,
 				A01A000005000004 /* Assets.xcassets */,
 				A01A000005000003 /* LifeGoodMac.entitlements */,
 			);
@@ -2294,6 +2321,15 @@
 				A01B000005000032 /* MacGameRules.swift in Sources */,
 				A01B000005000033 /* MacGameModel.swift in Sources */,
 				A01B000005000034 /* MacGameViews.swift in Sources */,
+				A01B000005000035 /* MacOwedLite.swift in Sources */,
+				A01B000005000036 /* MacOwedBoard.swift in Sources */,
+				A01B000005000037 /* MacOwedPage.swift in Sources */,
+				A01B000005000038 /* MacOwedCells.swift in Sources */,
+				A01B000005000039 /* MacSplitPatch.swift in Sources */,
+				A01B000005000040 /* MacInspectorChrome.swift in Sources */,
+				A01B000005000041 /* MacGameDays.swift in Sources */,
+				A01B000005000042 /* MacGameCalendarView.swift in Sources */,
+				A01B000005000043 /* MacFixedRailArt.swift in Sources */,
 				A01B000005000050 /* Expense.swift in Sources */,
 				A01B000005000051 /* Income.swift in Sources */,
 				A01B000005000052 /* WidgetMoneyFormat.swift in Sources */,

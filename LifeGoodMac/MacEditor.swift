@@ -2858,3 +2858,27 @@ private struct MacInspectorHint: View {
         }
     }
 }
+
+// MARK: - [v25.646 mac6 C0] 誰還欠我的入口（judge_mac.md §T4-8；G1 換內容）
+
+// 同檔 extension 才拿得到 private 的 writer、registerUndo、show；共用同一個 isBusy（一次只寫一筆）。
+// 主控骨架：兩個 block 一律回「這一版電腦只能看」、兩個 request 什麼都不做（頁面鈕反灰，不寫任何東西）。
+// G1：block 依序 寫入開關 → journal.splitGolden.allPassed → 這次開 App 抓過且不是快照 → 離線 → isBusy；
+// request → submitSplit(_:purpose:) → writer.saveSplit → finishSplit。名字不進 registerUndo（只准「標已還」「改成還沒還」）。
+extension MacEditCenter {
+    /// 〔已還…〕反灰原因（nil＝可以按）
+    func repayBlock(_ r: MacOwedMealRef) -> String? {
+        MacSplitPatch.reasonText("page_only")
+    }
+
+    /// 〔記下來〕（表單按了才呼叫；date＝表單選的日子）
+    func requestRepay(_ r: MacOwedMealRef, date: Date) {}
+
+    /// 〔改成還沒還〕反灰原因（nil＝可以按）
+    func unrepayBlock(_ r: MacOwedMealRef) -> String? {
+        MacSplitPatch.reasonText("page_only")
+    }
+
+    /// 〔改成還沒還〕確認框按了才呼叫
+    func requestUnrepay(_ r: MacOwedMealRef) {}
+}

@@ -2,6 +2,7 @@
 // [v25.640 mac1] 視窗骨架（brief.md §G2-6、judge_mac.md §F1、§F3、§O6）：側欄＋內容＋詳情（inspector）＋工具列。
 //
 // • 側欄：收支（總覽 ⌘1；收入 ⌘2〔v25.641〕；變動支出 ⌘3〔v25.642〕；固定支出 ⌘4〔v25.644〕；圖表 ⌘5〔v25.645〕）｜資料來源。
+// • [v25.646 mac6] 變動支出下面縮排一列「誰還欠我」（有人還沒還、或目前就在這頁才出現；不綁 ⌘6；judge_mac.md §T3-8）。
 // • 工具列只有「iPhone 同步 hh:mm」和 ⟳；超過 24 小時變橘色＋「打開 iPhone 的 LifeGood 讓資料同步」。
 // • 空白狀態（審核員的 iCloud 是空的）：沒登入、沒資料、家人共享的成員、讀不到 各一段。
 // • 編輯的 sheet、確認框、紅條、看門狗、狀態列由 G3 的 .macEditorHost(app) 掛在整個 split view 上。
@@ -42,6 +43,8 @@ struct MacShell: View {
 
 fileprivate struct MacSidebar: View {
     @EnvironmentObject private var ui: MacUIState
+    /// [v25.646 mac6] 誰還欠我那一列出不出現、幾個人（只讀 owedBook、expenses）
+    @EnvironmentObject private var money: MacMoneyStore
 
     var body: some View {
         List(selection: pageSelection) {
@@ -49,6 +52,10 @@ fileprivate struct MacSidebar: View {
                 MacSidebarRow(page: .overview, note: "⌘1").tag(MacPage.overview)
                 MacSidebarRow(page: .income, note: "⌘2").tag(MacPage.income)
                 MacSidebarRow(page: .variable, note: "⌘3").tag(MacPage.variable)
+                if MacOwedScreen.sidebarShows(book: money.owedBook, expenses: money.expenses, page: ui.page) {
+                    MacSidebarOwedRow(count: MacOwedScreen.sidebarPeople(book: money.owedBook, expenses: money.expenses))
+                        .tag(MacPage.owed)
+                }
                 MacSidebarRow(page: .fixed, note: "⌘4").tag(MacPage.fixed)
                 MacSidebarRow(page: .chart, note: "⌘5").tag(MacPage.chart)
             }
@@ -138,6 +145,13 @@ fileprivate struct MacDetailArea: View {
                 // [v25.645 mac5] 圖表頁；沒有帳本照 Mac 1 的空白狀態
                 if money.account.hasLedger {
                     MacChartPage()
+                } else {
+                    MacEmptyState(state: money.account)
+                }
+            case .owed:
+                // [v25.646 mac6] 誰還欠我頁；沒有帳本照 Mac 1 的空白狀態
+                if money.account.hasLedger {
+                    MacOwedPage()
                 } else {
                     MacEmptyState(state: money.account)
                 }

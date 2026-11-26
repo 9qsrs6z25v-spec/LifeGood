@@ -7,6 +7,8 @@
 //   不在 body、.task 裡寫 store。
 // • [v25.645 mac5] 圖表頁 ⌘5（MacPage.shows：圖表頁支出 true）；記帳小鎮 MacGameModel（只存這台 Mac 的 mac.game.*）掛進 .macStores，
 //   選單「顯示 › 遊戲元素」開關（judge_mac.md §S7-1）。
+// • [v25.646 mac6] 誰還欠我頁 MacPage.owed（不綁 ⌘6；isOpen 由 G2 加）；記帳小鎮 MacGameModel 多收 MacJournal（只讀 kind、key、at）
+//   （judge_mac.md §T7-2）。
 
 import SwiftUI
 import AppKit
@@ -33,7 +35,7 @@ struct LifeGoodMacApp: App {
 // MARK: - 頁
 
 enum MacPage: String, Hashable, CaseIterable {
-    case overview, income, variable, fixed, chart, source
+    case overview, income, variable, fixed, chart, owed, source
 
     var title: String {
         switch self {
@@ -42,6 +44,7 @@ enum MacPage: String, Hashable, CaseIterable {
         case .variable: return "變動支出"
         case .fixed: return "固定支出"
         case .chart: return "圖表"
+        case .owed: return "誰還欠我"
         case .source: return "資料來源"
         }
     }
@@ -53,6 +56,7 @@ enum MacPage: String, Hashable, CaseIterable {
         case .variable: return "cart"
         case .fixed: return "calendar"
         case .chart: return "chart.pie"
+        case .owed: return "person.2"
         case .source: return "icloud"
         }
     }
@@ -89,6 +93,10 @@ enum MacPage: String, Hashable, CaseIterable {
             return false
         // [v25.645 mac5] 圖表頁：支出 true、收入 false（看門狗〔看一下〕不跳頁直接選）— sim5: page5#1
         case .chart:
+            if case .expense = ref { return true }
+            return false
+        // [v25.646 mac6] 誰還欠我頁：支出 true、收入 false（詳情欄看那頓）— sim6: page6#1
+        case .owed:
             if case .expense = ref { return true }
             return false
         case .source:
@@ -189,6 +197,7 @@ final class MacAppModel: ObservableObject {
     let journal: MacJournal
     let edit: MacEditCenter
     /// [v25.645 mac5] 記帳小鎮（不收 MacJournal、MacEditCenter）
+    /// [v25.646 mac6] 多收 MacJournal（只讀 kind、key、at：第一次在電腦記帳那枚徽章）；仍不收 MacEditCenter
     let game: MacGameModel
     private var bag: Set<AnyCancellable> = []
 
@@ -201,7 +210,7 @@ final class MacAppModel: ObservableObject {
         self.journal = journal
         self.edit = MacEditCenter(money: money, journal: journal, ui: ui)
         // [v25.645 mac5] 一定在 [weak self] 閉包（下面的 Timer、CKAccountChanged）之前：stored property 要先都有值
-        self.game = MacGameModel(money: money)
+        self.game = MacGameModel(money: money, journal: journal)
         // 60 秒：App 在前景才抓（judge_mac.md §O3-1：前景每 60 秒）
         Timer.publish(every: 60, on: .main, in: .common)
             .autoconnect()
@@ -260,6 +269,9 @@ struct MacAppCommands: Commands {
             Button("變動支出") { ui.page = .variable }
                 .keyboardShortcut("3")
                 .disabled(!MacPage.variable.isOpen)
+            // [v25.646 mac6] 誰還欠我（不綁鍵；isOpen 由 G2 加，之前反灰）
+            Button("誰還欠我") { ui.page = .owed }
+                .disabled(!MacPage.owed.isOpen)
             Button("固定支出") { ui.page = .fixed }
                 .keyboardShortcut("4")
                 .disabled(!MacPage.fixed.isOpen)

@@ -109,6 +109,7 @@ extension MacPage {
         case .variable: return .orange
         case .fixed: return .blue
         case .chart: return .night
+        case .owed: return .coral
         case .source: return .slate
         }
     }

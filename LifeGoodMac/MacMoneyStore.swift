@@ -126,6 +126,8 @@ final class MacMoneyStore: ObservableObject {
     @Published private(set) var incomes: [Income] = []
     @Published private(set) var rates: [CurrencyRate] = []
     @Published private(set) var splitIndex: MacSplitIndex = .empty
+    /// [v25.646 mac6] 誰還欠我（MacOwedLite；名字只在畫面；快照與雲端同一條路，judge_mac.md §T3-2）
+    @Published private(set) var owedBook: MacOwedBook = .empty
     /// [v25.642 mac3] 細項 Lite（只顯示「汽車 - 罰款」；總設計先放：G3 接線、G2 讀）
     @Published private(set) var kindIndex: MacKindIndex = .empty
     /// 每個鍵剛抓到的樣子（5 個讀的鍵；雲端沒有＝record nil）
@@ -385,6 +387,7 @@ final class MacMoneyStore: ObservableObject {
             if data == nil { rates = [] } else if let v = MacMoneyStore.lossyDecodeArray([CurrencyRate].self, data) { rates = v }
         case MacCloud.splitsKey:
             splitIndex = MacSplitIndex(data: data)
+            owedBook = MacOwedBook(data: data)
         case MacCloud.kindsKey:
             // [v25.642 mac3 G3] 細項 Lite（只顯示「汽車 - 罰款」）；快照 showSnapshot、雲端 apply 都走這裡（同一條路）
             kindIndex = MacKindIndex(data: data)
@@ -460,6 +463,7 @@ final class MacMoneyStore: ObservableObject {
         incomes = []
         rates = []
         splitIndex = .empty
+        owedBook = .empty
         kindIndex = .empty
         records = [:]
         counts = [:]
