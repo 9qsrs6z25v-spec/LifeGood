@@ -6,6 +6,9 @@
 // 多地點、同行、收受人、禮金種類、節稅項目、旅行、照片幾列（有才列、只看）。同行、收受人的字不能選取拷貝。
 // [v25.644 mac4] 固定支出改叫 MacFixedInspector（MacFixedPage.swift：基本資料 → 貸款進度 → 儲蓄險 → 金額走勢 → 備註）；
 // 變動支出、收入照舊。
+// [v25.646 mac6 G3a] 詳情欄換新樣子（judge_mac.md §T5-1）：標頭＝MacInspectorHeader（分類色圖示圓＋名稱＋「變動支出・飲食」）、
+// 沒選東西＝MacInspectorEmpty（跟著頁面顏色）、變動支出那一路多 MacOwedFactsSection（G2；沒分帳不畫）、找不到這筆多灰色問號圓。
+// MacInspectorRows 一字不動。
 
 import SwiftUI
 
@@ -17,8 +20,8 @@ struct MacInspector: View {
             if let ref = ui.selection {
                 MacInspectorBody(ref: ref)
             } else {
-                ContentUnavailableView("選一筆看詳情", systemImage: "sidebar.right",
-                                       description: Text("在列表點一筆"))
+                // sim6: inspector6#9 [v25.646 mac6] 沒選東西：跟著那一頁顏色的提示（MacInspectorChrome）
+                MacInspectorEmpty(page: ui.page)
             }
         }
         .inspectorColumnWidth(min: 240, ideal: 290, max: 400)
@@ -50,14 +53,17 @@ fileprivate struct MacInspectorFacts: View {
                 if e.expenseType == .fixed {
                     MacFixedInspector(expense: e, money: money)
                 } else {
-                    MacExpenseFacts(rows: MacInspectorRows.expense(e, money: money), title: e.title)
+                    // sim6: inspector6#10 [v25.646 mac6] 新標頭；分帳區只在變動支出這一路（沒分帳＝不畫，MacOwedCells）
+                    MacExpenseFacts(rows: MacInspectorRows.expense(e, money: money),
+                                    head: MacInspectorHeaderInfo.expense(e, money: money))
+                    MacOwedFactsSection(expenseID: e.id)
                 }
             } else {
                 MacMissingFacts()
             }
         case .income(let id):
             if let i = money.income(id) {
-                MacExpenseFacts(rows: MacInspectorRows.income(i), title: i.title)
+                MacExpenseFacts(rows: MacInspectorRows.income(i), head: MacInspectorHeaderInfo.income(i))
             } else {
                 MacMissingFacts()
             }
@@ -67,7 +73,7 @@ fileprivate struct MacInspectorFacts: View {
 
 fileprivate struct MacExpenseFacts: View {
     let rows: [MacInspectorRow]
-    let title: String
+    let head: MacInspectorHeaderInfo
 
     var body: some View {
         Section {
@@ -75,8 +81,7 @@ fileprivate struct MacExpenseFacts: View {
                 LabeledContent(row.label, value: row.value)
             }
         } header: {
-            Text(title.isEmpty ? "（沒有名稱）" : title)
-                .font(.headline)
+            MacInspectorHeader(info: head)
         }
     }
 }
@@ -84,8 +89,13 @@ fileprivate struct MacExpenseFacts: View {
 fileprivate struct MacMissingFacts: View {
     var body: some View {
         Section {
-            Text("這筆已經不在了（可能在 iPhone 刪掉了）。按 ⌘R 重新讀取。")
-                .foregroundStyle(.secondary)
+            // sim6: inspector6#11 [v25.646 mac6] 灰色問號圓＋同一句
+            HStack(spacing: 8) {
+                MacIconBadge(icon: "questionmark", top: MacPageTheme.slate.top, bottom: MacPageTheme.slate.bottom, size: 22,
+                             solid: false)
+                Text("這筆已經不在了（可能在 iPhone 刪掉了）。按 ⌘R 重新讀取。")
+                    .foregroundStyle(.secondary)
+            }
         }
     }
 }
