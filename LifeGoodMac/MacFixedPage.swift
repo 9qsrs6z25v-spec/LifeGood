@@ -418,7 +418,7 @@ struct MacFixedTableView: View {
     let edit: MacEditCenter
     @Environment(\.colorScheme) private var scheme
 
-    // sim7: tbl7#13 讀一次 colorScheme 建 ink（在 Table 之前）；Table、rows、ForEach、Actions 那幾行＝BASE；builder 只放欄函式
+    // sim7: tbl7#13 讀一次外觀（淺／深）建 ink（在 Table 之前）；Table、rows、ForEach、Actions 那幾行＝BASE；builder 只放欄函式
     var body: some View {
         let ink = MacTableInk(scheme)
         Table(of: MacFixedRow.self, selection: $ui.selection, sortOrder: $sortOrder) {
