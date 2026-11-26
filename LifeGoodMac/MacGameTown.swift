@@ -215,6 +215,8 @@ private struct MacGameTownInk {
     var skyBottom: Color { dark ? MacTheme.hex(0x18264E) : MacTheme.hex(0xF4F8FD) }
     var ground: Color { dark ? MacTheme.hex(0x1E3A33) : MacTheme.hex(0xCFE8D6) }
     var wall: Color { dark ? MacTheme.hex(0x2A3A66) : Color.white }
+    /// 淺色白牆的細框（淺色天空也近白，不描邊看不出房子；深色牆跟天空分得開，不描）— sim7: game#54
+    var wallEdge: Color? { dark ? nil : MacTheme.hex(0x8C9DC2) }
     var wallShade: Color { dark ? MacTheme.hex(0x22305A) : MacTheme.hex(0xE3ECF8) }
     /// 後排高樓（比牆淡一點）
     var tower: Color { dark ? MacTheme.hex(0x22305A) : MacTheme.hex(0xC9D6EE) }
@@ -304,10 +306,17 @@ enum MacGameTownArt {
         ctx.fill(Path(ellipseIn: CGRect(x: f.minX, y: f.minY, width: f.width, height: f.height * crown)), with: .color(ink.tree))
     }
 
-    /// 牆＋右邊一條影子
+    /// 牆＋右邊一條影子（淺色加細框）
     private static func drawWall(_ ctx: inout GraphicsContext, _ r: CGRect, ink: MacGameTownInk) {
         ctx.fill(Path(r), with: .color(ink.wall))
         ctx.fill(Path(CGRect(x: r.maxX - r.width * 0.25, y: r.minY, width: r.width * 0.25, height: r.height)), with: .color(ink.wallShade))
+        drawEdge(&ctx, Path(r), ink: ink)
+    }
+
+    /// 白色那幾塊（牆、攤子的檯子、帆）的細框：只有淺色才畫
+    private static func drawEdge(_ ctx: inout GraphicsContext, _ path: Path, ink: MacGameTownInk) {
+        guard let edge = ink.wallEdge else { return }
+        ctx.stroke(path, with: .color(edge), lineWidth: 0.75)
     }
 
     /// 平屋頂一條
@@ -356,7 +365,9 @@ enum MacGameTownArt {
         let pole: CGFloat = max(1, f.width * 0.06)
         ctx.fill(Path(CGRect(x: f.minX + f.width * 0.08, y: f.minY, width: pole, height: f.height)), with: .color(ink.roofGray))
         ctx.fill(Path(CGRect(x: f.maxX - f.width * 0.08 - pole, y: f.minY, width: pole, height: f.height)), with: .color(ink.roofGray))
-        ctx.fill(Path(CGRect(x: f.minX, y: f.minY + f.height * 0.55, width: f.width, height: f.height * 0.45)), with: .color(ink.wall))
+        let counter = Path(CGRect(x: f.minX, y: f.minY + f.height * 0.55, width: f.width, height: f.height * 0.45))
+        ctx.fill(counter, with: .color(ink.wall))
+        drawEdge(&ctx, counter, ink: ink)
         var top = Path()
         top.move(to: CGPoint(x: f.minX - f.width * 0.05, y: f.minY + f.height * 0.38))
         top.addLine(to: CGPoint(x: f.minX + f.width * 0.15, y: f.minY))
@@ -397,6 +408,7 @@ enum MacGameTownArt {
         sail.addLine(to: CGPoint(x: f.maxX - f.width * 0.12, y: f.midY))
         sail.closeSubpath()
         ctx.fill(sail, with: .color(ink.wall))
+        drawEdge(&ctx, sail, ink: ink)
     }
 
     /// 四個尖的小星星（8 點：外徑 radius、內徑 0.32 × radius，尖朝上）
@@ -418,6 +430,7 @@ enum MacGameTownArt {
 }
 
 /// 徽章 popover 最上面那張（高 120）
+/// 小鎮圖本身不收滑鼠（.allowsHitTesting(false)）→ 滑過說明掛在上面一層透明框（收得到滑鼠、沒有動作；底下沒有要點的東西）— sim7: game#54
 struct MacGameTownBanner: View {
     let snap: MacGameSnapshot
     @Environment(\.colorScheme) private var scheme
@@ -427,7 +440,21 @@ struct MacGameTownBanner: View {
             .equatable()
             .frame(height: 120)
             .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .overlay {
+                MacGameTownHelpArea()
+            }
+            .accessibilityHint(Text(MacGameText.townHelp))
+    }
+}
+
+/// 透明、收得到滑鼠的一層：只給 .help 用（不畫東西、不收點、VoiceOver 不唸，說明由上面的 accessibilityHint 唸）
+private struct MacGameTownHelpArea: View {
+    var body: some View {
+        RoundedRectangle(cornerRadius: 12, style: .continuous)
+            .fill(Color.clear)
+            .contentShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
             .help(MacGameText.townHelp)
+            .accessibilityHidden(true)
     }
 }
 

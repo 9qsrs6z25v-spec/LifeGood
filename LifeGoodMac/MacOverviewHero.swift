@@ -29,15 +29,26 @@ fileprivate extension MacOverviewTone {
 struct MacOverviewHeroBoard: View {
     let data: MacOverviewBoardData
 
+    /// 左右並排要的寬（放不下＝窄視窗開著右邊詳情：大字、這個月的錢上下排，大字不被擠掉）
+    private static let sideBySide: CGFloat = 600
+
     var body: some View {
         let head = MacOverviewBoardText.header(data)
         VStack(alignment: .leading, spacing: 12) {
             MacOverviewHeroTop(data: data, head: head)
-            HStack(alignment: .top, spacing: 16) {
-                MacOverviewHeroLead(data: data, head: head)
-                    .frame(maxWidth: .infinity, alignment: .leading)
-                MacOverviewMoneyCell(data: data)
-                    .frame(minWidth: 360, idealWidth: 400, maxWidth: 440)
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 16) {
+                    MacOverviewHeroLead(data: data, head: head)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    MacOverviewMoneyCell(data: data)
+                        .frame(minWidth: 340, idealWidth: 400, maxWidth: 440)
+                }
+                .frame(minWidth: 0, idealWidth: Self.sideBySide, maxWidth: .infinity)
+                VStack(alignment: .leading, spacing: 12) {
+                    MacOverviewHeroLead(data: data, head: head)
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    MacOverviewMoneyCell(data: data)
+                }
             }
             MacOverviewTileRow(tiles: MacOverviewBoardText.tiles(data))
         }
@@ -195,7 +206,7 @@ fileprivate struct MacOverviewTileRow: View {
     }
 }
 
-/// 一格：target 有值整張是按鈕（切頁；ui 只寫 page）
+/// 一格：target 有值整張是按鈕（切頁；ui 只寫 page，到變動支出先寫 variableMonth = nil）
 fileprivate struct MacOverviewTile: View {
     let tile: MacOverviewTileText
     @EnvironmentObject private var ui: MacUIState
@@ -203,7 +214,7 @@ fileprivate struct MacOverviewTile: View {
     var body: some View {
         if let t = tile.target {
             Button {
-                ui.page = t
+                go(t)
             } label: {
                 MacOverviewTileFace(tile: tile)
             }
@@ -212,6 +223,14 @@ fileprivate struct MacOverviewTile: View {
         } else {
             MacOverviewTileFace(tile: tile)
         }
+    }
+
+    /// sim7: ov7#12 本月支出、今天花了說的是本月：變動支出頁先回本月（ui.variableMonth 換頁不清，之前翻過別的月會停在那個月）
+    private func go(_ t: MacPage) {
+        if t == .variable {
+            ui.variableMonth = nil
+        }
+        ui.page = t
     }
 }
 
@@ -394,8 +413,8 @@ struct MacOverviewUpcomingCard: View {
         let shown = showAll ? bills : Array(bills.prefix(Self.shownByDefault))
         if !bills.isEmpty {
             VStack(alignment: .leading, spacing: 8) {
-                MacSectionHeader(title: "未來 7 天要扣", icon: "calendar.badge.clock", tint: MacPageTheme.blue.top,
-                                 count: MacOverviewBoardText.upcomingCount(bills))
+                MacOverviewSectionTitle(title: "未來 7 天要扣", icon: "calendar.badge.clock", tint: MacPageTheme.blue.top,
+                                        count: MacOverviewBoardText.upcomingCount(bills))
                 VStack(spacing: 0) {
                     ForEach(Array(shown.enumerated()), id: \.element.id) { i, bill in
                         if i > 0 {
@@ -496,14 +515,43 @@ struct MacOverviewCategoryHeader: View {
     let stats: [MacOverviewCategoryStat]
 
     var body: some View {
-        MacSectionHeader(title: "本月花在哪裡", icon: "chart.pie.fill", tint: MacPageTheme.orange.top,
-                         count: MacOverviewBoardText.categoryCount(stats))
+        MacOverviewSectionTitle(title: "本月花在哪裡", icon: "chart.pie.fill", tint: MacPageTheme.orange.top,
+                                count: MacOverviewBoardText.categoryCount(stats))
+    }
+}
+
+/// 總覽三段的標頭＝MacSectionHeader（色條、圖示、標題；count 給 nil）＋右邊自己畫的計數膠囊 — sim7: ov7#20
+/// MacSectionCount（MacTheme 的 private）字用 tint：橘、藍在淺色白底上太淡 → 淺色字用 capsuleText、深色照 tint；底、框照 tint
+struct MacOverviewSectionTitle: View {
+    let title: String
+    let icon: String
+    let tint: Color
+    let count: String?
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        let p = MacPalette(scheme)
+        HStack(spacing: 6) {
+            MacSectionHeader(title: title, icon: icon, tint: tint, count: nil)
+            if let count {
+                Text(count)
+                    .font(.caption2.weight(.semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(p.dark ? tint : p.capsuleText)
+                    .padding(.horizontal, 7)
+                    .padding(.vertical, 2)
+                    .background(tint.opacity(0.10), in: Capsule())
+                    .overlay(Capsule().stroke(tint.opacity(0.22), lineWidth: 0.6))
+            }
+        }
     }
 }
 
 /// §U3-6 本月花在哪裡的分類卡（3 欄 Grid；點一張跳變動支出只看那一類）— sim7: ov7#4 ov7#16 ov7#17
 struct MacOverviewCategoryCards: View {
     let stats: [MacOverviewCategoryStat]
+    /// 「其他」那張能不能點（MacOverviewStats.otherIsPure；其餘分類一律能點）— sim7: ov7#19
+    let otherOpen: Bool
 
     /// 每一列第一張的 index（3 欄；同 MacGameViews.swift MacGameMonthGrid 的 pairs 寫法）
     private var rows: [Int] { Array(stride(from: 0, to: stats.count, by: 3)) }
@@ -520,12 +568,12 @@ struct MacOverviewCategoryCards: View {
                 Grid(horizontalSpacing: 10, verticalSpacing: 10) {
                     ForEach(rows, id: \.self) { i in
                         GridRow {
-                            MacOverviewCategoryCard(stat: stats[i], total: total)
+                            MacOverviewCategoryCard(stat: stats[i], total: total, clickable: clickable(stats[i]))
                             if i + 1 < stats.count {
-                                MacOverviewCategoryCard(stat: stats[i + 1], total: total)
+                                MacOverviewCategoryCard(stat: stats[i + 1], total: total, clickable: clickable(stats[i + 1]))
                             }
                             if i + 2 < stats.count {
-                                MacOverviewCategoryCard(stat: stats[i + 2], total: total)
+                                MacOverviewCategoryCard(stat: stats[i + 2], total: total, clickable: clickable(stats[i + 2]))
                             }
                         }
                     }
@@ -535,22 +583,33 @@ struct MacOverviewCategoryCards: View {
         .macBoard(.orange)
         .padding(.vertical, 6)
     }
+
+    /// 只有「其他」看 otherOpen（數字不動，只差能不能點）
+    private func clickable(_ s: MacOverviewCategoryStat) -> Bool {
+        s.category != .other || otherOpen
+    }
 }
 
 /// 一張分類卡＝按鈕：跳到變動支出頁、本月、只看這一類（ui 只寫 variableMonth、variableCategoryRequest、page）
+/// clickable＝false（「其他」裡有沒分類的）：只畫卡、不是按鈕（變動支出頁只看 .other 看不到沒分類的）— sim7: ov7#19
 fileprivate struct MacOverviewCategoryCard: View {
     let stat: MacOverviewCategoryStat
     let total: Double
+    let clickable: Bool
     @EnvironmentObject private var ui: MacUIState
 
     var body: some View {
-        Button {
-            jump(stat.category)
-        } label: {
+        if clickable {
+            Button {
+                jump(stat.category)
+            } label: {
+                MacOverviewCategoryFace(stat: stat, total: total)
+            }
+            .buttonStyle(.plain)
+            .help("切到變動支出，只看這一類")
+        } else {
             MacOverviewCategoryFace(stat: stat, total: total)
         }
-        .buttonStyle(.plain)
-        .help("切到變動支出，只看這一類")
     }
 
     /// sim7: ov7#17 順序固定：page 的 didSet 會清選取、清搜全部月份，不清 request（變動支出頁 onAppear 讀到就清）

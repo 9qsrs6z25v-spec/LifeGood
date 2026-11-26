@@ -218,6 +218,16 @@ enum MacOverviewStats {
             .filter { $0.amount > 0 }
             .sorted { a, b in a.amount != b.amount ? a.amount > b.amount : a.id < b.id }
     }
+
+    /// 「其他」那張卡能不能點（Mac 補；卡上的數字照 iPhone 不動）：沒分類的變動支出算進那張卡，
+    /// 變動支出頁的分類篩選只比 variableCategory（沒分類的不在 .other 裡）→ 本月有沒分類的就不給點，不然點過去筆數、合計對不上
+    /// （同 MacVariableBoard.otherIsPure 的道理）— sim7: ov7#19
+    @MainActor
+    static func otherIsPure(money: MacMoneyStore, now: Date, calendar cal: Calendar) -> Bool {
+        !money.expenses.contains { e in
+            e.expenseType == .variable && e.variableCategory == nil && cal.isDate(e.date, equalTo: now, toGranularity: .month)
+        }
+    }
 }
 
 // MARK: - ⑤ 語氣（畫面那邊對到 MacTone；這檔不碰 Color）

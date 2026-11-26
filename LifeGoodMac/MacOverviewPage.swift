@@ -21,10 +21,11 @@ struct MacOverviewPage: View {
         let numbers = money.overview(now: now, calendar: cal)
         let board = MacOverviewBoardData.build(money: money, now: now, calendar: cal)
         let stats = MacOverviewStats.categoryStats(money: money, now: now, calendar: cal)
+        let otherOpen = MacOverviewStats.otherIsPure(money: money, now: now, calendar: cal)
         // [v25.645 mac5] 最上面記帳小鎮的遊戲列（關掉時是空的）
         VStack(spacing: 0) {
             MacGameStrip()
-            MacOverviewList(numbers: numbers, board: board, stats: stats, selection: $ui.selection, edit: edit)
+            MacOverviewList(numbers: numbers, board: board, stats: stats, otherOpen: otherOpen, selection: $ui.selection, edit: edit)
         }
     }
 }
@@ -35,6 +36,8 @@ fileprivate struct MacOverviewList: View {
     let numbers: MacOverviewNumbers
     let board: MacOverviewBoardData
     let stats: [MacOverviewCategoryStat]
+    /// 「其他」那張卡能不能點（本月有沒分類的變動支出就不行；sim7: ov7#19）
+    let otherOpen: Bool
     @Binding var selection: MacEntryRef?
     let edit: MacEditCenter
 
@@ -52,7 +55,7 @@ fileprivate struct MacOverviewList: View {
                     .listRowSeparator(.hidden)
             }
             Section {
-                MacOverviewCategoryCards(stats: stats)
+                MacOverviewCategoryCards(stats: stats, otherOpen: otherOpen)
                     .listRowSeparator(.hidden)
             } header: {
                 MacOverviewCategoryHeader(stats: stats)
@@ -80,12 +83,24 @@ fileprivate struct MacOverviewList: View {
 fileprivate struct MacOverviewMiddle: View {
     let board: MacOverviewBoardData
 
+    /// 左右並排要的寬（放不下＝窄視窗開著右邊詳情：長條、未來 7 天上下排，長條不被擠成一條）
+    private static let sideBySide: CGFloat = 600
+
     var body: some View {
-        HStack(alignment: .top, spacing: 12) {
-            MacOverviewDailyCard(data: board)
-            if !board.upcoming.isEmpty {
-                MacOverviewUpcomingCard(bills: board.upcoming)
-                    .frame(width: 320)
+        ViewThatFits(in: .horizontal) {
+            HStack(alignment: .top, spacing: 12) {
+                MacOverviewDailyCard(data: board)
+                if !board.upcoming.isEmpty {
+                    MacOverviewUpcomingCard(bills: board.upcoming)
+                        .frame(width: 320)
+                }
+            }
+            .frame(minWidth: 0, idealWidth: Self.sideBySide, maxWidth: .infinity)
+            VStack(alignment: .leading, spacing: 12) {
+                MacOverviewDailyCard(data: board)
+                if !board.upcoming.isEmpty {
+                    MacOverviewUpcomingCard(bills: board.upcoming)
+                }
             }
         }
         .padding(.vertical, 6)

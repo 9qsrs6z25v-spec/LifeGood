@@ -23,6 +23,7 @@ struct MacTableInk {
 }
 
 /// 組頭的筆數膠囊（＝MacSectionCount 的樣子；那支是 private） — sim7: tbl7#25
+/// 字用 Color.primary（分類色水電黃、保險綠、電信青在淺色白底上看不清；這裡不讀 Environment）；底、框照分類色
 struct MacTableCountPill: View {
     let text: String
     let tint: Color
@@ -30,7 +31,7 @@ struct MacTableCountPill: View {
     var body: some View {
         Text(text)
             .font(.caption2.weight(.semibold).monospacedDigit())
-            .foregroundStyle(tint)
+            .foregroundStyle(Color.primary)
             .padding(.horizontal, 7)
             .padding(.vertical, 2)
             .background(tint.opacity(0.10), in: Capsule())

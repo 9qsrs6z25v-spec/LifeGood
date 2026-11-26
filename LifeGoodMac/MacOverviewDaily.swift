@@ -40,8 +40,8 @@ struct MacOverviewDailyCard: View {
         let days = MacOverviewBoardText.daily(data)
         let empty = data.daily.allSatisfy { $0 == 0 } && data.dailyBudget == nil
         VStack(alignment: .leading, spacing: 10) {
-            MacSectionHeader(title: "每天花多少", icon: "chart.bar.fill", tint: MacPageTheme.orange.top,
-                             count: MacOverviewBoardText.budgetText(data))
+            MacOverviewSectionTitle(title: "每天花多少", icon: "chart.bar.fill", tint: MacPageTheme.orange.top,
+                                    count: MacOverviewBoardText.budgetText(data))
             if empty {
                 MacEmptyHint(icon: "chart.bar", tint: MacPageTheme.orange.top, title: "這個月還沒有變動支出", detail: nil)
                     .frame(maxWidth: .infinity, minHeight: 150)
