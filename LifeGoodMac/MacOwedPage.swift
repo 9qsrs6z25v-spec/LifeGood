@@ -305,10 +305,17 @@ struct MacOwedHead: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top, spacing: 12) {
-                MacOwedSummaryBlock(screen: screen)
-                Spacer(minLength: 8)
-                MacOwedTabPicker(tab: $tab)
+            // 內容欄窄（詳情欄開著、視窗 900～1050pt）放不下一排時，分頁鈕排到摘要上面，膠囊和總額不被擠成「…」
+            ViewThatFits(in: .horizontal) {
+                HStack(alignment: .top, spacing: 12) {
+                    MacOwedSummaryBlock(screen: screen)
+                    Spacer(minLength: 8)
+                    MacOwedTabPicker(tab: $tab)
+                }
+                VStack(alignment: .leading, spacing: 8) {
+                    MacOwedTabPicker(tab: $tab)
+                    MacOwedSummaryBlock(screen: screen)
+                }
             }
             MacOwedCardStrip(screen: screen, person: $person)
         }
@@ -380,7 +387,8 @@ struct MacOwedCardStrip: View {
                 MacOwedAllCard(count: screen.people.count, total: screen.allTotal, selected: screen.person == nil,
                                pick: $person)
                 ForEach(screen.people) { p in
-                    MacOwedPersonCard(person: p, selected: screen.person == p.name, pick: $person)
+                    MacOwedPersonCard(person: p, selected: screen.person == p.name, pick: $person,
+                                      settled: screen.tab == .settled)
                 }
             }
             .padding(.vertical, 4)

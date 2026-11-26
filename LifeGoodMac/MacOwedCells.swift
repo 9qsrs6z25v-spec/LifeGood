@@ -99,6 +99,8 @@ struct MacOwedPersonCard: View {
     let person: MacOwedPerson
     let selected: Bool
     @Binding var pick: String?
+    /// 還清了分頁（person.total＝已還的）
+    var settled: Bool = false
 
     var body: some View {
         Button {
@@ -113,9 +115,9 @@ struct MacOwedPersonCard: View {
         .accessibilityLabel(spoken)
     }
 
-    /// VoiceOver「王小明，還欠 NT$750，2 頓」（畫面朗讀；不進 .help）
+    /// VoiceOver「王小明，還欠 NT$750，2 頓」／還清了「王小明，還了 NT$750，2 頓」（畫面朗讀；不進 .help）
     private var spoken: String {
-        "\(person.name)，還欠 \(MacOwedText.ntd(person.total))，\(person.meals.count) 頓"
+        "\(person.name)，\(settled ? "還了" : "還欠") \(MacOwedText.ntd(person.total))，\(person.meals.count) 頓"
     }
 }
 

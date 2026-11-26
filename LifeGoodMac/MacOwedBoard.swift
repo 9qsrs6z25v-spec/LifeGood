@@ -91,16 +91,17 @@ struct MacOwedScreen {
                           title: m.title, dot: e.variableCategory?.accentColor ?? MacPageTheme.orange.top,
                           total: e.amount, totalText: MacOwedText.ntd(e.amount), amount: m.amount,
                           amountText: MacOwedText.ntd(m.amount), days: m.days,
-                          statusText: statusText(m, settled: settled, calendar: calendar),
+                          statusText: statusText(m, settled: settled, now: now, calendar: calendar),
                           late: !settled && m.days > MacOwedText.lateDays, settled: settled, ref: ref,
                           repayReason: repayReason(m, settled: settled), undoReason: undoReason(m, settled: settled))
     }
 
-    /// 狀態欄：還沒還「今天」／「等了 N 天」；還清了 paidLine（帳戶名一律「帳戶」，不讀存摺包）
-    static func statusText(_ m: MacOwedMeal, settled: Bool, calendar: Calendar) -> String {
+    /// 狀態欄：還沒還「今天」／「等了 N 天」／這頓在今天以後「還沒到那天」；還清了 paidLine（帳戶名一律「帳戶」，不讀存摺包）
+    static func statusText(_ m: MacOwedMeal, settled: Bool, now: Date, calendar: Calendar) -> String {
         if settled {
             return MacOwedText.paidLine(date: m.repaidDate ?? m.date, accountName: m.account ? "帳戶" : nil, calendar: calendar)
         }
+        if calendar.startOfDay(for: m.date) > calendar.startOfDay(for: now) { return "還沒到那天" }
         return m.days == 0 ? "今天" : "等了 \(m.days) 天"
     }
 

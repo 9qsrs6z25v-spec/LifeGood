@@ -488,6 +488,8 @@ private struct MacGameBadgeDetail: View {
 
     var body: some View {
         Text(text)
+            // 104pt 寬放 4 行（fixedTidy 那句要 4 行）；離 Text 最近的 lineLimit 算數，下面 BASE 那行 3 照留
+            .lineLimit(4)
             .font(.caption2)
             .foregroundStyle(.secondary)
             .multilineTextAlignment(.center)
