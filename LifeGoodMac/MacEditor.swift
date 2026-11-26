@@ -1357,7 +1357,11 @@ final class MacEditCenter: ObservableObject {
         for item in items {
             // sim6: split6#27 分帳那條走 saveSplit（同一個 isBusy、一次寫一筆；收支那條一字不改）
             if item.entry.key == MacCloud.splitsKey {
-                guard let splitAction = Self.splitRestoreAction(item, now: Date()) else { continue }
+                // 抓完最新再看一次：現在還是同一個原因才補（例：iPhone 已先撤掉自己那筆，repayTwice 就不能再撤電腦這筆）
+                let still = journal.watchdog(records: money.records).contains { w in
+                    w.entry.id == item.entry.id && w.reason == item.reason
+                }
+                guard still, let splitAction = Self.splitRestoreAction(item, now: Date()) else { continue }
                 let (outcome, entry) = await submitSplit(splitAction, purpose: .restore(item.entry.id))
                 switch outcome {
                 case .saved(let record, _):
@@ -3091,7 +3095,8 @@ extension MacEditCenter {
                             fromPage: false)
         }
         if entry.kind == .unrepay {
-            let rep = MacSplitPatch.repayment(id: newID, date: info.date, amount: info.amount)
+            // iPhone 記的還款日期可能帶小數秒（Date()）；再標一次一律取整數秒（S6 只收整數秒）
+            let rep = MacSplitPatch.repayment(id: newID, date: info.date.rounded(.down), amount: info.amount)
             return .repay(expenseID: info.expenseID, shareID: info.shareID, repayment: rep, expected: info.amount)
         }
         return nil
@@ -3101,7 +3106,7 @@ extension MacEditCenter {
                                    now: Date) -> MacSplitAction? {
         guard let info = MacSplitPatch.entryInfo(entry.rawAfter) else { return nil }
         if entry.kind == .repay {
-            let rep = MacSplitPatch.repayment(id: newID, date: info.date, amount: info.amount)
+            let rep = MacSplitPatch.repayment(id: newID, date: info.date.rounded(.down), amount: info.amount)
             return .repay(expenseID: info.expenseID, shareID: info.shareID, repayment: rep, expected: info.amount)
         }
         if entry.kind == .unrepay {
